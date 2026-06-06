@@ -36,8 +36,9 @@ next-env.d.ts
 # Local Netlify folder
 .netlify
 
-# Claude Code local settings (machine-specific)
-.claude/
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.json
+.claude/settings.local.json
 
 # Deploy logs
 deploy.log
