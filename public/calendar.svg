@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <g stroke="#CFC9F7" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Calendar body -->
+    <path d="M95 109C95 88 112 71 133 71H364C385 71 402 88 402 109V309" />
+    <path d="M95 142H402" />
+    <path d="M95 309V109" />
+    <path d="M95 309V376C95 397 112 414 133 414H230" />
+
+    <!-- Binding tabs -->
+    <path d="M146 52V90" />
+    <path d="M220 52V90" />
+    <path d="M294 52V90" />
+    <path d="M368 52V90" />
+
+    <!-- Calendar dots -->
+    <path d="M147 209H164" />
+    <path d="M219 209H236" />
+    <path d="M291 209H308" />
+    <path d="M147 277H164" />
+    <path d="M219 277H236" />
+
+    <!-- Clock -->
+    <circle cx="324" cy="319" r="103" />
+    <path d="M324 269V319H372" />
+  </g>
+</svg>

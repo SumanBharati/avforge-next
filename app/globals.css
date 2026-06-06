@@ -1,0 +1,200 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide number input spinners */
+.no-spin::-webkit-outer-spin-button,
+.no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spin { -moz-appearance: textfield; }
+
+/* ── Theme tokens (RGB channels for Tailwind opacity support) ── */
+:root {
+  /* Dark (default) */
+  --forge-bg: 12 18 32;
+  --forge-panel: 8 13 23;
+  --forge-surface: 15 23 42;
+  --forge-card: 10 15 26;
+  --forge-card-hover: 17 24 39;
+  --border: 30 41 59;
+  --border-light: 51 65 85;
+  --border-dark: 18 30 54;
+  --text-heading: 241 245 249;
+  --text-body: 226 232 240;
+  --text-secondary: 203 213 225;
+  --text-muted: 148 163 184;
+  --text-subtle: 100 116 139;
+  --text-faint: 71 85 105;
+  --scrollbar-thumb: #1e293b;
+  --scrollbar-hover: #334155;
+  /* Accents */
+  --accent-blue: #93c5fd;
+  --color-scheme: dark;
+  /* Chart / SVG */
+  --chart-center: #0c1220;
+  --chart-stroke: #0a0f1a;
+  --chart-empty: #1e293b;
+  --chart-text: #e2e8f0;
+  --chart-text-dim: #64748b;
+  /* Card gradient endpoint */
+  --card-gradient-end: rgba(12, 18, 32, 0.95);
+  --card-gradient-end-strong: rgba(12, 18, 32, 0.95);
+  /* Room canvas */
+  --canvas-floor-a: #2a3040;
+  --canvas-floor-b: #1e2836;
+  --canvas-device: #111827;
+  --canvas-device-deep: #0a0f1a;
+  --canvas-device-border: #2d3748;
+  --canvas-device-border-light: #334155;
+  --canvas-grid: rgba(100, 116, 139, 0.12);
+  --canvas-wall-label: #94a3b8;
+  --canvas-zoom-bg: #1e293b;
+  --canvas-zoom-text: #e2e8f0;
+}
+
+[data-theme="light"] {
+  --forge-bg: 248 250 252;
+  --forge-panel: 255 255 255;
+  --forge-surface: 236 240 246;
+  --forge-card: 255 255 255;
+  --forge-card-hover: 226 232 240;
+  --border: 214 222 235;
+  --border-light: 186 200 218;
+  --border-dark: 241 245 249;
+  --text-heading: 15 23 42;
+  --text-body: 30 41 59;
+  --text-secondary: 51 65 85;
+  --text-muted: 71 85 105;
+  --text-subtle: 100 116 139;
+  --text-faint: 148 163 184;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-hover: #94a3b8;
+  /* Accents */
+  --accent-blue: #2563eb;
+  --color-scheme: light;
+  /* Chart / SVG */
+  --chart-center: #f8fafc;
+  --chart-stroke: #e2e8f0;
+  --chart-empty: #e2e8f0;
+  --chart-text: #1e293b;
+  --chart-text-dim: #64748b;
+  /* Card gradient endpoint */
+  --card-gradient-end: rgba(248, 250, 252, 0.95);
+  --card-gradient-end-strong: rgba(248, 250, 252, 1);
+  /* Room canvas */
+  --canvas-floor-a: #dde3ec;
+  --canvas-floor-b: #cdd4df;
+  --canvas-device: #e2e8f0;
+  --canvas-device-deep: #f1f5f9;
+  --canvas-device-border: #cbd5e1;
+  --canvas-device-border-light: #94a3b8;
+  --canvas-grid: rgba(100, 116, 139, 0.15);
+  --canvas-wall-label: #475569;
+  --canvas-zoom-bg: #e2e8f0;
+  --canvas-zoom-text: #1e293b;
+}
+
+@layer base {
+  body {
+    @apply bg-forge-bg text-body antialiased;
+    color-scheme: var(--color-scheme);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-hover);
+  }
+
+  /* Smooth scroll */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Shared card pattern used across calculators & tools */
+  .forge-card {
+    @apply rounded-lg border border-border bg-forge-surface/40 p-4 transition-all;
+  }
+  .forge-card:hover {
+    @apply border-border-light;
+  }
+
+  /* Section title pattern */
+  .forge-section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-subtle;
+  }
+
+  /* Input fields */
+  .forge-input {
+    @apply w-full rounded-lg border border-border bg-forge-surface px-3.5 py-2.5 text-sm text-body outline-none transition-colors placeholder:text-faint focus:border-blue-500/40;
+  }
+
+  /* Primary button */
+  .forge-btn-primary {
+    @apply flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Ghost button */
+  .forge-btn-ghost {
+    @apply flex items-center gap-2 rounded-lg border border-blue-500/25 bg-blue-500/[0.08] px-5 py-2.5 text-sm font-medium transition-all hover:border-blue-500;
+    color: var(--accent-blue);
+  }
+
+  /* Gradient card background (hero cards) */
+  .forge-gradient-card {
+    background: linear-gradient(170deg, rgba(59,130,246,0.06) 0%, var(--card-gradient-end) 60%);
+  }
+  .forge-gradient-card-subtle {
+    background: linear-gradient(170deg, rgba(59,130,246,0.04) 0%, var(--card-gradient-end-strong) 40%);
+  }
+}
+
+/* Hide scrollbar track while keeping scroll behaviour */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Room designer — hide device labels, show on hover */
+.dev-label { opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+g:hover > .dev-label { opacity: 1; }
+
+/* Pulse animation for AI loading dots */
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* Shimmer sweep animation */
+@keyframes shimmer-sweep {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+/* Shimmer for theme-aware surfaces (dashboard, panels) */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--border))       25%,
+    rgb(var(--border-light)) 50%,
+    rgb(var(--border))       75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.5s ease-in-out infinite;
+}
+
+/* Shimmer for always-white card surfaces */
+.shimmer-light {
+  background: linear-gradient(90deg, #e8ecf2 25%, #f5f7fa 50%, #e8ecf2 75%);
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.5s ease-in-out infinite;
+}

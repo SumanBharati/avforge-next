@@ -1,0 +1,4237 @@
+"use client";
+
+import React, { useState, useRef, useCallback } from "react";
+import { Video, Monitor, Presentation } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useTheme } from "@/components/ThemeProvider";
+
+/* Theme-aware canvas colors */
+const canvasColors = {
+  dark: {
+    floorA: "#2a3040", floorB: "#1e2836", device: "#111827", deviceDeep: "#0a0f1a",
+    deviceBorder: "#2d3748", deviceBorderLight: "#334155", grid: "rgba(100,116,139,0.12)",
+    panel: "#080d17", card: "#0a0f1a",
+  },
+  light: {
+    floorA: "#dde3ec", floorB: "#cdd4df", device: "#e2e8f0", deviceDeep: "#f1f5f9",
+    deviceBorder: "#cbd5e1", deviceBorderLight: "#94a3b8", grid: "rgba(100,116,139,0.15)",
+    panel: "#ffffff", card: "#ffffff",
+  },
+};
+const LedWallIcon = ({size,color}:{size:number,color:string}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="9" height="7" rx="1"/>
+    <rect x="13" y="4" width="9" height="7" rx="1"/>
+    <rect x="2" y="13" width="9" height="7" rx="1"/>
+    <rect x="13" y="13" width="9" height="7" rx="1"/>
+  </svg>
+);
+const SoundbarIcon = ({size,color}:{size:number,color:string}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="6" width="22" height="12" rx="2"/>
+    <circle cx="12" cy="12" r="2" fill={color} stroke="none"/>
+  </svg>
+);
+
+interface RoomType {
+  id: string; name: string; people: string; maxSeats: number;
+  w: number; l: number; h: number; desc: string;
+}
+interface DeviceCatalogItem {
+  id: string; name: string; icon: string; w: number; h: number;
+  wall: string; type: string; color: string;
+}
+interface PlacedDevice extends DeviceCatalogItem {
+  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; rotation?: number;
+}
+
+const roomTypes: RoomType[] = [
+  { id:"huddle",  name:"Huddle Room",          people:"2-4",  maxSeats:4,  w:8.2,  l:8.2,  h:7.87,  desc:"Quick meetings, BYOD" },
+  { id:"small",   name:"Small Room",            people:"4-6",  maxSeats:6,  w:11.5, l:13.1, h:7.87,  desc:"Team standups, video calls" },
+  { id:"medium",  name:"Medium Room",           people:"6-10", maxSeats:10, w:16.4, l:19.7, h:8.86,  desc:"Conference room, hybrid meetings" },
+  { id:"large",   name:"Large Room",            people:"11-16",maxSeats:16, w:22.97,l:29.53,h:9.84,  desc:"Boardroom, all-hands" },
+  { id:"boardroom",name:"Executive Boardroom",  people:"12-20",maxSeats:20, w:26.25,l:39.37,h:9.84,  desc:"Executive meetings, dual display" },
+  { id:"training",name:"Training Room",         people:"20-40",maxSeats:24, w:26.25,l:32.81,h:9.84,  desc:"Classroom style, presenter station" },
+  { id:"auditorium",name:"Auditorium",          people:"50+",  maxSeats:24, w:49.2, l:65.6, h:13.12, desc:"Large venue, multi-display, PA" },
+];
+
+const deviceCatalog = [
+  { cat:"Displays", items:[
+    { id:"display-43",     name:'43" Display',        icon:"monitor", w:3.12, h:1.77, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-55",     name:'55" Display',        icon:"monitor", w:4.00, h:2.26, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-65",     name:'65" Display',        icon:"monitor", w:4.76, h:2.69, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-75",     name:'75" Display',        icon:"monitor", w:5.45, h:3.08, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-86",     name:'86" Display',        icon:"monitor", w:6.27, h:3.54, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-98",     name:'98" Display',        icon:"monitor", w:7.12, h:4.00, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"display-110",    name:'110" Display',       icon:"monitor", w:7.97, h:4.49, wall:"front",   type:"display",   color:"#3b82f6" },
+    { id:"projector-screen",name:"Projection Screen", icon:"presentation", w:7.87, h:4.92, wall:"front",   type:"display",   color:"#8b5cf6" },
+    { id:"led-wall",       name:"LED Video Wall",     icon:"tv", w:9.84, h:5.58, wall:"front",   type:"display",   color:"#06b6d4" },
+  ]},
+  { cat:"Cameras", items:[
+    { id:"ptz-cam",      name:"PTZ Camera",         icon:"confbar", w:0.49, h:0.39, wall:"front",   type:"camera",    color:"#22c55e" },
+    { id:"soundbar-cam", name:"Conference Bar",     icon:"soundbar", w:2.30, h:0.39, wall:"front",   type:"camera",    color:"#22c55e" },
+    { id:"ceiling-cam",  name:"Ceiling Camera",     icon:"confbar", w:0.66, h:0.66, wall:"ceiling", type:"camera",    color:"#22c55e" },
+  ]},
+  { cat:"Audio", items:[
+    { id:"ceiling-mic",  name:"Ceiling Mic Array",  icon:"🎙", w:2.00, h:2.00, wall:"ceiling", type:"mic",       color:"#f59e0b" },  // Shure MXA920 2'×2' tile
+    { id:"table-mic",    name:"Table Mic",          icon:"🎙", w:0.44, h:0.44, wall:"table",   type:"mic",       color:"#f59e0b" },  // Shure MXA310 5.3" dia
+    { id:"ceiling-spk",  name:"Ceiling Speaker",    icon:"🔊", w:0.67, h:0.67, wall:"ceiling", type:"speaker",   color:"#ef4444" },
+    { id:"soundbar",     name:"Wall Speaker",           icon:"🔊", w:1.04, h:1.67, wall:"front",   type:"speaker",   color:"#ef4444" },  // JBL Control 29AV-1
+  ]},
+  { cat:"Control", items:[
+    { id:"touch-panel",  name:"Touch Panel (Wall)", icon:"📱", w:0.92, h:0.59, wall:"side",    type:"control",   color:"#a855f7" },  // Crestron TSW-1070
+    { id:"table-touch",  name:"Touch Panel (Table)",icon:"📱", w:0.86, h:0.43, wall:"table",   type:"control",   color:"#a855f7" },  // Logitech Tap
+    { id:"byod-hub",     name:"Cable Cubby",        icon:"🔌", w:0.98, h:0.49, wall:"table",   type:"control",   color:"#a855f7" },
+  ]},
+];
+
+const roomElementItems: DeviceCatalogItem[] = [
+  { id:"wall-partition", name:"Wall / Partition",    icon:"🧱", w:9.84, h:0.333, wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"conf-table",    name:"Conference Table",    icon:"🪑", w:7.87, h:3.94,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"round-table",   name:"Round Table",         icon:"⭕", w:4.92, h:4.92,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"exec-chair",    name:"Executive Chair",     icon:"💺", w:1.97, h:1.97,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"side-chair",    name:"Side Chair",          icon:"🪑", w:1.48, h:1.48,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"credenza",      name:"Credenza / Cabinet",  icon:"🗄️", w:5.91, h:1.64,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"podium",        name:"Podium / Lectern",    icon:"📦", w:1.97, h:1.64,  wall:"floor",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"whiteboard",    name:"Whiteboard",          icon:"📋", w:5.91, h:0.16,  wall:"front",   type:"furniture", color:"rgb(var(--text-subtle))" },
+  { id:"door-marker",   name:"Door",                icon:"🚪", w:3.0,  h:0.33,  wall:"floor",   type:"furniture", color:"#475569" },
+  { id:"window-marker", name:"Window",              icon:"🪟", w:2.0,  h:0.16,  wall:"front",   type:"furniture", color:"#475569" },
+];
+
+export default function RoomDesignerPage() {
+  const { theme } = useTheme();
+  const cc = canvasColors[theme];
+  const [roomSizeMode,  setRoomSizeMode]  = useState<"survey" | "custom" | null>("custom");
+  const [showCustomRoom, setShowCustomRoom] = useState(false);
+  const [showCustomConfirm, setShowCustomConfirm] = useState(false);
+  const [showSurveyConfirm, setShowSurveyConfirm] = useState(false);
+  const [surveyRooms,   setSurveyRooms]   = useState<{ id: string; name: string; width: number; length: number; height: number }[]>([]);
+  const [selectedSurveyRoom, setSelectedSurveyRoom] = useState<string>("");
+  const [roomType,      setRoomType]      = useState("medium");
+  const [roomW,         setRoomW]         = useState(16.4);
+  const [roomL,         setRoomL]         = useState(19.7);
+  const [roomH,         setRoomH]         = useState(8.86);
+  const [placedDevices, setPlacedDevices] = useState<PlacedDevice[]>([]);
+  const [activeCat,     setActiveCat]     = useState("Displays");
+  const [step,          setStep]          = useState(2);
+  const [selectedWall,  setSelectedWall]  = useState("north");
+  const [tableShape,    setTableShape]    = useState("rectangular");
+  const [tableSeats,    setTableSeats]    = useState(2);
+  const [tableWidth,    setTableWidth]    = useState(2.0);
+  const [tableLengthOverride, setTableLengthOverride] = useState<number|null>(2.0);
+  const [tableWallDist, setTableWallDist] = useState(3.28);
+  const [bomOpen,       setBomOpen]       = useState(true);
+  const [showTable,     setShowTable]     = useState(false);
+  const [showTableSizeEditor, setShowTableSizeEditor] = useState(false);
+  const [tableEditW,    setTableEditW]    = useState("");
+  const [tableEditL,    setTableEditL]    = useState("");
+  const [showFurnitureEditor, setShowFurnitureEditor] = useState(false);
+  const [furnitureEditUid, setFurnitureEditUid] = useState<number|null>(null);
+  const [furnitureEditW, setFurnitureEditW] = useState("");
+  const [furnitureEditL, setFurnitureEditL] = useState("");
+  const [dragUid,       setDragUid]       = useState<number|null>(null);
+  const [dragStart,     setDragStart]     = useState<{x:number;y:number}|null>(null);
+  const [wallDragEdge,  setWallDragEdge]  = useState<"north"|"south"|"east"|"west"|null>(null);
+  const [wallDragStart, setWallDragStart] = useState<{svgX:number;svgY:number;origW:number;origL:number}|null>(null);
+  const [selectedEdge,  setSelectedEdge]  = useState<"north"|"south"|"east"|"west"|null>(null);
+  const [deletedWalls,  setDeletedWalls]  = useState<Set<string>>(new Set());
+  // Unified multi-select: items like "chair:0", "table", "door"
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const isItemSelected = (id: string) => selected.has(id);
+  const toggleSelect = (id: string, ctrlKey: boolean) => {
+    setSelected(prev => {
+      if (ctrlKey) {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      }
+      return prev.has(id) && prev.size === 1 ? new Set() : new Set([id]);
+    });
+    setSelectedEdge(null);
+  };
+  // Multi-select for placed AV devices
+  const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
+  const clearSelection = () => { setSelected(new Set()); setSelectedUids(new Set()); };
+  const dragStartedRef = useRef(false);
+
+  const [deletedChairs, setDeletedChairs] = useState<Set<number>>(new Set());
+  const [tableDeleted,  setTableDeleted]  = useState(false);
+  const [doorDeleted,   setDoorDeleted]   = useState(false);
+  // Doors placed on walls: wall, position along wall (0-1), width in meters
+  type PlacedDoor = { id: number; wall: "north"|"south"|"east"|"west"|"drawn"; pos: number; width: number; type: "door"|"window"; wallUid?: number; flipped?: boolean };
+  const [placedDoors, setPlacedDoors] = useState<PlacedDoor[]>([]);
+  const [dragNewDoor, setDragNewDoor] = useState<{type:"door"|"window";active:boolean;wall:"north"|"south"|"east"|"west"|"drawn"|null;pos:number;wallUid?:number}|null>(null);
+  const [doorDragId, setDoorDragId] = useState<number|null>(null);
+  const [doorDragStart, setDoorDragStart] = useState<{svgX:number;svgY:number;origWall:string;origPos:number}|null>(null);
+  const [tableCenterX,  setTableCenterX]  = useState<number|null>(null);
+  const [dragNewTable,  setDragNewTable]  = useState<{active:boolean;worldX:number;worldY:number}|null>(null);
+  const [dragNewChair,  setDragNewChair]  = useState<{active:boolean;worldX:number;worldY:number}|null>(null);
+  const [dragNewDevice, setDragNewDevice] = useState<{active:boolean;item:DeviceCatalogItem;worldX:number;worldY:number;wall:"north"|"south"|"east"|"west"|null}|null>(null);
+  // Free-angle rotation drag
+  const [rotDragUid, setRotDragUid] = useState<number|null>(null);
+  const [rotDragCenter, setRotDragCenter] = useState<{x:number;y:number}|null>(null);
+  const [tableRotation, setTableRotation] = useState(0);
+  const [rotatingTable, setRotatingTable] = useState(false);
+  const [tableRotCenter, setTableRotCenter] = useState<{x:number;y:number}|null>(null);
+  const [chairOffsets,  setChairOffsets]  = useState<Record<number,{dx:number;dy:number}>>({});
+  // Table edge resize drag
+  const [tableResizeDrag, setTableResizeDrag] = useState<{edge:"left"|"right"|"top"|"bottom";startSvgX:number;startSvgY:number;origWidth:number;origLength:number;origSeats:number}|null>(null);
+  // Multi-item drag
+  const [multiDrag,     setMultiDrag]     = useState<{startSvgX:number;startSvgY:number;origTableCX:number;origWallDist:number;origChairOffsets:Record<number,{dx:number;dy:number}>;items:Set<string>}|null>(null);
+
+  // Undo history
+  type UndoSnapshot = {
+    roomW: number; roomL: number; roomH: number;
+    deletedWalls: Set<string>; deletedChairs: Set<number>; tableDeleted: boolean;
+    doorDeleted: boolean; placedDevices: PlacedDevice[]; showTable: boolean; placedDoors: PlacedDoor[]; tableLengthOverride: number|null; tableRotation: number;
+    tableCenterX: number|null; tableWallDist: number; chairOffsets: Record<number,{dx:number;dy:number}>;
+  };
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+  const pushUndo = () => {
+    setUndoStack(prev => [...prev.slice(-30), {
+      roomW, roomL, roomH,
+      deletedWalls: new Set(deletedWalls),
+      deletedChairs: new Set(deletedChairs),
+      tableDeleted, doorDeleted,
+      placedDevices: [...placedDevices],
+      showTable, tableCenterX, tableWallDist, placedDoors: [...placedDoors], tableLengthOverride, tableRotation,
+      chairOffsets: {...chairOffsets},
+    }]);
+  };
+  const popUndo = () => {
+    setUndoStack(prev => {
+      if (prev.length === 0) return prev;
+      const snap = prev[prev.length - 1];
+      setRoomW(snap.roomW); setRoomL(snap.roomL); setRoomH(snap.roomH);
+      setDeletedWalls(new Set(snap.deletedWalls));
+      setDeletedChairs(new Set(snap.deletedChairs));
+      setTableDeleted(snap.tableDeleted);
+      setDoorDeleted(snap.doorDeleted);
+      setPlacedDevices([...snap.placedDevices]);
+      setPlacedDoors([...snap.placedDoors]);
+      setTableLengthOverride(snap.tableLengthOverride);
+      setTableRotation(snap.tableRotation);
+      setShowTable(snap.showTable);
+      setTableCenterX(snap.tableCenterX);
+      setTableWallDist(snap.tableWallDist);
+      setChairOffsets({...snap.chairOffsets});
+      return prev.slice(0, -1);
+    });
+  };
+  const [selectedUid,   setSelectedUid]   = useState<number|null>(null);
+  const [clipboard,     setClipboard]     = useState<PlacedDevice[]>([]);
+  const [showHfov,      setShowHfov]      = useState(false);
+  const [viewMode,      setViewMode]      = useState("plan");
+  const [zoom,          setZoom]          = useState(1.5);
+  const [pan,           setPan]           = useState({x:0,y:0});
+  const [isPanning,     setIsPanning]     = useState(false);
+  const [panMode,       setPanMode]       = useState(false);
+  const [moveMode,      setMoveMode]      = useState(false);
+  const [moveDragStart, setMoveDragStart] = useState<{x:number;y:number}|null>(null);
+  const [marquee, setMarquee] = useState<{startSvgX:number;startSvgY:number;curSvgX:number;curSvgY:number}|null>(null);
+  const didMarqueeDrag = useRef(false);
+  const [panStart,      setPanStart]      = useState({x:0,y:0,px:0,py:0});
+  const [ceilZoom,      setCeilZoom]      = useState(1.5);
+  const [ceilPan,       setCeilPan]       = useState({x:0,y:0});
+  const [isCeilPanning, setIsCeilPanning] = useState(false);
+  const [ceilPanStart,  setCeilPanStart]  = useState({x:0,y:0,px:0,py:0});
+  const [ceilDragUid,   setCeilDragUid]   = useState<number|null>(null);
+  const [ceilDragStart, setCeilDragStart] = useState<{x:number,y:number}|null>(null);
+  const ceilSvgRef = useRef<SVGSVGElement>(null);
+  const [micZoom,       setMicZoom]       = useState(1.5);
+  const [micPan,        setMicPan]        = useState({x:0,y:0});
+  const [isMicPanning,  setIsMicPanning]  = useState(false);
+  const [micPanStart,   setMicPanStart]   = useState({x:0,y:0,px:0,py:0});
+  const [micDragUid,    setMicDragUid]    = useState<number|null>(null);
+  const [micDragStart,  setMicDragStart]  = useState<{x:number,y:number}|null>(null);
+  const micSvgRef = useRef<SVGSVGElement>(null);
+  const [wallSpkZoom,      setWallSpkZoom]      = useState(1.5);
+  const [wallSpkPan,       setWallSpkPan]       = useState({x:0,y:0});
+  const [isWallSpkPanning, setIsWallSpkPanning] = useState(false);
+  const [wallSpkPanStart,  setWallSpkPanStart]  = useState({x:0,y:0,px:0,py:0});
+  const [wallSpkDragUid,   setWallSpkDragUid]   = useState<number|null>(null);
+  const wallSpkSvgRef = useRef<SVGSVGElement>(null);
+  const [wallMicZoom,      setWallMicZoom]      = useState(1.5);
+  const [wallMicPan,       setWallMicPan]       = useState({x:0,y:0});
+  const [isWallMicPanning, setIsWallMicPanning] = useState(false);
+  const [wallMicPanStart,  setWallMicPanStart]  = useState({x:0,y:0,px:0,py:0});
+  const [wallMicDragUid,   setWallMicDragUid]   = useState<number|null>(null);
+  const wallMicSvgRef = useRef<SVGSVGElement>(null);
+
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Wall drawing mode (polygonal — continuous click-to-draw)
+  const [isDrawingWall,   setIsDrawingWall]   = useState(false);
+  const [wallPoints,      setWallPoints]      = useState<{x:number;y:number}[]>([]);
+  const [wallMousePos,    setWallMousePos]    = useState<{x:number;y:number}|null>(null);
+  const [wallLengthInput, setWallLengthInput] = useState("");
+  const [cursorScreenPos, setCursorScreenPos] = useState<{x:number;y:number}|null>(null);
+  const [orthoMode,       setOrthoMode]       = useState(false);
+  const wallInputRef = useRef<HTMLInputElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const WALL_SNAP_DIST = 1; // feet — snap to first point to close polygon
+  // Legacy compat
+  const wallStart = wallPoints.length > 0 ? wallPoints[wallPoints.length - 1] : null;
+
+  // Floor plan image import
+  const [floorPlanImg,       setFloorPlanImg]       = useState<string | null>(null);
+  const [floorPlanScale,     setFloorPlanScale]     = useState(1); // pixels per foot
+  const [floorPlanOffset,    setFloorPlanOffset]    = useState({x: 0, y: 0});
+  const [isScalingFloorPlan, setIsScalingFloorPlan] = useState(false);
+  const [scaleRefPoints,     setScaleRefPoints]     = useState<{x:number;y:number}[]>([]);
+  const [scaleRefLength,     setScaleRefLength]     = useState("");
+  const floorPlanInputRef = useRef<HTMLInputElement>(null);
+
+  // Track current project/room IDs for save
+  const currentProjectId = useRef<string | null>(null);
+  const currentRoomId = useRef<string | null>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const saveDesign = useCallback(async (devices: PlacedDevice[], config: Record<string, unknown>) => {
+    const pid = currentProjectId.current;
+    const rid = currentRoomId.current || "default";
+    if (!pid) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const designData = { devices, config };
+    const { data: existing } = await supabase
+      .from("room_designs").select("id").eq("project_id", pid).eq("room_id", rid).single();
+
+    if (existing) {
+      await supabase.from("room_designs")
+        .update({ data: designData, updated_at: new Date().toISOString() })
+        .eq("project_id", pid).eq("room_id", rid);
+    } else {
+      await supabase.from("room_designs")
+        .insert({ project_id: pid, room_id: rid, user_id: user.id, data: designData });
+    }
+  }, []);
+
+  const triggerAutoSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveDesign(placedDevices, {
+        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+      });
+    }, 1500);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, saveDesign]);
+
+  // Auto-save on changes (after step 2 is active)
+  React.useEffect(() => {
+    if (step === 2) triggerAutoSave();
+  }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, step, triggerAutoSave]);
+
+  // Listen for manual save from layout
+  React.useEffect(() => {
+    const handler = () => {
+      saveDesign(placedDevices, {
+        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+      });
+    };
+    window.addEventListener("avforge-save", handler);
+    return () => window.removeEventListener("avforge-save", handler);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, saveDesign]);
+
+  // Load room dimensions from site survey + saved design
+  React.useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get("room");
+    const projectId = urlParams.get("project");
+    if (!projectId) return;
+    currentProjectId.current = projectId;
+    currentRoomId.current = roomId || "default";
+
+    supabase.from("site_surveys").select("data").eq("project_id", projectId).single()
+          .then(({ data: surveyRow }) => {
+            try {
+              const survey = surveyRow?.data as { buildings?: { name?: string; rooms?: { id: string; name?: string; data?: Record<string, string> }[] }[] } | null;
+              const building = survey?.buildings?.[0];
+              if (!building || !building.rooms?.length) return;
+
+              // Build survey rooms list for picker
+              const parsed = building.rooms.map(r => ({
+                id: r.id,
+                name: r.name || r.id,
+                width: parseFloat(r.data?.room_width || "0"),
+                length: parseFloat(r.data?.room_length || "0"),
+                height: parseFloat(r.data?.room_height || "0"),
+              })).filter(r => r.width > 0 || r.length > 0);
+              setSurveyRooms(parsed);
+
+              const room = roomId
+                ? building.rooms.find((r) => r.id === roomId) || building.rooms[0]
+                : building.rooms[0];
+              const widthFt = parseFloat(room.data?.room_width || "0");
+              const lengthFt = parseFloat(room.data?.room_length || "0");
+              const heightFt = parseFloat(room.data?.room_height || "0");
+              const hasData = widthFt > 0 || lengthFt > 0 || heightFt > 0;
+              if (widthFt > 0) setRoomW(widthFt);
+              if (lengthFt > 0) setRoomL(lengthFt);
+              if (heightFt > 0) setRoomH(heightFt);
+              if (hasData) {
+                // Don't auto-select mode — let user choose
+              }
+            } catch {}
+          });
+
+    // Load saved room design
+    supabase.from("room_designs").select("data")
+      .eq("project_id", projectId).eq("room_id", roomId || "default").single()
+      .then(({ data: designRow }) => {
+        if (!designRow?.data) return;
+        const saved = designRow.data as { devices?: PlacedDevice[]; config?: Record<string, unknown> };
+        if (saved.devices?.length) setPlacedDevices(saved.devices);
+        if (saved.config) {
+          if (saved.config.roomType) setRoomType(saved.config.roomType as string);
+          if (saved.config.roomW) setRoomW(saved.config.roomW as number);
+          if (saved.config.roomL) setRoomL(saved.config.roomL as number);
+          if (saved.config.roomH) setRoomH(saved.config.roomH as number);
+          if (saved.config.tableShape) setTableShape(saved.config.tableShape as string);
+          if (saved.config.tableSeats) setTableSeats(saved.config.tableSeats as number);
+          if (saved.config.tableWidth) setTableWidth(saved.config.tableWidth as number);
+          if (saved.config.tableWallDist) setTableWallDist(saved.config.tableWallDist as number);
+          if (saved.config.showTable !== undefined) setShowTable(saved.config.showTable as boolean);
+          if (saved.config.selectedWall) setSelectedWall(saved.config.selectedWall as string);
+          if (saved.config.placedDoors) setPlacedDoors(saved.config.placedDoors as PlacedDoor[]);
+          setStep(2);
+        }
+      });
+  }, []);
+
+  const toFtIn = (feet: number) => {
+    const totalQ = Math.round(feet * 12 * 4); // quarters of an inch
+    const f = Math.floor(totalQ / 48);
+    const remQ = totalQ % 48;
+    const wholeIn = Math.floor(remQ / 4);
+    const q = remQ % 4;
+    const frac = q === 0 ? "" : q === 1 ? "¼" : q === 2 ? "½" : "¾";
+    return `${f}′ ${wholeIn}${frac}″`;
+  };
+  const toDisplay = (feet: number) => toFtIn(feet);
+
+  const parseFtIn = (str: string): number | null => {
+    const s = str.trim().replace(/'\s*-\s*/g, "' ");
+    if (!s) return null;
+    const inToFt = 1/12;
+    let m;
+    // 15' 1 1/2"  or  15'-1 1/2"
+    m = s.match(/^(\d+)'\s*(\d+)\s+(\d+)\/(\d+)"?$/);
+    if (m) return +m[1] + (+m[2] + +m[3] / +m[4])*inToFt;
+    // 15' 1/2"
+    m = s.match(/^(\d+)'\s*(\d+)\/(\d+)"?$/);
+    if (m) return +m[1] + (+m[2] / +m[3])*inToFt;
+    // 12'6"  or  12' 6
+    m = s.match(/^(\d+(?:\.\d+)?)'\s*(\d+(?:\.\d+)?)"?$/);
+    if (m) return +m[1] + +m[2]*inToFt;
+    // 10'  or plain number (treated as feet)
+    m = s.match(/^(\d+(?:\.\d+)?)'?$/);
+    if (m) return +m[1];
+    // 6"
+    m = s.match(/^(\d+(?:\.\d+)?)"$/);
+    if (m) return +m[1]*inToFt;
+    return null;
+  };
+  const QUARTER_IN_FT = 1/48;
+  const snapToGrid = (pos: {x:number;y:number}) => ({
+    x: Math.round(pos.x / QUARTER_IN_FT) * QUARTER_IN_FT,
+    y: Math.round(pos.y / QUARTER_IN_FT) * QUARTER_IN_FT,
+  });
+
+  const isCustomBlank = roomSizeMode === "custom";
+
+  // Compute oriented dimensions of drawn walls for custom rooms
+  const drawnWalls = placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined);
+  const drawnBounds = (() => {
+    if (drawnWalls.length === 0) return null;
+    // Collect all wall endpoints
+    const pts: {x:number;y:number}[] = [];
+    drawnWalls.forEach(dev => {
+      const angle = dev.wallAngle!;
+      const len = dev.w;
+      pts.push(
+        { x: dev.x - Math.cos(angle) * len / 2, y: dev.y - Math.sin(angle) * len / 2 },
+        { x: dev.x + Math.cos(angle) * len / 2, y: dev.y + Math.sin(angle) * len / 2 },
+      );
+    });
+    // Find the longest wall to determine primary direction
+    let longestLen = 0, primaryAngle = 0;
+    drawnWalls.forEach(dev => {
+      if (dev.w > longestLen) { longestLen = dev.w; primaryAngle = dev.wallAngle!; }
+    });
+    // Primary axis unit vector and perpendicular
+    const ax = Math.cos(primaryAngle), ay = Math.sin(primaryAngle);
+    const px = -ay, py = ax; // perpendicular
+    // Project all points onto primary and perpendicular axes
+    let minA = Infinity, maxA = -Infinity, minP = Infinity, maxP = -Infinity;
+    pts.forEach(pt => {
+      const projA = pt.x * ax + pt.y * ay;
+      const projP = pt.x * px + pt.y * py;
+      minA = Math.min(minA, projA); maxA = Math.max(maxA, projA);
+      minP = Math.min(minP, projP); maxP = Math.max(maxP, projP);
+    });
+    const width = maxA - minA;  // along primary wall direction
+    const depth = maxP - minP;  // perpendicular to primary wall
+    // Center of the bounding region in world coords
+    const centerA = (minA + maxA) / 2, centerP = (minP + maxP) / 2;
+    const centerX = centerA * ax + centerP * px;
+    const centerY = centerA * ay + centerP * py;
+    // Corner points of the oriented bounding box (for rendering)
+    const corners = [
+      { x: minA * ax + minP * px, y: minA * ay + minP * py },
+      { x: maxA * ax + minP * px, y: maxA * ay + minP * py },
+      { x: maxA * ax + maxP * px, y: maxA * ay + maxP * py },
+      { x: minA * ax + maxP * px, y: minA * ay + maxP * py },
+    ];
+    // Axis-aligned bbox too (for fallback)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach(pt => { minX = Math.min(minX, pt.x); minY = Math.min(minY, pt.y); maxX = Math.max(maxX, pt.x); maxY = Math.max(maxY, pt.y); });
+    return { width, depth, primaryAngle, ax, ay, px, py, minA, maxA, minP, maxP, corners, centerX, centerY, minX, minY, maxX, maxY };
+  })();
+  // Effective room dimensions (use drawn bounds in custom mode if available)
+  const effectiveRoomW = isCustomBlank && drawnBounds ? drawnBounds.width : roomW;
+  const effectiveRoomL = isCustomBlank && drawnBounds ? drawnBounds.depth : roomL;
+
+  // Drag clamp bounds — in custom wall mode use the drawn walls' axis-aligned extents (+ padding)
+  const cMinX = isCustomBlank ? (drawnBounds ? drawnBounds.minX - 1 : -50) : 0;
+  const cMaxX = isCustomBlank ? (drawnBounds ? drawnBounds.maxX + 1 : 50)  : roomW;
+  const cMinY = isCustomBlank ? (drawnBounds ? drawnBounds.minY - 1 : -50) : 0;
+  const cMaxY = isCustomBlank ? (drawnBounds ? drawnBounds.maxY + 1 : 50)  : roomL;
+
+  const scale = Math.min(1, 20 / Math.max(roomW, roomL));
+  const sX = (x: number, y: number, _z?: number) => 300 + (x - y) * 32 * scale;
+  const sY = (x: number, y: number, z: number) =>
+    (140 + Math.max(0, 20 - Math.max(roomW, roomL)) * 2.44) + (x + y) * 18 * scale - z * 38 * scale;
+
+  const planScale = Math.min(380 / roomW, 270 / roomL);
+  const planOffX = (600 - roomW * planScale) / 2;
+  const planOffY = (420 - roomL * planScale) / 2;
+  const pX = (x: number) => planOffX + x * planScale;
+  const pY = (y: number) => planOffY + y * planScale;
+
+  const handleMarqueeMove = (e: React.MouseEvent) => {
+    if (!marquee) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    setMarquee(prev => prev ? { ...prev, curSvgX: svgP.x, curSvgY: svgP.y } : null);
+  };
+
+  const handleMarqueeUp = () => {
+    if (!marquee) return;
+    const dx = Math.abs(marquee.curSvgX - marquee.startSvgX);
+    const dy = Math.abs(marquee.curSvgY - marquee.startSvgY);
+    if (dx > 4 || dy > 4) {
+      // left-to-right = window (fully inside), right-to-left = crossing (intersects)
+      const isWindow = marquee.curSvgX >= marquee.startSvgX;
+      const mX1 = Math.min(marquee.startSvgX, marquee.curSvgX);
+      const mX2 = Math.max(marquee.startSvgX, marquee.curSvgX);
+      const mY1 = Math.min(marquee.startSvgY, marquee.curSvgY);
+      const mY2 = Math.max(marquee.startSvgY, marquee.curSvgY);
+      const hits = new Set<number>();
+      placedDevices.forEach(dev => {
+        let dX1: number, dY1: number, dX2: number, dY2: number;
+        if (dev.id === "wall-partition" && dev.wallAngle !== undefined) {
+          const angle = dev.wallAngle;
+          const half = dev.w / 2;
+          const ex1 = pX(dev.x - Math.cos(angle) * half);
+          const ey1 = pY(dev.y - Math.sin(angle) * half);
+          const ex2 = pX(dev.x + Math.cos(angle) * half);
+          const ey2 = pY(dev.y + Math.sin(angle) * half);
+          dX1 = Math.min(ex1, ex2); dY1 = Math.min(ey1, ey2);
+          dX2 = Math.max(ex1, ex2); dY2 = Math.max(ey1, ey2);
+        } else {
+          dX1 = pX(dev.x) - (dev.w * planScale) / 2;
+          dY1 = pY(dev.y) - (dev.h * planScale) / 2;
+          dX2 = pX(dev.x) + (dev.w * planScale) / 2;
+          dY2 = pY(dev.y) + (dev.h * planScale) / 2;
+        }
+        if (isWindow) {
+          if (dX1 >= mX1 && dX2 <= mX2 && dY1 >= mY1 && dY2 <= mY2) hits.add(dev.uid);
+        } else {
+          if (!(dX2 < mX1 || dX1 > mX2 || dY2 < mY1 || dY1 > mY2)) hits.add(dev.uid);
+        }
+      });
+      setSelectedUids(hits);
+      setSelectedUid(null);
+      didMarqueeDrag.current = true;
+    }
+    setMarquee(null);
+  };
+
+  const floorPts   = `${sX(0,0,0)},${sY(0,0,0)} ${sX(roomW,0,0)},${sY(roomW,0,0)} ${sX(roomW,roomL,0)},${sY(roomW,roomL,0)} ${sX(0,roomL,0)},${sY(0,roomL,0)}`;
+  const backWallPts= `${sX(0,0,0)},${sY(0,0,0)} ${sX(roomW,0,0)},${sY(roomW,0,0)} ${sX(roomW,0,roomH)},${sY(roomW,0,roomH)} ${sX(0,0,roomH)},${sY(0,0,roomH)}`;
+  const leftWallPts= `${sX(0,0,0)},${sY(0,0,0)} ${sX(0,roomL,0)},${sY(0,roomL,0)} ${sX(0,roomL,roomH)},${sY(0,roomL,roomH)} ${sX(0,0,roomH)},${sY(0,0,roomH)}`;
+
+  const rt = roomTypes.find(r => r.id === roomType);
+
+
+
+  const handleDeviceMouseDown = (e: React.MouseEvent, uid: number) => {
+    if (isDrawingWall) return; // Don't drag devices while drawing walls
+    if (dragNewChair?.active || dragNewTable?.active || dragNewDoor?.active) return; // Don't drag while placement tool is active
+    e.stopPropagation();
+    setDragUid(uid); setSelectedUid(uid); setShowHfov(false);
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    setDragStart({ x: svgP.x, y: svgP.y });
+  };
+
+  const handleSvgMouseMove = (e: React.MouseEvent) => {
+    if (!dragUid || !dragStart) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dxPx = svgP.x - dragStart.x;
+    const dyPx = svgP.y - dragStart.y;
+    const dev = placedDevices.find(d => d.uid === dragUid);
+    if (!dev) return;
+    if (viewMode === "plan") {
+      const dxW = dxPx / planScale, dyW = dyPx / planScale;
+      if (dev.mountWall === "north" || dev.mountWall === "south") {
+        const newX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
+        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:newX} : d));
+      } else if (dev.mountWall === "west" || dev.mountWall === "east") {
+        const newY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
+        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,y:newY} : d));
+      } else {
+        const newX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
+        const newY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
+        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:newX,y:newY} : d));
+      }
+    } else {
+      const s32=32*scale, s18=18*scale, s38=38*scale;
+      if (dev.mountWall==="north"||dev.mountWall==="south"||dev.mountWall==="west"||dev.mountWall==="east") {
+        if (dev.mountWall==="north"||dev.mountWall==="south") {
+          const dxW=dxPx/s32, dzW=-(dyPx-dxW*s18)/s38;
+          const newX=Math.max(cMinX,Math.min(cMaxX,dev.x+dxW)), newZ=Math.max(0,Math.min(roomH,dev.z+dzW));
+          setPlacedDevices(prev=>prev.map(d=>d.uid===dragUid?{...d,x:newX,z:newZ}:d));
+        } else {
+          const dyW=-dxPx/s32, dzW=-(dyPx+dyW*s18)/s38;
+          const newY=Math.max(cMinY,Math.min(cMaxY,dev.y+dyW)), newZ=Math.max(0,Math.min(roomH,dev.z+dzW));
+          setPlacedDevices(prev=>prev.map(d=>d.uid===dragUid?{...d,y:newY,z:newZ}:d));
+        }
+      } else {
+        const dxW=dxPx/(2*s32)+dyPx/(2*s18), dyW=-dxPx/(2*s32)+dyPx/(2*s18);
+        const newX=Math.max(cMinX,Math.min(cMaxX,dev.x+dxW)), newY=Math.max(cMinY,Math.min(cMaxY,dev.y+dyW));
+        setPlacedDevices(prev=>prev.map(d=>d.uid===dragUid?{...d,x:newX,y:newY}:d));
+      }
+    }
+    setDragStart({ x: svgP.x, y: svgP.y });
+  };
+
+  const [wallDragged, setWallDragged] = useState(false);
+  const wallEdgeClicked = useRef(false);
+  const handleSvgMouseUp = () => {
+    // If wall edge was clicked without dragging, select it
+    if (wallDragEdge && !wallDragged) {
+      setSelectedEdge(wallDragEdge);
+      wallEdgeClicked.current = true;
+    }
+    if (dragNewDevice?.active) handleNewDeviceDrop();
+    setDragUid(null); setDragStart(null); setWallDragEdge(null); setWallDragStart(null); setWallDragged(false); setMultiDrag(null); setTableResizeDrag(null); setDoorDragId(null); setDoorDragStart(null); setRotDragUid(null); setRotDragCenter(null); setRotatingTable(false); setTableRotCenter(null);
+  };
+
+  const handleMoveDrag = (e: React.MouseEvent) => {
+    if (!moveDragStart) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dxW = (svgP.x - moveDragStart.x) / planScale;
+    const dyW = (svgP.y - moveDragStart.y) / planScale;
+    if (selectedUid !== null || selectedUids.size > 0) {
+      setPlacedDevices(prev => prev.map(d => {
+        const hit = selectedUid !== null ? d.uid === selectedUid : selectedUids.has(d.uid);
+        if (!hit) return d;
+        return { ...d, x: d.x + dxW, y: d.y + dyW };
+      }));
+    }
+    if (selected.has("table")) {
+      setTableCenterX(prev => (prev ?? roomW / 2) + dxW);
+      setTableWallDist(prev => prev + dyW);
+    }
+    selected.forEach(id => {
+      if (id.startsWith("chair:")) {
+        const idx = parseInt(id.split(":")[1]);
+        setChairOffsets(prev => ({ ...prev, [idx]: { dx: (prev[idx]?.dx ?? 0) + dxW, dy: (prev[idx]?.dy ?? 0) + dyW } }));
+      }
+    });
+    setMoveDragStart({ x: svgP.x, y: svgP.y });
+  };
+
+  const handleWallEdgeDown = (edge: "north"|"south"|"east"|"west", e: React.MouseEvent) => {
+    e.stopPropagation();
+    pushUndo();
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    setWallDragEdge(edge);
+    setWallDragStart({ svgX: svgP.x, svgY: svgP.y, origW: roomW, origL: roomL });
+  };
+
+  const handleWallEdgeDrag = (e: React.MouseEvent) => {
+    if (!wallDragEdge || !wallDragStart) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dx = (svgP.x - wallDragStart.svgX) / planScale;
+    const dy = (svgP.y - wallDragStart.svgY) / planScale;
+    if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) setWallDragged(true);
+    const minSize = 2; // min 2 meters
+    if (wallDragEdge === "east") {
+      setRoomW(Math.max(minSize, wallDragStart.origW + dx));
+    } else if (wallDragEdge === "west") {
+      setRoomW(Math.max(minSize, wallDragStart.origW - dx));
+    } else if (wallDragEdge === "south") {
+      setRoomL(Math.max(minSize, wallDragStart.origL + dy));
+    } else if (wallDragEdge === "north") {
+      setRoomL(Math.max(minSize, wallDragStart.origL - dy));
+    }
+  };
+
+  const selectRoom = (r: RoomType) => {
+    setRoomType(r.id); setRoomW(r.w); setRoomL(r.l); setRoomH(r.h);
+    setTableSeats(r.maxSeats);
+    setTableWidth(r.maxSeats<=6?3.5:r.maxSeats<=12?4.0:5.0);
+    setTableWallDist(r.l*0.2);
+    setPlacedDevices([]); setStep(2);
+  };
+
+  const addDeviceToRoom = (dev: DeviceCatalogItem) => {
+    const id = Date.now();
+    let x=0.5, y=0.5, z=0, mountWall="north";
+    if (dev.wall==="front"||dev.wall==="side") {
+      mountWall=selectedWall;
+      if (selectedWall==="north")  { x=roomW/2;       y=0.02;       z=roomH*0.55; }
+      else if(selectedWall==="south") { x=roomW/2;    y=roomL-0.02; z=roomH*0.55; }
+      else if(selectedWall==="west")  { x=0.02;       y=roomL/2;    z=roomH*0.55; }
+      else if(selectedWall==="east")  { x=roomW-0.02; y=roomL/2;    z=roomH*0.55; }
+    } else if(dev.wall==="ceiling") { x=roomW/2; y=roomL/2; z=roomH-0.05; mountWall="ceiling"; }
+    else if(dev.wall==="table")     { x=roomW/2; y=roomL/2; z=0.76;       mountWall="floor"; }
+    else if(dev.wall==="floor")     { x=roomW/2; y=roomL/2; z=0;          mountWall="floor"; }
+    const hfov = dev.type==="camera" ? (dev.id==="soundbar-cam"?120:dev.id==="ceiling-cam"?90:70) : undefined;
+    const covShape = (dev.type==="mic"&&dev.wall==="ceiling") ? "round" as const : undefined;
+    const covDiameter = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : dev.id==="table-mic" ? 2 : undefined;
+    const covW = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
+    const covL = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
+    const dispersion = (dev.type==="speaker"&&dev.wall==="ceiling") ? 90 : undefined;
+    setPlacedDevices(prev=>[...prev,{...dev,uid:id,x,y,z,mountWall,hfov,covShape,covDiameter,covW,covL,dispersion}]);
+  };
+
+  const removeDevice = (uid: number) => { pushUndo(); setPlacedDevices(prev=>prev.filter(d=>d.uid!==uid)); };
+
+  // Snap world coords to nearest wall, return wall name and position (0-1) along that wall
+  const snapToWall = (wx: number, wy: number): { wall: "north"|"south"|"east"|"west"|"drawn"; pos: number; wallUid?: number } => {
+    const dists: { wall: "north"|"south"|"east"|"west"|"drawn"; d: number; pos: number; wallUid?: number }[] = [];
+    // Boundary walls (only in non-custom mode)
+    if (!isCustomBlank) {
+      dists.push(
+        { wall: "north", d: Math.abs(wy), pos: Math.max(0, Math.min(1, wx / roomW)) },
+        { wall: "south", d: Math.abs(wy - roomL), pos: Math.max(0, Math.min(1, wx / roomW)) },
+        { wall: "west", d: Math.abs(wx), pos: Math.max(0, Math.min(1, wy / roomL)) },
+        { wall: "east", d: Math.abs(wx - roomW), pos: Math.max(0, Math.min(1, wy / roomL)) },
+      );
+    }
+    // Drawn wall segments
+    placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).forEach(dev => {
+      const angle = dev.wallAngle!;
+      const len = dev.w;
+      const x1 = dev.x - Math.cos(angle) * len / 2;
+      const y1 = dev.y - Math.sin(angle) * len / 2;
+      const x2 = dev.x + Math.cos(angle) * len / 2;
+      const y2 = dev.y + Math.sin(angle) * len / 2;
+      const dx = x2 - x1, dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 0.001) return;
+      const t = Math.max(0, Math.min(1, ((wx - x1) * dx + (wy - y1) * dy) / lenSq));
+      const closestX = x1 + t * dx, closestY = y1 + t * dy;
+      const dist = Math.sqrt((wx - closestX) ** 2 + (wy - closestY) ** 2);
+      dists.push({ wall: "drawn", d: dist, pos: t, wallUid: dev.uid });
+    });
+    if (dists.length === 0) {
+      return { wall: "north", pos: 0.5 };
+    }
+    dists.sort((a, b) => a.d - b.d);
+    return { wall: dists[0].wall, pos: dists[0].pos, wallUid: dists[0].wallUid };
+  };
+
+  // Get door rendering coords from wall + position
+  const getDoorCoords = (door: PlacedDoor) => {
+    if (door.wall === "drawn" && door.wallUid) {
+      const wallDev = placedDevices.find(d => d.uid === door.wallUid);
+      if (wallDev && wallDev.wallAngle !== undefined) {
+        const angle = wallDev.wallAngle;
+        const len = wallDev.w;
+        const wx1 = wallDev.x - Math.cos(angle) * len / 2;
+        const wy1 = wallDev.y - Math.sin(angle) * len / 2;
+        const wx2 = wallDev.x + Math.cos(angle) * len / 2;
+        const wy2 = wallDev.y + Math.sin(angle) * len / 2;
+        const halfW = door.width / 2;
+        const cx = wx1 + (wx2 - wx1) * door.pos;
+        const cy = wy1 + (wy2 - wy1) * door.pos;
+        const dx = Math.cos(angle) * halfW;
+        const dy = Math.sin(angle) * halfW;
+        const perpX = -Math.sin(angle) * 0.2;
+        const perpY = Math.cos(angle) * 0.2;
+        return { x1: cx - dx, y1: cy - dy, x2: cx + dx, y2: cy + dy, labelX: cx + perpX, labelY: cy + perpY, angle: angle * 180 / Math.PI };
+      }
+    }
+    const wallLen = (door.wall === "north" || door.wall === "south") ? roomW : roomL;
+    const along = door.pos * wallLen;
+    const halfW = door.width / 2;
+    let x1 = 0, y1 = 0, x2 = 0, y2 = 0, labelX = 0, labelY = 0;
+    if (door.wall === "north") { x1 = along - halfW; y1 = 0; x2 = along + halfW; y2 = 0; labelX = along; labelY = -0.15; }
+    else if (door.wall === "south") { x1 = along - halfW; y1 = roomL; x2 = along + halfW; y2 = roomL; labelX = along; labelY = roomL + 0.3; }
+    else if (door.wall === "west") { x1 = 0; y1 = along - halfW; x2 = 0; y2 = along + halfW; labelX = -0.3; labelY = along; }
+    else if (door.wall === "east") { x1 = roomW; y1 = along - halfW; x2 = roomW; y2 = along + halfW; labelX = roomW + 0.3; labelY = along; }
+    return { x1, y1, x2, y2, labelX, labelY, angle: undefined };
+  };
+
+  // Handle dragging new door from sidebar
+  const handleNewDoorDrag = (e: React.MouseEvent) => {
+    if (!dragNewDoor?.active) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = (svgP.x - planOffX) / planScale;
+    const wy = (svgP.y - planOffY) / planScale;
+    const snapped = snapToWall(wx, wy);
+    setDragNewDoor(prev => prev ? { ...prev, wall: snapped.wall, pos: snapped.pos, wallUid: snapped.wallUid } : null);
+  };
+
+  const handleNewDoorDrop = () => {
+    if (!dragNewDoor?.active || !dragNewDoor.wall) return;
+    pushUndo();
+    const newId = Date.now();
+    const width = dragNewDoor.type === "window" ? 2.0 : 3.0;
+    setPlacedDoors(prev => [...prev, { id: newId, wall: dragNewDoor.wall!, pos: dragNewDoor.pos, width, type: dragNewDoor.type, wallUid: dragNewDoor.wallUid }]);
+  };
+
+  // Handle dragging existing placed door
+  const handleDoorDragMove = (e: React.MouseEvent) => {
+    if (!doorDragId || !doorDragStart) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = (svgP.x - planOffX) / planScale;
+    const wy = (svgP.y - planOffY) / planScale;
+    const snapped = snapToWall(wx, wy);
+    setPlacedDoors(prev => prev.map(d => d.id === doorDragId ? { ...d, wall: snapped.wall, pos: snapped.pos, wallUid: snapped.wallUid } : d));
+  };
+
+  // Table edge resize handlers
+  const handleTableResizeStart = (edge: "left"|"right"|"top"|"bottom", e: React.MouseEvent) => {
+    e.stopPropagation();
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    pushUndo();
+    setTableResizeDrag({ edge, startSvgX: svgP.x, startSvgY: svgP.y, origWidth: tableWidth, origLength: tL, origSeats: tableSeats });
+  };
+  const handleTableResizeMove = (e: React.MouseEvent) => {
+    if (!tableResizeDrag) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dx = (svgP.x - tableResizeDrag.startSvgX) / planScale;
+    const dy = (svgP.y - tableResizeDrag.startSvgY) / planScale;
+    if (tableResizeDrag.edge === "right") {
+      setTableWidth(Math.max(1, Math.min(16, tableResizeDrag.origWidth + dx * 2)));
+    } else if (tableResizeDrag.edge === "left") {
+      setTableWidth(Math.max(1, Math.min(16, tableResizeDrag.origWidth - dx * 2)));
+    } else if (tableResizeDrag.edge === "bottom") {
+      setTableLengthOverride(Math.max(1, Math.min(30, tableResizeDrag.origLength + dy * 2)));
+    } else if (tableResizeDrag.edge === "top") {
+      setTableLengthOverride(Math.max(1, Math.min(30, tableResizeDrag.origLength - dy * 2)));
+    }
+  };
+
+  // New table drag from sidebar
+  const handleNewTableDrag = (e: React.MouseEvent) => {
+    if (!dragNewTable?.active) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = Math.max(cMinX, Math.min(cMaxX, (svgP.x - planOffX) / planScale));
+    const wy = Math.max(cMinY, Math.min(cMaxY, (svgP.y - planOffY) / planScale));
+    setDragNewTable({ active: true, worldX: wx, worldY: wy });
+  };
+  const handleNewTableDrop = () => {
+    if (!dragNewTable?.active) return;
+    pushUndo();
+    const tableItem = roomElementItems.find(i => i.id === "conf-table")!;
+    const id = Date.now();
+    setPlacedDevices(prev => [...prev, { ...tableItem, w: 4, h: 8, uid: id, x: dragNewTable.worldX, y: dragNewTable.worldY, z: 0, mountWall: "floor" }]);
+  };
+
+  // New chair drag from sidebar
+  const handleNewChairDrag = (e: React.MouseEvent) => {
+    if (!dragNewChair?.active) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = Math.max(cMinX, Math.min(cMaxX, (svgP.x - planOffX) / planScale));
+    const wy = Math.max(cMinY, Math.min(cMaxY, (svgP.y - planOffY) / planScale));
+    setDragNewChair({ active: true, worldX: wx, worldY: wy });
+  };
+  const handleNewChairDrop = () => {
+    if (!dragNewChair?.active) return;
+    pushUndo();
+    const chairItem = roomElementItems.find(i => i.id === "side-chair")!;
+    const id = Date.now();
+    setPlacedDevices(prev => [...prev, { ...chairItem, uid: id, x: dragNewChair.worldX, y: dragNewChair.worldY, z: 0, mountWall: "floor" }]);
+  };
+
+  // New device drag from sidebar
+  const handleNewDeviceDrag = (e: React.MouseEvent) => {
+    if (!dragNewDevice?.active) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = (svgP.x - planOffX) / planScale;
+    const wy = (svgP.y - planOffY) / planScale;
+    const item = dragNewDevice.item;
+    // Wall-mounted devices snap to nearest wall
+    if (item.wall === "front" || item.wall === "side") {
+      const snapped = snapToWall(wx, wy);
+      const wall = snapped.wall === "drawn" ? null : snapped.wall;
+      setDragNewDevice(prev => prev ? { ...prev, worldX: wx, worldY: wy, wall } : null);
+    } else {
+      // Floor/ceiling devices follow cursor freely
+      const cx = Math.max(0.1, Math.min(roomW - 0.1, wx));
+      const cy = Math.max(0.1, Math.min(roomL - 0.1, wy));
+      setDragNewDevice(prev => prev ? { ...prev, worldX: cx, worldY: cy } : null);
+    }
+  };
+  const handleNewDeviceDrop = () => {
+    if (!dragNewDevice?.active) return;
+    pushUndo();
+    const item = dragNewDevice.item;
+    const id = Date.now();
+    let x = dragNewDevice.worldX, y = dragNewDevice.worldY, z = 0;
+    let mountWall = "floor";
+    if (item.wall === "front" || item.wall === "side") {
+      const wall = dragNewDevice.wall || "north";
+      mountWall = wall;
+      if (wall === "north") { y = 0.02; z = roomH * 0.55; }
+      else if (wall === "south") { y = roomL - 0.02; z = roomH * 0.55; }
+      else if (wall === "west") { x = 0.02; z = roomH * 0.55; }
+      else if (wall === "east") { x = roomW - 0.02; z = roomH * 0.55; }
+    } else if (item.wall === "ceiling") {
+      z = roomH - 0.05; mountWall = "ceiling";
+    } else if (item.wall === "table") {
+      z = 0.76; mountWall = "floor";
+    }
+    const hfov = item.type === "camera" ? (item.id === "soundbar-cam" ? 120 : item.id === "ceiling-cam" ? 90 : 70) : undefined;
+    const covShape = (item.type === "mic" && item.wall === "ceiling") ? "round" as const : undefined;
+    const covDiameter = (item.type === "mic" && item.wall === "ceiling") ? 6 : item.id === "table-mic" ? 2 : undefined;
+    const covW = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
+    const covL = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
+    const dispersion = (item.type === "speaker" && item.wall === "ceiling") ? 90 : undefined;
+    setPlacedDevices(prev => [...prev, { ...item, uid: id, x, y, z, mountWall, hfov, covShape, covDiameter, covW, covL, dispersion }]);
+    setDragNewDevice(null);
+  };
+
+  // Free-angle rotation drag handlers
+  const handleRotDragStart = (uid: number, centerSvgX: number, centerSvgY: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    pushUndo();
+    setRotDragUid(uid);
+    setRotDragCenter({ x: centerSvgX, y: centerSvgY });
+  };
+  const handleRotDragMove = (e: React.MouseEvent) => {
+    if (!rotDragUid || !rotDragCenter) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const angle = Math.atan2(svgP.y - rotDragCenter.y, svgP.x - rotDragCenter.x) * (180 / Math.PI) + 90;
+    setPlacedDevices(prev => prev.map(d => d.uid === rotDragUid ? { ...d, rotation: ((angle % 360) + 360) % 360 } : d));
+  };
+  const handleTableRotDragStart = (centerSvgX: number, centerSvgY: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    pushUndo();
+    setRotatingTable(true);
+    setTableRotCenter({ x: centerSvgX, y: centerSvgY });
+  };
+  const handleTableRotDragMove = (e: React.MouseEvent) => {
+    if (!rotatingTable || !tableRotCenter) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const angle = Math.atan2(svgP.y - tableRotCenter.y, svgP.x - tableRotCenter.x) * (180 / Math.PI) + 90;
+    setTableRotation(((angle % 360) + 360) % 360);
+  };
+
+  // Multi-item drag handler — moves all selected items together
+  const handleMultiDragStart = (triggerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    pushUndo();
+    // Build the set of items to drag
+    let items: Set<string>;
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+mouseDown: add to selection, drag all selected
+      items = new Set(selected);
+      items.add(triggerId);
+    } else if (selected.has(triggerId)) {
+      // Already selected, drag all selected together
+      items = new Set(selected);
+    } else {
+      // Not selected, no Ctrl: select only this item
+      items = new Set([triggerId]);
+    }
+    setSelected(items);
+    dragStartedRef.current = true;
+    setMultiDrag({
+      startSvgX: svgP.x, startSvgY: svgP.y,
+      origTableCX: tableCenterX ?? roomW/2,
+      origWallDist: tableWallDist,
+      origChairOffsets: {...chairOffsets},
+      items,
+    });
+  };
+  const handleMultiDragMove = (e: React.MouseEvent) => {
+    if (!multiDrag) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dx = (svgP.x - multiDrag.startSvgX) / planScale;
+    const dy = (svgP.y - multiDrag.startSvgY) / planScale;
+    const { items } = multiDrag;
+    const hasTable = items.has("table");
+
+    // Move table if selected
+    if (hasTable) {
+      const newCX = Math.max(tW/2 + 0.1, Math.min(roomW - tW/2 - 0.1, multiDrag.origTableCX + dx));
+      const newWD = Math.max(0.1, Math.min(roomL - tL - 0.1, multiDrag.origWallDist + dy));
+      setTableCenterX(newCX);
+      setTableWallDist(newWD);
+      // Compensate unselected chairs so they don't move with table
+      const actualDx = newCX - multiDrag.origTableCX;
+      const actualDy = newWD - multiDrag.origWallDist;
+      const newOffsets = {...multiDrag.origChairOffsets};
+      const totalChairs = tableSeats + 2;
+      for (let i = 0; i < totalChairs; i++) {
+        const orig = multiDrag.origChairOffsets[i] || { dx: 0, dy: 0 };
+        if (items.has(`chair:${i}`)) {
+          // Selected chair moves with table + its own delta
+          newOffsets[i] = { dx: orig.dx + dx - actualDx, dy: orig.dy + dy - actualDy };
+        } else {
+          // Unselected chair compensates for table movement
+          newOffsets[i] = { dx: orig.dx - actualDx, dy: orig.dy - actualDy };
+        }
+      }
+      setChairOffsets(newOffsets);
+    } else {
+      // Only chairs selected (no table)
+      const newOffsets = {...multiDrag.origChairOffsets};
+      items.forEach(id => {
+        if (id.startsWith("chair:")) {
+          const idx = parseInt(id.split(":")[1]);
+          const orig = multiDrag.origChairOffsets[idx] || { dx: 0, dy: 0 };
+          newOffsets[idx] = { dx: orig.dx + dx, dy: orig.dy + dy };
+        }
+      });
+      setChairOffsets(newOffsets);
+    }
+  };
+
+  // Convert screen mouse event to world coords on the floor plan
+  const screenToWorld = (e: React.MouseEvent): {x:number;y:number}|null => {
+    const svg = svgRef.current; if (!svg) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const wx = (svgP.x - planOffX) / planScale;
+    const wy = (svgP.y - planOffY) / planScale;
+    return {x: wx, y: wy};
+  };
+
+  const handleWallClick = (e: React.MouseEvent) => {
+    if (!isDrawingWall) return;
+    let pos = screenToWorld(e);
+    if (!pos) return;
+    pos = snapToGrid(pos);
+    if (wallPoints.length > 0) {
+      const last = wallPoints[wallPoints.length - 1];
+      if (orthoMode || e.shiftKey) {
+        const dx = pos.x - last.x, dy = pos.y - last.y;
+        const angle = Math.atan2(dy, dx);
+        const snapped = orthoMode
+          ? Math.round(angle / (Math.PI / 2)) * (Math.PI / 2)
+          : Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        pos = snapToGrid({ x: last.x + Math.cos(snapped) * dist, y: last.y + Math.sin(snapped) * dist });
+      }
+    }
+
+    // If scaling floor plan, handle scale reference clicks
+    if (isScalingFloorPlan) {
+      setScaleRefPoints(prev => {
+        const next = [...prev, pos];
+        return next.length > 2 ? [pos] : next;
+      });
+      return;
+    }
+
+    // Check snap to first point to close polygon
+    if (wallPoints.length >= 2) {
+      const first = wallPoints[0];
+      const dx = pos.x - first.x;
+      const dy = pos.y - first.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < WALL_SNAP_DIST) {
+        // Close polygon — create wall segments for all points
+        const closed = [...wallPoints, first];
+        createWallSegments(closed);
+        setWallPoints([]);
+        setWallMousePos(null);
+        setIsDrawingWall(false);
+        return;
+      }
+    }
+
+    // Add point — also create a wall segment from last point to this one
+    if (wallPoints.length > 0) {
+      const last = wallPoints[wallPoints.length - 1];
+      createWallSegment(last, pos);
+    }
+    setWallPoints(prev => [...prev, pos]);
+  };
+
+  const createWallSegment = (from: {x:number;y:number}, to: {x:number;y:number}) => {
+    pushUndo();
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (len < 0.05) return;
+    const cx = (from.x + to.x) / 2;
+    const cy = (from.y + to.y) / 2;
+    const angle = Math.atan2(dy, dx);
+    const id = Date.now() + Math.random();
+    setPlacedDevices(prev => [...prev, {
+      id: "wall-partition", name: "Wall", icon: "🧱",
+      w: len, h: 0.15, wall: "floor", type: "furniture", color: "rgb(var(--text-subtle))",
+      uid: id, x: cx, y: cy, z: 0, mountWall: "floor",
+      wallAngle: angle,
+    } as PlacedDevice]);
+  };
+
+  const createWallSegments = (points: {x:number;y:number}[]) => {
+    for (let i = 0; i < points.length - 1; i++) {
+      // Skip if segment was already created incrementally — only close the last one
+      if (i === points.length - 2) {
+        createWallSegment(points[i], points[i + 1]);
+      }
+    }
+  };
+
+  const cancelWallDrawing = () => {
+    setIsDrawingWall(false);
+    setWallPoints([]);
+    setWallMousePos(null);
+    setWallLengthInput("");
+  };
+
+  const handleWallInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      e.nativeEvent.stopPropagation();
+      const meters = parseFtIn(wallLengthInput);
+      if (meters !== null && meters > 0.05 && wallPoints.length > 0) {
+        const last = wallPoints[wallPoints.length - 1];
+        let angle = wallMousePos ? Math.atan2(wallMousePos.y - last.y, wallMousePos.x - last.x) : 0;
+        if (orthoMode) {
+          angle = Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
+        } else {
+          const snap45 = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          if (Math.abs(angle - snap45) < 0.05) angle = snap45;
+        }
+        const to = snapToGrid({ x: last.x + Math.cos(angle) * meters, y: last.y + Math.sin(angle) * meters });
+        createWallSegment(last, to);
+        setWallPoints(prev => [...prev, to]);
+        setWallMousePos(to);
+        setWallLengthInput("");
+      }
+    } else if (e.key === "Escape") {
+      if (wallLengthInput) {
+        setWallLengthInput("");
+        e.nativeEvent.stopPropagation();
+      }
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      e.nativeEvent.stopPropagation();
+    }
+  };
+
+  const snapToAxis = (from: {x:number;y:number}, to: {x:number;y:number}): {x:number;y:number} => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const angle = Math.atan2(dy, dx);
+    const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    return { x: from.x + Math.cos(snapped) * dist, y: from.y + Math.sin(snapped) * dist };
+  };
+
+  const handleWallMouseMove = (e: React.MouseEvent) => {
+    if (isDrawingWall && canvasContainerRef.current) {
+      const rect = canvasContainerRef.current.getBoundingClientRect();
+      setCursorScreenPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    }
+    if (!isDrawingWall || wallPoints.length === 0) return;
+    let pos = screenToWorld(e);
+    if (!pos) return;
+    pos = snapToGrid(pos);
+    const last = wallPoints[wallPoints.length - 1];
+    if (orthoMode || e.shiftKey) {
+      const dx = pos.x - last.x, dy = pos.y - last.y;
+      const angle = Math.atan2(dy, dx);
+      const snapped = orthoMode
+        ? Math.round(angle / (Math.PI / 2)) * (Math.PI / 2)
+        : Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      pos = { x: last.x + Math.cos(snapped) * dist, y: last.y + Math.sin(snapped) * dist };
+    }
+    setWallMousePos(pos);
+  };
+
+  // Keyboard handler for wall drawing escape + wall edge delete
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isInputFocused = document.activeElement === wallInputRef.current;
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        popUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        e.preventDefault();
+        if (selectedUids.size > 0) {
+          setClipboard(placedDevices.filter(d => selectedUids.has(d.uid)));
+        } else if (selectedUid !== null) {
+          const dev = placedDevices.find(d => d.uid === selectedUid);
+          if (dev) setClipboard([dev]);
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+        e.preventDefault();
+        if (clipboard.length > 0) {
+          pushUndo();
+          const base = Date.now();
+          const pasted = clipboard.map((d, i) => ({
+            ...d,
+            uid: base + i,
+            x: d.x + 0.3,
+            y: d.y + 0.3,
+          }));
+          setPlacedDevices(prev => [...prev, ...pasted]);
+          if (pasted.length === 1) {
+            setSelectedUid(pasted[0].uid);
+            setSelectedUids(new Set());
+          } else {
+            setSelectedUids(new Set(pasted.map(d => d.uid)));
+            setSelectedUid(null);
+          }
+        }
+        return;
+      }
+      if (e.key === "F8" && isDrawingWall) {
+        e.preventDefault();
+        setOrthoMode(v => !v);
+        return;
+      }
+      if (e.key === "Escape" && moveMode) {
+        setMoveMode(false);
+        setMoveDragStart(null);
+        return;
+      }
+      if (e.key === "Escape" && panMode) {
+        setPanMode(false);
+        return;
+      }
+      if (e.key === "Escape" && isDrawingWall) {
+        cancelWallDrawing();
+      }
+      if (e.key === "Escape" && (dragNewChair?.active || dragNewTable?.active || dragNewDoor?.active)) {
+        setDragNewChair(null);
+        setDragNewTable(null);
+        setDragNewDoor(null);
+      }
+      if (e.key === "Escape" && (selectedEdge || selected.size > 0)) {
+        setSelectedEdge(null);
+        clearSelection();
+      }
+      if (isInputFocused) return;
+      if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
+        pushUndo();
+        selected.forEach(id => {
+          if (id.startsWith("chair:")) {
+            const idx = parseInt(id.split(":")[1]);
+            setDeletedChairs(prev => { const next = new Set(prev); next.add(idx); return next; });
+          } else if (id === "table") {
+            setTableDeleted(true);
+          } else if (id.startsWith("door:")) {
+            const doorId = parseInt(id.split(":")[1]);
+            setPlacedDoors(prev => prev.filter(d => d.id !== doorId));
+          }
+        });
+        clearSelection();
+      }
+      // Delete selected device (furniture, walls etc.)
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedUid) {
+        pushUndo();
+        // Also remove doors attached to this wall if it's a wall-partition
+        setPlacedDoors(prev => prev.filter(d => d.wallUid !== selectedUid));
+        setPlacedDevices(prev => prev.filter(d => d.uid !== selectedUid));
+        setSelectedUid(null);
+      }
+      // Delete all marquee-selected devices
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedUids.size > 0) {
+        pushUndo();
+        setPlacedDoors(prev => prev.filter(d => !selectedUids.has(d.wallUid ?? -1)));
+        setPlacedDevices(prev => prev.filter(d => !selectedUids.has(d.uid)));
+        setSelectedUids(new Set());
+      }
+      // Rotate selected furniture by 90 degrees
+      if (e.key === "r" && selectedUid && !e.ctrlKey && !e.metaKey) {
+        pushUndo();
+        setPlacedDevices(prev => prev.map(d => d.uid === selectedUid ? { ...d, rotation: ((d.rotation || 0) + 90) % 360 } : d));
+      }
+      // Arrow key nudge — single or multi selected devices, table, chairs
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key) && (selectedUid !== null || selectedUids.size > 0 || selected.size > 0) && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const step = e.shiftKey ? 0.5 : 0.05;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp"   ? -step : e.key === "ArrowDown"  ? step : 0;
+        pushUndo();
+        if (selectedUid !== null || selectedUids.size > 0) {
+          setPlacedDevices(prev => prev.map(d => {
+            const hit = selectedUid !== null ? d.uid === selectedUid : selectedUids.has(d.uid);
+            if (!hit) return d;
+            return { ...d, x: d.x + dx, y: d.y + dy };
+          }));
+        }
+        if (selected.has("table")) {
+          setTableCenterX(prev => (prev ?? roomW / 2) + dx);
+          setTableWallDist(prev => prev + dy);
+        }
+        selected.forEach(id => {
+          if (id.startsWith("chair:")) {
+            const idx = parseInt(id.split(":")[1]);
+            setChairOffsets(prev => ({
+              ...prev,
+              [idx]: { dx: (prev[idx]?.dx ?? 0) + dx, dy: (prev[idx]?.dy ?? 0) + dy },
+            }));
+          }
+        });
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedEdge) {
+        pushUndo();
+        setDeletedWalls(prev => {
+          const next = new Set(prev);
+          if (next.has(selectedEdge)) {
+            next.delete(selectedEdge);
+          } else {
+            next.add(selectedEdge);
+          }
+          return next;
+        });
+        setSelectedEdge(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDrawingWall, selectedEdge, selected, selectedUid, selectedUids, dragNewChair, dragNewTable, dragNewDoor, clipboard, placedDevices, roomW, roomL, panMode, moveMode]);
+
+  React.useEffect(() => {
+    if (isDrawingWall && wallPoints.length > 0) {
+      setTimeout(() => wallInputRef.current?.focus(), 0);
+    }
+  }, [isDrawingWall, wallPoints.length]);
+
+  // Floor plan import handler
+  const handleFloorPlanUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFloorPlanImg(reader.result as string);
+      setFloorPlanScale(50); // default: 50 pixels per foot
+      setFloorPlanOffset({x: 0, y: 0});
+      setIsScalingFloorPlan(false);
+      setScaleRefPoints([]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const applyScaleReference = () => {
+    if (scaleRefPoints.length !== 2 || !scaleRefLength) return;
+    const dx = scaleRefPoints[1].x - scaleRefPoints[0].x;
+    const dy = scaleRefPoints[1].y - scaleRefPoints[0].y;
+    const pixelDist = Math.sqrt(dx*dx + dy*dy) * planScale; // distance in SVG pixels
+    const realDist = parseFloat(scaleRefLength);
+    if (realDist > 0 && pixelDist > 0) {
+      setFloorPlanScale(prev => prev * (pixelDist / (realDist * prev)));
+    }
+    setIsScalingFloorPlan(false);
+    setScaleRefPoints([]);
+    setScaleRefLength("");
+  };
+
+  // Isometric chair renderer (needs sX/sY closure)
+  const renderChair = (cx: number, cy: number, backDir: string) => {
+    const legW=0.43, seatZ=1.48, backZ=2.69;
+    const corners: [number,number][] = [[cx-legW,cy-legW],[cx+legW,cy-legW],[cx+legW,cy+legW],[cx-legW,cy+legW]];
+    const backCorners = backDir==="up"?[0,1]:backDir==="down"?[2,3]:backDir==="left"?[0,3]:[1,2];
+    const seatPts = corners.map(c=>`${sX(c[0],c[1],seatZ)},${sY(c[0],c[1],seatZ)}`).join(" ");
+    const seatEdgePts = [
+      `${sX(corners[2][0],corners[2][1],seatZ-0.02)},${sY(corners[2][0],corners[2][1],seatZ-0.02)}`,
+      `${sX(corners[3][0],corners[3][1],seatZ-0.02)},${sY(corners[3][0],corners[3][1],seatZ-0.02)}`,
+      `${sX(corners[3][0],corners[3][1],seatZ)},${sY(corners[3][0],corners[3][1],seatZ)}`,
+      `${sX(corners[2][0],corners[2][1],seatZ)},${sY(corners[2][0],corners[2][1],seatZ)}`,
+    ].join(" ");
+    const bc0=corners[backCorners[0]], bc1=corners[backCorners[1]];
+    const backPts = [
+      `${sX(bc0[0],bc0[1],backZ)},${sY(bc0[0],bc0[1],backZ)}`,
+      `${sX(bc1[0],bc1[1],backZ)},${sY(bc1[0],bc1[1],backZ)}`,
+      `${sX(bc1[0],bc1[1],seatZ+0.04)},${sY(bc1[0],bc1[1],seatZ+0.04)}`,
+      `${sX(bc0[0],bc0[1],seatZ+0.04)},${sY(bc0[0],bc0[1],seatZ+0.04)}`,
+    ].join(" ");
+    return (
+      <g>
+        <ellipse cx={sX(cx,cy,0)} cy={sY(cx,cy,0)+2} rx={6} ry={3.5} fill="#000" opacity={0.07}/>
+        {corners.map((c,i)=>(
+          <line key={i} x1={sX(c[0],c[1],0)} y1={sY(c[0],c[1],0)} x2={sX(c[0],c[1],seatZ)} y2={sY(c[0],c[1],seatZ)} stroke="#d1d5db" strokeWidth={1.8} strokeLinecap="round"/>
+        ))}
+        <line x1={sX(bc0[0],bc0[1],seatZ)} y1={sY(bc0[0],bc0[1],seatZ)} x2={sX(bc0[0],bc0[1],backZ)} y2={sY(bc0[0],bc0[1],backZ)} stroke="#d1d5db" strokeWidth={1.8} strokeLinecap="round"/>
+        <line x1={sX(bc1[0],bc1[1],seatZ)} y1={sY(bc1[0],bc1[1],seatZ)} x2={sX(bc1[0],bc1[1],backZ)} y2={sY(bc1[0],bc1[1],backZ)} stroke="#d1d5db" strokeWidth={1.8} strokeLinecap="round"/>
+        <polygon points={seatEdgePts} fill="#b0b8c4" stroke="#cbd5e1" strokeWidth={0.3}/>
+        <polygon points={seatPts} fill="#e5e7eb" stroke="#d1d5db" strokeWidth={0.8}/>
+        <polygon points={backPts} fill="#dde1e7" stroke="#cbd5e1" strokeWidth={0.6}/>
+      </g>
+    );
+  };
+
+  // ── Step 1: Room Setup Landing ────────────────────────────────────────────────
+  if (step === 1) {
+    const applySurveyRoom = (roomId: string) => {
+      const r = surveyRooms.find(s => s.id === roomId);
+      if (!r) return;
+      if (r.width > 0) setRoomW(r.width);
+      if (r.length > 0) setRoomL(r.length);
+      if (r.height > 0) setRoomH(r.height);
+      const w = r.width > 0 ? r.width : 16;
+      const l = r.length > 0 ? r.length : 20;
+      const area = w * l;
+      const seats = Math.min(24, Math.max(4, Math.round(area / 27)));
+      setTableSeats(seats);
+      setTableWidth(seats <= 6 ? 3.5 : seats <= 12 ? 4.0 : 5.0);
+      setTableWallDist(l * 0.2);
+      setRoomType("custom");
+      setStep(2);
+    };
+
+    const selectRoomTemplate = (r: RoomType) => {
+      selectRoom(r);
+    };
+
+    const renderRoomCard = (r: RoomType) => {
+      const s=Math.min(1.4,6.5/Math.max(r.w,r.l));
+      const mx=(x:number,y:number,_z?: number)=>100+(x-y)*10*s;
+      const my=(x:number,y:number,z:number)=>65+(x+y)*6*s-z*16*s;
+      return (
+        <div key={r.id} onClick={()=>selectRoomTemplate(r)}
+          style={{padding:16,background:"rgb(var(--forge-surface) / 0.4)",borderRadius:12,border:"1px solid rgb(var(--border))",cursor:"pointer",transition:"all 0.25s",display:"flex",flexDirection:"column"}}
+          onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="#3b82f6";(e.currentTarget as HTMLDivElement).style.transform="translateY(-2px)";}}
+          onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="rgb(var(--border))";(e.currentTarget as HTMLDivElement).style.transform="translateY(0)";}}
+        >
+          <svg viewBox="0 0 200 130" style={{width:"100%",height:100,marginBottom:8}}>
+            <g>
+              <polygon points={`${mx(0,0,0)},${my(0,0,0)} ${mx(r.w,0,0)},${my(r.w,0,0)} ${mx(r.w,r.l,0)},${my(r.w,r.l,0)} ${mx(0,r.l,0)},${my(0,r.l,0)}`} fill={cc.floorA} stroke="#3b82f6" strokeWidth={0.8} opacity={0.6}/>
+              <polygon points={`${mx(0,0,0)},${my(0,0,0)} ${mx(r.w,0,0)},${my(r.w,0,0)} ${mx(r.w,0,r.h)},${my(r.w,0,r.h)} ${mx(0,0,r.h)},${my(0,0,r.h)}`} fill={cc.floorB} stroke="#3b82f6" strokeWidth={0.8} opacity={0.5}/>
+              <polygon points={`${mx(0,0,0)},${my(0,0,0)} ${mx(0,r.l,0)},${my(0,r.l,0)} ${mx(0,r.l,r.h)},${my(0,r.l,r.h)} ${mx(0,0,r.h)},${my(0,0,r.h)}`} fill={cc.device} stroke="#3b82f6" strokeWidth={0.8} opacity={0.4}/>
+            </g>
+          </svg>
+          <div style={{fontSize:14,fontWeight:700,color:"rgb(var(--text-body))"}}>{ r.name}</div>
+          <div style={{fontSize:11,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{r.people} people · {toDisplay(r.w)} × {toDisplay(r.l)}</div>
+        </div>
+      );
+    };
+
+    return (
+      <div style={{height:"calc(100vh - 72px)",overflowY:"auto",display:"flex",justifyContent:"center",alignItems:"center"}}>
+        <div style={{maxWidth:700,width:"100%",padding:"24px"}}>
+          <div style={{textAlign:"center",marginBottom:32}}>
+            <h2 style={{fontSize:22,fontWeight:700,color:"rgb(var(--text-heading))",marginBottom:6}}>Room Designer</h2>
+            <p style={{fontSize:14,color:"rgb(var(--text-muted))"}}>How would you like to set up your room?</p>
+          </div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {/* Option 1: Pick from Site Survey */}
+            <div style={{borderRadius:12,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+              <div style={{padding:"16px 20px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:40,height:40,borderRadius:10,background:"rgba(59,130,246,0.1)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" />
+                  </svg>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:600,color:"rgb(var(--text-heading))"}}>Pick from Site Survey</div>
+                  <div style={{fontSize:12,color:"rgb(var(--text-muted))"}}>Use room dimensions from your site survey</div>
+                </div>
+              </div>
+              {surveyRooms.length > 0 ? (
+                <div style={{padding:"0 20px 16px",display:"flex",flexWrap:"wrap",gap:8}}>
+                  {surveyRooms.map(r => (
+                    <button key={r.id} onClick={()=>applySurveyRoom(r.id)}
+                      style={{padding:"8px 14px",borderRadius:8,border:"1px solid rgb(var(--border))",background:"rgb(var(--forge-surface) / 0.4)",cursor:"pointer",textAlign:"left",transition:"all 0.2s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor="#3b82f6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";}}
+                    >
+                      <div style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))"}}>{ r.name}</div>
+                      <div style={{fontSize:11,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace"}}>{r.width}&apos; × {r.length}&apos; × {r.height}&apos;</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{padding:"0 20px 16px",fontSize:12,color:"rgb(var(--text-faint))"}}>No rooms found in site survey. Complete the site survey first.</div>
+              )}
+            </div>
+
+            {/* Option 2: Create your own room */}
+            <button
+              onClick={()=>setShowCustomRoom(true)}
+              style={{width:"100%",borderRadius:12,border:"1px solid rgb(var(--border))",overflow:"hidden",cursor:"pointer",background:"transparent",textAlign:"left",padding:0,transition:"all 0.2s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#22c55e";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";}}
+            >
+              <div style={{padding:"16px 20px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:40,height:40,borderRadius:10,background:"rgba(34,197,94,0.1)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+                  </svg>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:600,color:"rgb(var(--text-heading))"}}>Create your own Room</div>
+                  <div style={{fontSize:12,color:"rgb(var(--text-muted))"}}>Pick a template or enter custom dimensions</div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{marginLeft:"auto"}}>
+                  <path d="M6 3L11 8L6 13" stroke="rgb(var(--text-faint))" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </div>
+            </button>
+
+            {/* Room templates (shown after confirmation) */}
+            {showCustomRoom && (
+              <div style={{borderRadius:12,border:"1px solid rgb(var(--border))",overflow:"hidden",marginTop:-8}}>
+                {/* Room templates grid */}
+                <div style={{padding:"0 20px 16px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                    {roomTypes.map(renderRoomCard)}
+                  </div>
+                  {/* Custom dimensions button */}
+                  <button onClick={()=>{setRoomType("custom");setPlacedDevices([]);setStep(2);}}
+                    style={{width:"100%",marginTop:10,padding:"10px",borderRadius:8,border:"2px dashed rgb(var(--border))",background:"transparent",cursor:"pointer",textAlign:"center",transition:"all 0.2s"}}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#3b82f6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";}}
+                  >
+                    <div style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))"}}>Custom Dimensions</div>
+                    <div style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>Enter your own width, length, and height</div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 2: Design view ──────────────────────────────────────────────────
+  // Table geometry
+  const tH=0.76, tW=tableWidth;
+  const tL=tableLengthOverride !== null ? tableLengthOverride : (tableShape==="round"?Math.max(tW,tableSeats*0.3+0.6):Math.max(0.5,tableSeats*0.35));
+  const tcx=roomW/2, tcy=tableWallDist+tL/2;
+  const thw=tW/2, thl=tL/2;
+  const seatDist=tableShape==="round"?-0.28:0.35;
+
+  // ── Multiple-room detection — suppress guide values when walls form >1 disconnected shape ──
+  const multipleRooms = (() => {
+    if (drawnWalls.length < 2) return false;
+    const SNAP = 0.2;
+    const wallEps = drawnWalls.map(dev => {
+      const a = dev.wallAngle!, l = dev.w;
+      return [
+        { x: dev.x - Math.cos(a) * l / 2, y: dev.y - Math.sin(a) * l / 2 },
+        { x: dev.x + Math.cos(a) * l / 2, y: dev.y + Math.sin(a) * l / 2 },
+      ];
+    });
+    const adj: Set<number>[] = drawnWalls.map(() => new Set());
+    for (let i = 0; i < drawnWalls.length; i++) {
+      for (let j = i + 1; j < drawnWalls.length; j++) {
+        outer: for (const pi of wallEps[i]) {
+          for (const pj of wallEps[j]) {
+            if (Math.sqrt((pi.x-pj.x)**2 + (pi.y-pj.y)**2) < SNAP) {
+              adj[i].add(j); adj[j].add(i); break outer;
+            }
+          }
+        }
+      }
+    }
+    const visited = new Set<number>();
+    const queue = [0];
+    while (queue.length) { const c = queue.shift()!; if (visited.has(c)) continue; visited.add(c); adj[c].forEach(n => queue.push(n)); }
+    return visited.size < drawnWalls.length;
+  })();
+
+  // ── Display Size Guide (DISCAS 3% element height) ──────────────────────
+  // In custom blank mode, use drawn room dimensions; nil if nothing drawn
+  const hasRoomContent = !isCustomBlank || (showTable && !tableDeleted) || drawnBounds !== null;
+  const validRoom = hasRoomContent && !multipleRooms;
+  const effectiveDepth = isCustomBlank ? (drawnBounds ? drawnBounds.depth : 0) : roomL;
+  const effectiveWidth = isCustomBlank ? (drawnBounds ? drawnBounds.width : 0) : roomW;
+  const farthestViewer = !validRoom ? 0
+    : showTable && !tableDeleted ? tableWallDist + tL + Math.max(seatDist, 0.35)
+    : Math.max(0, effectiveDepth - 4);
+  const imageHeightIn = farthestViewer / 6 * 12;  // VR 6:1 = 3% element height, converted to inches
+  const ar16x9 = 16 / 9;
+  const reqDiagIn = imageHeightIn * Math.sqrt(ar16x9 * ar16x9 + 1);
+  const standardSizes = [43, 50, 55, 65, 75, 86, 98, 110];
+  const recommendedSize = standardSizes.find(s => s >= reqDiagIn) || standardSizes[standardSizes.length - 1];
+  const showDisplayGuide = farthestViewer > 0;
+
+  // ── Camera Guide ───────────────────────────────────────────────────────
+  const closestViewer = !validRoom ? 0
+    : showTable && !tableDeleted ? tableWallDist : 4;
+  const chairMargin = 1;  // 1 foot chair margin
+  const seatingWidth = !validRoom ? 0
+    : showTable && !tableDeleted ? tW + 2 * (Math.max(seatDist, 0.35) + chairMargin) : effectiveWidth;
+  const reqHFOV = closestViewer > 0
+    ? 2 * Math.atan((seatingWidth / 2) / closestViewer) * (180 / Math.PI)
+    : 0;
+  const showCameraGuide = closestViewer > 0 && farthestViewer > 0;
+
+  const render3DTable = () => {
+    if (tableShape==="round") {
+      const r=Math.max(tW,tL)/2;
+      const legOff=r*0.4;
+      const legPts:[number,number][]=[[-legOff,-legOff],[legOff,-legOff],[legOff,legOff],[-legOff,legOff]];
+      return (
+        <g>
+          <ellipse cx={sX(tcx,tcy,0)} cy={sY(tcx,tcy,0)+4} rx={r*32*scale} ry={r*19*scale} fill="#000" opacity={0.1}/>
+          {Array.from({length:tableSeats},(_,i)=>{
+            const angle=(i/tableSeats)*Math.PI*2-Math.PI/2;
+            const chX=tcx+(r+seatDist)*Math.cos(angle), chY=tcy+(r+seatDist)*Math.sin(angle);
+            if(chY<tcy){const ddx=chX-tcx,ddy=chY-tcy;const dir=Math.abs(ddx)>Math.abs(ddy)?(ddx>0?"right":"left"):"up";return <React.Fragment key={"cb"+i}>{renderChair(chX,chY,dir)}</React.Fragment>;}
+            return null;
+          })}
+          {legPts.map((lp,i)=>(
+            <line key={"rl"+i} x1={sX(tcx+lp[0],tcy+lp[1],0.05)} y1={sY(tcx+lp[0],tcy+lp[1],0.05)} x2={sX(tcx+lp[0]*0.6,tcy+lp[1]*0.6,tH)} y2={sY(tcx+lp[0]*0.6,tcy+lp[1]*0.6,tH)} stroke="rgb(var(--text-muted))" strokeWidth={2.5} strokeLinecap="round" opacity={0.5}/>
+          ))}
+          <ellipse cx={sX(tcx,tcy,tH-0.02)} cy={sY(tcx,tcy,tH-0.02)} rx={r*31*scale} ry={r*18*scale} fill="rgb(var(--text-muted))" opacity={0.15} stroke="#cbd5e1" strokeWidth={0.5}/>
+          <ellipse cx={sX(tcx,tcy,tH)} cy={sY(tcx,tcy,tH)} rx={r*30*scale} ry={r*17*scale} fill="url(#tableTopGrad)" stroke="#e2e8f0" strokeWidth={1}/>
+          <ellipse cx={sX(tcx-r*0.15,tcy-r*0.15,tH+0.01)} cy={sY(tcx-r*0.15,tcy-r*0.15,tH+0.01)} rx={r*15*scale} ry={r*9*scale} fill="#f1f5f9" opacity={0.15}/>
+          {Array.from({length:tableSeats},(_,i)=>{
+            const angle=(i/tableSeats)*Math.PI*2-Math.PI/2;
+            const chX=tcx+(r+seatDist)*Math.cos(angle), chY=tcy+(r+seatDist)*Math.sin(angle);
+            if(chY>=tcy){const ddx=chX-tcx,ddy=chY-tcy;const dir=Math.abs(ddx)>Math.abs(ddy)?(ddx>0?"right":"left"):"down";return <React.Fragment key={"cf"+i}>{renderChair(chX,chY,dir)}</React.Fragment>;}
+            return null;
+          })}
+        </g>
+      );
+    }
+    const taperIn=tableShape==="tapered"?tW*0.15:0;
+    const fhw=thw-taperIn, bhw=thw;
+    const topPts=[`${sX(tcx-fhw,tcy-thl,tH)},${sY(tcx-fhw,tcy-thl,tH)}`,`${sX(tcx+fhw,tcy-thl,tH)},${sY(tcx+fhw,tcy-thl,tH)}`,`${sX(tcx+bhw,tcy+thl,tH)},${sY(tcx+bhw,tcy+thl,tH)}`,`${sX(tcx-bhw,tcy+thl,tH)},${sY(tcx-bhw,tcy+thl,tH)}`].join(" ");
+    const frontPts=[`${sX(tcx-bhw,tcy+thl,tH-0.04)},${sY(tcx-bhw,tcy+thl,tH-0.04)}`,`${sX(tcx+bhw,tcy+thl,tH-0.04)},${sY(tcx+bhw,tcy+thl,tH-0.04)}`,`${sX(tcx+bhw,tcy+thl,tH)},${sY(tcx+bhw,tcy+thl,tH)}`,`${sX(tcx-bhw,tcy+thl,tH)},${sY(tcx-bhw,tcy+thl,tH)}`].join(" ");
+    const rightPts=[`${sX(tcx+fhw,tcy-thl,tH-0.04)},${sY(tcx+fhw,tcy-thl,tH-0.04)}`,`${sX(tcx+bhw,tcy+thl,tH-0.04)},${sY(tcx+bhw,tcy+thl,tH-0.04)}`,`${sX(tcx+bhw,tcy+thl,tH)},${sY(tcx+bhw,tcy+thl,tH)}`,`${sX(tcx+fhw,tcy-thl,tH)},${sY(tcx+fhw,tcy-thl,tH)}`].join(" ");
+    const legs:[[number,number]][]=[[[tcx-fhw+0.06,tcy-thl+0.06]],[[tcx+fhw-0.06,tcy-thl+0.06]],[[tcx-bhw+0.06,tcy+thl-0.06]],[[tcx+bhw-0.06,tcy+thl-0.06]]];
+    const seatsArr: {x:number;y:number;side:string}[] = [];
+    const sps=Math.floor(tableSeats/2), lo=tableSeats-sps*2;
+    for(let i=0;i<sps;i++){const t=(i+0.5)/sps;const lw=fhw+(bhw-fhw)*t;seatsArr.push({x:tcx-lw-seatDist,y:tcy-thl+tL*t,side:"left"});}
+    for(let i=0;i<sps;i++){const t=(i+0.5)/sps;const rw=fhw+(bhw-fhw)*t;seatsArr.push({x:tcx+rw+seatDist,y:tcy-thl+tL*t,side:"right"});}
+    if(lo>=1) seatsArr.push({x:tcx,y:tcy+thl+seatDist,side:"end"});
+    if(lo>=2) seatsArr.push({x:tcx,y:tcy-thl-seatDist,side:"front"});
+    return (
+      <g>
+        <polygon points={[`${sX(tcx-bhw-0.1,tcy-thl-0.1,0)},${sY(tcx-bhw-0.1,tcy-thl-0.1,0)+5}`,`${sX(tcx+bhw+0.1,tcy-thl-0.1,0)},${sY(tcx+bhw+0.1,tcy-thl-0.1,0)+5}`,`${sX(tcx+bhw+0.1,tcy+thl+0.1,0)},${sY(tcx+bhw+0.1,tcy+thl+0.1,0)+5}`,`${sX(tcx-bhw-0.1,tcy+thl+0.1,0)},${sY(tcx-bhw-0.1,tcy+thl+0.1,0)+5}`].join(" ")} fill="#000" opacity={0.08}/>
+        {seatsArr.filter(s=>s.y<tcy).map((s,i)=>{
+          const dir=s.side==="left"?"left":s.side==="right"?"right":"up";
+          return <React.Fragment key={"cb"+i}>{renderChair(s.x,s.y,dir)}</React.Fragment>;
+        })}
+        {legs.map((lp,i)=>(
+          <g key={"leg"+i}>
+            <line x1={sX(lp[0][0],lp[0][1],0.02)} y1={sY(lp[0][0],lp[0][1],0.02)} x2={sX(lp[0][0],lp[0][1],tH-0.02)} y2={sY(lp[0][0],lp[0][1],tH-0.02)} stroke="#cbd5e1" strokeWidth={3} strokeLinecap="round" opacity={0.6}/>
+            <line x1={sX(lp[0][0],lp[0][1],0.02)} y1={sY(lp[0][0],lp[0][1],0.02)} x2={sX(lp[0][0],lp[0][1],tH-0.02)} y2={sY(lp[0][0],lp[0][1],tH-0.02)} stroke="#e2e8f0" strokeWidth={1.5} strokeLinecap="round" opacity={0.3}/>
+          </g>
+        ))}
+        <polygon points={frontPts} fill="url(#tableFrontGrad)" stroke="#cbd5e1" strokeWidth={0.5}/>
+        <polygon points={rightPts} fill="url(#tableSideGrad)" stroke="#cbd5e1" strokeWidth={0.5}/>
+        <polygon points={topPts} fill="url(#tableTopGrad)" stroke="#e2e8f0" strokeWidth={1}/>
+        <polygon points={[`${sX(tcx-fhw*0.6,tcy-thl*0.7,tH+0.008)},${sY(tcx-fhw*0.6,tcy-thl*0.7,tH+0.008)}`,`${sX(tcx+fhw*0.3,tcy-thl*0.5,tH+0.008)},${sY(tcx+fhw*0.3,tcy-thl*0.5,tH+0.008)}`,`${sX(tcx+bhw*0.1,tcy+thl*0.2,tH+0.008)},${sY(tcx+bhw*0.1,tcy+thl*0.2,tH+0.008)}`,`${sX(tcx-bhw*0.5,tcy+thl*0.1,tH+0.008)},${sY(tcx-bhw*0.5,tcy+thl*0.1,tH+0.008)}`].join(" ")} fill="#f8fafc" opacity={0.12}/>
+        {seatsArr.filter(s=>s.y>=tcy).map((s,i)=>{
+          const dir=s.side==="left"?"left":s.side==="right"?"right":"down";
+          return <React.Fragment key={"cf"+i}>{renderChair(s.x,s.y,dir)}</React.Fragment>;
+        })}
+      </g>
+    );
+  };
+
+  const renderPlanTable = () => {
+    const cx=tableCenterX ?? roomW/2, cy2=tableWallDist+tL/2;
+    const hw=tW/2, hl=tL/2;
+    const cW = Math.max(6, 0.45 * planScale);
+    const cD = Math.max(5, 0.38 * planScale);
+    const cB = Math.max(2, 0.09 * planScale);
+    const rx = Math.max(1, cW * 0.18);
+
+    const chairClick = (idx: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (dragStartedRef.current) { dragStartedRef.current = false; return; }
+      toggleSelect(`chair:${idx}`, e.ctrlKey || e.metaKey);
+      setSelectedUid(null);
+    };
+    const tableClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (dragStartedRef.current) { dragStartedRef.current = false; return; }
+      toggleSelect("table", e.ctrlKey || e.metaKey);
+      setSelectedUid(null);
+    };
+
+    const renderSelectableChair = (idx: number, chairEl: React.ReactNode, cx2: number, cy2r: number) => {
+      if (deletedChairs.has(idx)) return null;
+      const isSel = isItemSelected(`chair:${idx}`);
+      const off = chairOffsets[idx];
+      const offPx = off ? off.dx * planScale : 0;
+      const offPy = off ? off.dy * planScale : 0;
+      return (
+        <g key={"sc"+idx} transform={`translate(${offPx},${offPy})`}
+          style={{cursor: "grab"}}
+          onClick={e => chairClick(idx, e)}
+          onMouseDown={e => handleMultiDragStart(`chair:${idx}`, e)}
+        >
+          {isSel && <circle cx={cx2} cy={cy2r} r={cW*0.8} fill="rgba(59,130,246,0.15)" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" />}
+          {chairEl}
+          {isSel && (
+            <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setDeletedChairs(prev => { const next = new Set(prev); next.add(idx); return next; }); clearSelection(); }}>
+              <circle cx={cx2+cW*0.6} cy={cy2r-cD*0.6} r={7} fill="#ef4444" />
+              <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cx2+cW*0.6},${cy2r-cD*0.6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round" />
+            </g>
+          )}
+        </g>
+      );
+    };
+
+    // Table edge resize handles (rendered on top of table body)
+    const renderTableResizeHandles = (x1: number, y1: number, w: number, h: number) => (
+      <g>
+        {/* Left edge */}
+        <line x1={pX(x1)} y1={pY(y1)} x2={pX(x1)} y2={pY(y1+h)} stroke="transparent" strokeWidth={8} cursor="ew-resize"
+          onMouseDown={e => handleTableResizeStart("left", e)}
+          onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+          onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+        {/* Right edge */}
+        <line x1={pX(x1+w)} y1={pY(y1)} x2={pX(x1+w)} y2={pY(y1+h)} stroke="transparent" strokeWidth={8} cursor="ew-resize"
+          onMouseDown={e => handleTableResizeStart("right", e)}
+          onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+          onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+        {/* Top edge */}
+        <line x1={pX(x1)} y1={pY(y1)} x2={pX(x1+w)} y2={pY(y1)} stroke="transparent" strokeWidth={8} cursor="ns-resize"
+          onMouseDown={e => handleTableResizeStart("top", e)}
+          onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+          onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+        {/* Bottom edge */}
+        <line x1={pX(x1)} y1={pY(y1+h)} x2={pX(x1+w)} y2={pY(y1+h)} stroke="transparent" strokeWidth={8} cursor="ns-resize"
+          onMouseDown={e => handleTableResizeStart("bottom", e)}
+          onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+          onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+        {/* Highlight active edge */}
+        {tableResizeDrag?.edge === "left" && <line x1={pX(x1)} y1={pY(y1)} x2={pX(x1)} y2={pY(y1+h)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+        {tableResizeDrag?.edge === "right" && <line x1={pX(x1+w)} y1={pY(y1)} x2={pX(x1+w)} y2={pY(y1+h)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+        {tableResizeDrag?.edge === "top" && <line x1={pX(x1)} y1={pY(y1)} x2={pX(x1+w)} y2={pY(y1)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+        {tableResizeDrag?.edge === "bottom" && <line x1={pX(x1)} y1={pY(y1+h)} x2={pX(x1+w)} y2={pY(y1+h)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+      </g>
+    );
+
+    if(tableShape==="round"){
+      const r=Math.max(tW,tL)/2;
+      const seatDistR=-0.28;
+      return (
+        <g>
+          {!tableDeleted && (() => {
+            const tSel = isItemSelected("table");
+            return (
+            <g style={{cursor:"grab"}} onClick={tableClick} onMouseDown={e => handleMultiDragStart("table", e)}>
+              {tSel && <circle cx={pX(cx)} cy={pY(cy2)} r={r*planScale+4} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="4 3" />}
+              <circle cx={pX(cx)} cy={pY(cy2)} r={r*planScale} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#3b82f6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
+              {/* Diameter label below round table */}
+              <text x={pX(cx)} y={pY(cy2)+r*planScale+14} textAnchor="middle" fontSize={10} fill="#94a3b8" fontFamily="'JetBrains Mono',monospace">⌀ {toDisplay(r*2)}</text>
+              {tSel && (
+                <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setTableDeleted(true); clearSelection(); }}>
+                  <circle cx={pX(cx)+r*planScale+8} cy={pY(cy2)-r*planScale} r={10} fill="#ef4444" />
+                  <path d="M-4,-4 L4,4 M4,-4 L-4,4" transform={`translate(${pX(cx)+r*planScale+8},${pY(cy2)-r*planScale})`} stroke="#fff" strokeWidth={1.5} strokeLinecap="round" />
+                </g>
+              )}
+            </g>
+            );
+          })()}
+          {Array.from({length:tableSeats},(_,i)=>{
+            const a=(i/tableSeats)*Math.PI*2-Math.PI/2;
+            const chairX=pX(cx+(r+seatDistR)*Math.cos(a)), chairY=pY(cy2+(r+seatDistR)*Math.sin(a));
+            const deg=a*180/Math.PI+90;
+            const chairEl = (
+              <g transform={`rotate(${deg},${chairX},${chairY})`}>
+                <rect x={chairX-cW/2} y={chairY-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>
+                <rect x={chairX-cW/2} y={chairY-cD/2-cB} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/>
+              </g>
+            );
+            return renderSelectableChair(i, chairEl, chairX, chairY);
+          })}
+          {!tableDeleted && renderTableResizeHandles(cx - r, cy2 - r, r * 2, r * 2)}
+        </g>
+      );
+    }
+    const taperIn=tableShape==="tapered"?tW*0.15:0;
+    const sps=Math.floor(tableSeats/2), lo=tableSeats-sps*2;
+    const sd=0.35;
+    let chairIdx = 0;
+    return (
+      <g>
+        {!tableDeleted && (() => {
+          const tSel = isItemSelected("table");
+          return (
+          <g style={{cursor:"grab"}} onClick={tableClick} onMouseDown={e => handleMultiDragStart("table", e)}>
+            {tSel && <rect x={pX(cx-hw)-4} y={pY(cy2-hl)-4} width={tW*planScale+8} height={tL*planScale+8} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="4 3" rx={4} />}
+            <polygon points={`${pX(cx-hw+taperIn)},${pY(cy2-hl)} ${pX(cx+hw-taperIn)},${pY(cy2-hl)} ${pX(cx+hw)},${pY(cy2+hl)} ${pX(cx-hw)},${pY(cy2+hl)}`} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#3b82f6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
+            {/* Width dimension — above table */}
+            <text x={pX(cx)} y={pY(cy2-hl)-6} textAnchor="middle" fontSize={10} fill="#94a3b8" fontFamily="'JetBrains Mono',monospace">{toDisplay(tW)}</text>
+            {/* Length dimension — right of table, rotated */}
+            <text x={pX(cx+hw)+16} y={pY(cy2)} textAnchor="middle" fontSize={10} fill="#94a3b8" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${pX(cx+hw)+16},${pY(cy2)})`}>{toDisplay(tL)}</text>
+            {tSel && (
+              <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setTableDeleted(true); clearSelection(); }}>
+                <circle cx={pX(cx+hw)+12} cy={pY(cy2-hl)} r={10} fill="#ef4444" />
+                <path d="M-4,-4 L4,4 M4,-4 L-4,4" transform={`translate(${pX(cx+hw)+12},${pY(cy2-hl)})`} stroke="#fff" strokeWidth={1.5} strokeLinecap="round" />
+              </g>
+            )}
+          </g>
+          );
+        })()}
+        {Array.from({length:sps},(_,i)=>{
+          const idx = chairIdx++;
+          const t=(i+0.5)/sps, lw=hw-taperIn+(taperIn)*t;
+          const cx2=pX(cx-lw-sd), cy3=pY(cy2-hl+tL*t);
+          const chairEl = (<g><rect x={cx2-cD/2} y={cy3-cW/2} width={cD} height={cW} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cD/2-cB} y={cy3-cW/2} width={cB} height={cW} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);
+          return renderSelectableChair(idx, chairEl, cx2, cy3);
+        })}
+        {Array.from({length:sps},(_,i)=>{
+          const idx = chairIdx++;
+          const t=(i+0.5)/sps, rw=hw-taperIn+(taperIn)*t;
+          const cx2=pX(cx+rw+sd), cy3=pY(cy2-hl+tL*t);
+          const chairEl = (<g><rect x={cx2-cD/2} y={cy3-cW/2} width={cD} height={cW} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2+cD/2} y={cy3-cW/2} width={cB} height={cW} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);
+          return renderSelectableChair(idx, chairEl, cx2, cy3);
+        })}
+        {lo>=1&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2+hl+sd);const chairEl=(<g><rect x={cx2-cW/2} y={cy3-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cW/2} y={cy3+cD/2} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
+        {lo>=2&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2-hl-sd);const chairEl=(<g><rect x={cx2-cW/2} y={cy3-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cW/2} y={cy3-cD/2-cB} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
+        {!tableDeleted && renderTableResizeHandles(cx - hw, cy2 - hl, tW, tL)}
+      </g>
+    );
+  };
+
+  return (
+    <div className="animate-fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px)"}}>
+    <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+      {/* ── Left Sidebar ─────────────────────────────────── */}
+      <div style={{width:420,background:cc.panel,borderRight:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,minHeight:0}}>
+        <div style={{padding:"14px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
+          <div style={{fontSize:20,fontWeight:600,color:"rgb(var(--text-body))"}}>Room Designer</div>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto",overflowX:"hidden",minHeight:0}}>
+          {/* Room Configuration */}
+          <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Room Configuration</div>
+            {/* Draw Walls */}
+            <div style={{marginTop:12,opacity:1}}>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <button onClick={()=>{setDragNewDoor(null);setDragNewTable(null);setDragNewChair(null);setIsDrawingWall(true);setWallPoints([]);setWallMousePos(null);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:isDrawingWall && !isScalingFloorPlan ? "rgba(59,130,246,0.15)" : "rgb(var(--forge-surface) / 0.4)",border:"1px solid " + (isDrawingWall && !isScalingFloorPlan ? "rgba(59,130,246,0.4)" : "rgb(var(--border))"),borderRadius:5,cursor:"pointer",textAlign:"left"}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Draw Walls</div>
+                    <div style={{fontSize:11,color:"#475569"}}>Click points on canvas to draw</div>
+                  </div>
+                </button>
+                {isDrawingWall && (
+                  <button
+                    onClick={() => setOrthoMode(v => !v)}
+                    title="Ortho mode — constrain to horizontal/vertical (F8)"
+                    style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:32,height:32,padding:0,background:orthoMode?"#3b82f6":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(orthoMode?"#3b82f6":"rgb(var(--border))"),borderRadius:6,cursor:"pointer",transition:"all 0.15s"}}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <rect x="2" y="2" width="16" height="16" rx="2" fill={orthoMode?"#3b82f6":"transparent"}/>
+                      <path d="M5 15V6" stroke={orthoMode?"#fff":"#64748b"} strokeWidth="2" strokeLinecap="round"/>
+                      <path d="M5 15h9" stroke={orthoMode?"#fff":"#64748b"} strokeWidth="2" strokeLinecap="round"/>
+                      <rect x="4" y="11" width="4" height="4" rx="0.5" fill={orthoMode?"#fff":"#64748b"} opacity="0.9"/>
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onMouseDown={()=>{setIsDrawingWall(false);setWallPoints([]);setWallMousePos(null);setDragNewTable(null);setDragNewChair(null);setDragNewDoor({type:"door",active:true,wall:null,pos:0.5});}}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDoor?.type==="door"?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDoor?.type==="door"?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                  onMouseEnter={e=>{if(!dragNewDoor)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDoor)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><circle cx="15" cy="12" r="0.5" fill="#64748b"/></svg>
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Door</div>
+                    <div style={{fontSize:11,color:"#475569"}}>Drag onto a wall</div>
+                  </div>
+                </button>
+                <button
+                  onMouseDown={()=>{setIsDrawingWall(false);setWallPoints([]);setWallMousePos(null);setDragNewTable(null);setDragNewChair(null);setDragNewDoor({type:"window",active:true,wall:null,pos:0.5});}}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDoor?.type==="window"?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDoor?.type==="window"?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                  onMouseEnter={e=>{if(!dragNewDoor)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDoor)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/></svg>
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Window</div>
+                    <div style={{fontSize:11,color:"#475569"}}>Drag onto a wall</div>
+                  </div>
+                </button>
+                <button
+                  onMouseDown={()=>{setIsDrawingWall(false);setWallPoints([]);setWallMousePos(null);setDragNewDoor(null);setDragNewChair(null);setDragNewTable({active:true,worldX:roomW/2,worldY:roomL*0.2});}}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewTable?.active?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewTable?.active?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                  onMouseEnter={e=>{if(!dragNewTable)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewTable)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="18" height="4" rx="1"/><path d="M6 11v6M18 11v6"/></svg>
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Table</div>
+                    <div style={{fontSize:11,color:"#475569"}}>Drag onto the floor</div>
+                  </div>
+                </button>
+                <button
+                  onMouseDown={()=>{setIsDrawingWall(false);setWallPoints([]);setWallMousePos(null);setDragNewDoor(null);setDragNewTable(null);setDragNewChair({active:true,worldX:roomW/2,worldY:roomL/2});}}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewChair?.active?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewChair?.active?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                  onMouseEnter={e=>{if(!dragNewChair)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewChair)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M6 20v-6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v6"/><path d="M4 10V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Chair</div>
+                    <div style={{fontSize:11,color:"#475569"}}>Drag onto the floor</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+            {/* Import Floor Plan */}
+            <div style={{marginTop:12,opacity:1}}>
+              {!floorPlanImg ? (
+                <div style={{border:"2px dashed rgb(var(--border))",borderRadius:8,padding:"16px 12px",textAlign:"center"}}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-faint))" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{margin:"0 auto 8px"}}>
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <div style={{fontSize:12,color:"rgb(var(--text-muted))",marginBottom:8}}>Drop or upload a floor plan</div>
+                  <div style={{fontSize:10,color:"rgb(var(--text-faint))",marginBottom:10}}>JPG, JPEG, or PNG formats</div>
+                  <button onClick={()=>floorPlanInputRef.current?.click()} style={{padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-body))",cursor:"pointer"}}>Upload</button>
+                  <input ref={floorPlanInputRef} type="file" accept=".jpg,.jpeg,.png" onChange={handleFloorPlanUpload} style={{display:"none"}} />
+                </div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{fontSize:12,color:"rgb(var(--text-muted))"}}>Floor plan loaded</div>
+                  {!isScalingFloorPlan ? (
+                    <div style={{display:"flex",gap:4}}>
+                      <button onClick={()=>{setIsScalingFloorPlan(true);setScaleRefPoints([]);setIsDrawingWall(true);}} style={{flex:1,padding:"6px 8px",borderRadius:5,fontSize:11,fontWeight:600,background:"rgba(59,130,246,0.1)",border:"1px solid rgba(59,130,246,0.3)",color:"#60a5fa",cursor:"pointer"}}>Set Scale</button>
+                      <button onClick={()=>{setFloorPlanImg(null);setIsScalingFloorPlan(false);setScaleRefPoints([]);}} style={{padding:"6px 8px",borderRadius:5,fontSize:11,background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",cursor:"pointer"}}>Remove</button>
+                    </div>
+                  ) : (
+                    <div style={{padding:"8px 10px",background:"rgba(59,130,246,0.1)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:5,fontSize:12,color:"#60a5fa"}}>
+                      {scaleRefPoints.length === 0 && "Click two points on the plan for a known distance"}
+                      {scaleRefPoints.length === 1 && "Click the second point"}
+                      {scaleRefPoints.length === 2 && (
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          <div>Enter the real distance between the two points:</div>
+                          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                            <input type="number" step="0.1" value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder="e.g. 15" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(59,130,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+                            <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>ft</span>
+                          </div>
+                          <div style={{display:"flex",gap:4}}>
+                            <button onClick={applyScaleReference} style={{flex:1,padding:"5px",borderRadius:4,fontSize:11,fontWeight:600,background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Apply Scale</button>
+                            <button onClick={()=>{setIsScalingFloorPlan(false);setScaleRefPoints([]);setIsDrawingWall(false);}} style={{padding:"5px 8px",borderRadius:4,fontSize:11,background:"none",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",cursor:"pointer"}}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <input type="range" min={10} max={200} step={1} value={floorPlanScale} onChange={e=>setFloorPlanScale(parseFloat(e.target.value))} style={{width:"100%",accentColor:"#3b82f6",height:4} as React.CSSProperties}/>
+                  <div style={{fontSize:10,color:"rgb(var(--text-faint))",textAlign:"center"}}>Scale: {floorPlanScale.toFixed(0)} px/ft</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Display Size Guide */}
+          <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Display Size Guide</div>
+            <div style={{padding:10,background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveRoomW) : "—"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Room depth</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveRoomL) : "—"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Farthest viewer</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"#60a5fa"}}>{validRoom ? toDisplay(farthestViewer) : "—"}</span>
+              </div>
+              <div style={{borderTop:"1px solid rgba(59,130,246,0.1)",margin:"6px 0",paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))"}}>
+                <span>Req. image height</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? `${imageHeightIn.toFixed(1)}"` : "—"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Calc. diagonal</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? `${reqDiagIn.toFixed(1)}"` : "—"}</span>
+              </div>
+              <div style={{borderTop:"1px solid rgba(59,130,246,0.15)",margin:"6px 0",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:15,fontWeight:600,color:"rgb(var(--text-body))"}}>Recommended</span>
+                <span style={{fontSize:18,fontWeight:700,color:"#60a5fa",fontFamily:"'JetBrains Mono',monospace"}}>{validRoom ? `${recommendedSize}"` : "—"}</span>
+              </div>
+              <div style={{fontSize:13,color:"#475569",marginTop:4}}>AVIXA DISCAS · 3% element height · 16:9</div>
+            </div>
+          </div>
+
+          {/* Camera Guide */}
+          <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Camera Guide</div>
+            <div style={{padding:10,background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.15)",borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Seating width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(seatingWidth) : "—"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Closest viewer</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(closestViewer) : "—"}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
+                <span>Farthest viewer</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(farthestViewer) : "—"}</span>
+              </div>
+              <div style={{borderTop:"1px solid rgba(34,197,94,0.15)",margin:"6px 0",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:15,fontWeight:600,color:"rgb(var(--text-body))"}}>Req. HFOV</span>
+                <span style={{fontSize:18,fontWeight:700,color:"#22c55e",fontFamily:"'JetBrains Mono',monospace"}}>{validRoom ? `${reqHFOV.toFixed(1)}°` : "—"}</span>
+              </div>
+              <div style={{fontSize:13,color:"#475569",marginTop:4}}>Horizontal FOV to cover closest viewers</div>
+            </div>
+          </div>
+
+          {/* Devices */}
+          <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Place Equipment</div>
+            {/* Device Categories */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:12,marginBottom:8}}>
+              {deviceCatalog.map(c=>(
+                <button key={c.cat} onClick={()=>setActiveCat(c.cat)} style={{padding:"4px 10px",borderRadius:4,fontSize:12,fontWeight:activeCat===c.cat?600:400,background:activeCat===c.cat?"rgba(59,130,246,0.15)":"transparent",border:"1px solid "+(activeCat===c.cat?"rgba(59,130,246,0.3)":"transparent"),color:activeCat===c.cat?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer"}}>{c.cat}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {deviceCatalog.find(c=>c.cat===activeCat)?.items.map(item=>(
+                <button key={item.id}
+                  onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                  onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                >
+                  {item.icon==="confbar" ? <Video size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                   : item.icon==="soundbar" ? <SoundbarIcon size={20} color="rgb(var(--text-muted))"/>
+                   : item.icon==="monitor" ? <Monitor size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                   : item.icon==="presentation" ? <Presentation size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                   : item.icon==="tv" ? <LedWallIcon size={20} color="rgb(var(--text-muted))"/>
+                   : <span style={{fontSize:18}}>{item.icon}</span>}
+                  <div>
+                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>{item.name}</div>
+                    <div style={{fontSize:11,color:"#475569"}}>{item.wall} mount · {toDisplay(item.w)}×{toDisplay(item.h)} · drag to place</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+
+
+        </div>
+      </div>
+
+      {/* ── Canvas sections (scrollable) ───────────────── */}
+      <div style={{flex:1,overflowY:"auto"}}>
+        <>
+        {/* Row 1: Video Calculations */}
+        <div style={{flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:2,padding:"4px 10px",borderBottom:"1px solid rgb(var(--border))"}}>
+            <button onClick={()=>{setMoveMode(v=>!v);setPanMode(false);}} title="Move selected objects" style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"5px 8px",background:moveMode?"rgba(59,130,246,0.15)":"none",border:"1px solid",borderColor:moveMode?"rgb(59,130,246)":"transparent",borderRadius:5,color:moveMode?"rgb(59,130,246)":"rgb(var(--text-muted))",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=moveMode?"rgba(59,130,246,0.2)":"rgba(59,130,246,0.08)"} onMouseLeave={e=>e.currentTarget.style.background=moveMode?"rgba(59,130,246,0.15)":"none"}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg></button>
+            <button onClick={()=>{setPanMode(v=>!v);setMoveMode(false);}} title="Pan canvas" style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"5px 8px",background:panMode?"rgba(59,130,246,0.15)":"none",border:"1px solid",borderColor:panMode?"rgb(59,130,246)":"transparent",borderRadius:5,color:panMode?"rgb(59,130,246)":"rgb(var(--text-muted))",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=panMode?"rgba(59,130,246,0.2)":"rgba(59,130,246,0.08)"} onMouseLeave={e=>e.currentTarget.style.background=panMode?"rgba(59,130,246,0.15)":"none"}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8.5"/><path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
+          </div>
+          <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations</div>
+        </div>
+        <div style={{display:"flex",height:"50vh",minHeight:400}}>
+        {/* Floor Plan */}
+        <div ref={canvasContainerRef} style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
+        <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
+          style={{background:cc.card,userSelect:"none",cursor:isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default"}}
+          onMouseMove={e=>{if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
+          onMouseUp={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseLeave={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseDown={e=>{if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
+          onClick={e=>{if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();}}}>
+
+          {viewMode==="plan" ? (
+            <g>
+              <defs>
+                <clipPath id="roomClip">
+                  <rect x={pX(0)} y={pY(0)} width={roomW*planScale} height={roomL*planScale}/>
+                </clipPath>
+              </defs>
+              {!isCustomBlank && (
+                <>
+                  <rect x={pX(0)} y={pY(0)} width={roomW*planScale} height={roomL*planScale} fill="none" stroke="none" />
+                  {/* Individual wall lines — skip deleted walls */}
+                  {!deletedWalls.has("north") && <line x1={pX(0)} y1={pY(0)} x2={pX(roomW)} y2={pY(0)} stroke={selectedEdge==="north"?"#3b82f6":"#b0b5be"} strokeWidth={selectedEdge==="north"?3:2} />}
+                  {!deletedWalls.has("south") && <line x1={pX(0)} y1={pY(roomL)} x2={pX(roomW)} y2={pY(roomL)} stroke={selectedEdge==="south"?"#3b82f6":"#b0b5be"} strokeWidth={selectedEdge==="south"?3:2} />}
+                  {!deletedWalls.has("west") && <line x1={pX(0)} y1={pY(0)} x2={pX(0)} y2={pY(roomL)} stroke={selectedEdge==="west"?"#3b82f6":"#b0b5be"} strokeWidth={selectedEdge==="west"?3:2} />}
+                  {!deletedWalls.has("east") && <line x1={pX(roomW)} y1={pY(0)} x2={pX(roomW)} y2={pY(roomL)} stroke={selectedEdge==="east"?"#3b82f6":"#b0b5be"} strokeWidth={selectedEdge==="east"?3:2} />}
+                  {/* Dashed lines for deleted walls */}
+                  {deletedWalls.has("north") && <line x1={pX(0)} y1={pY(0)} x2={pX(roomW)} y2={pY(0)} stroke="#475569" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />}
+                  {deletedWalls.has("south") && <line x1={pX(0)} y1={pY(roomL)} x2={pX(roomW)} y2={pY(roomL)} stroke="#475569" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />}
+                  {deletedWalls.has("west") && <line x1={pX(0)} y1={pY(0)} x2={pX(0)} y2={pY(roomL)} stroke="#475569" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />}
+                  {deletedWalls.has("east") && <line x1={pX(roomW)} y1={pY(0)} x2={pX(roomW)} y2={pY(roomL)} stroke="#475569" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />}
+                </>
+              )}
+              {/* Floor plan image overlay */}
+              {floorPlanImg && (
+                <image
+                  href={floorPlanImg}
+                  x={pX(floorPlanOffset.x)}
+                  y={pY(floorPlanOffset.y)}
+                  width={roomW * planScale}
+                  height={roomL * planScale}
+                  preserveAspectRatio="xMidYMid meet"
+                  opacity={0.5}
+                  clipPath="url(#roomClip)"
+                />
+              )}
+              {!isCustomBlank ? (
+                <g clipPath="url(#roomClip)">
+                </g>
+              ) : (
+                <g>
+                  {/* Faint reference grid for custom blank mode */}
+                  {Array.from({length:Math.ceil(roomW)+1},(_,i)=>(<line key={"cgw"+i} x1={pX(i)} y1={pY(0)} x2={pX(i)} y2={pY(roomL)} stroke="rgb(var(--border))" strokeWidth={0.2} opacity={0.3}/>))}
+                  {Array.from({length:Math.ceil(roomL)+1},(_,i)=>(<line key={"cgl"+i} x1={pX(0)} y1={pY(i)} x2={pX(roomW)} y2={pY(i)} stroke="rgb(var(--border))" strokeWidth={0.2} opacity={0.3}/>))}
+                  {/* Origin crosshair */}
+                  <line x1={pX(roomW/2)-8} y1={pY(roomL/2)} x2={pX(roomW/2)+8} y2={pY(roomL/2)} stroke="rgb(var(--text-faint))" strokeWidth={0.5} opacity={0.5}/>
+                  <line x1={pX(roomW/2)} y1={pY(roomL/2)-8} x2={pX(roomW/2)} y2={pY(roomL/2)+8} stroke="rgb(var(--text-faint))" strokeWidth={0.5} opacity={0.5}/>
+                  {/* Drawn room dimensions — oriented along wall direction */}
+                  {drawnWalls.length > 0 && (() => {
+                    // Compute centroid of all wall endpoints to determine "inside"
+                    const allPts: {x:number;y:number}[] = [];
+                    drawnWalls.forEach(dev => {
+                      const a = dev.wallAngle!;
+                      const l = dev.w;
+                      allPts.push(
+                        { x: dev.x - Math.cos(a) * l / 2, y: dev.y - Math.sin(a) * l / 2 },
+                        { x: dev.x + Math.cos(a) * l / 2, y: dev.y + Math.sin(a) * l / 2 },
+                      );
+                    });
+                    const cx = allPts.reduce((s, p) => s + p.x, 0) / allPts.length;
+                    const cy = allPts.reduce((s, p) => s + p.y, 0) / allPts.length;
+                    return (
+                      <g>
+                        {drawnWalls.map(dev => {
+                          const angle = dev.wallAngle!;
+                          const len = dev.w;
+                          const mx = dev.x, my = dev.y;
+                          // Perpendicular to wall (two possible directions)
+                          const nx = -Math.sin(angle), ny = Math.cos(angle);
+                          // Pick the outward direction (away from centroid)
+                          const toCenterX = cx - mx, toCenterY = cy - my;
+                          const dot = toCenterX * nx + toCenterY * ny;
+                          const outX = dot > 0 ? -nx : nx;
+                          const outY = dot > 0 ? -ny : ny;
+                          // Label position: offset outward from wall midpoint
+                          const labelOff = 0.55;
+                          const lx = mx + outX * labelOff;
+                          const ly = my + outY * labelOff;
+                          // Rotation angle for text to align with wall direction
+                          let textAngleDeg = angle * (180 / Math.PI);
+                          // Keep text readable (not upside down)
+                          if (textAngleDeg > 90) textAngleDeg -= 180;
+                          if (textAngleDeg < -90) textAngleDeg += 180;
+                          return (
+                            <text
+                              key={"wdim"+dev.uid}
+                              x={pX(lx)}
+                              y={pY(ly)}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fontSize={9}
+                              fill="rgb(var(--text-subtle))"
+                              fontFamily="'JetBrains Mono',monospace"
+                              transform={`rotate(${textAngleDeg},${pX(lx)},${pY(ly)})`}
+                            >{toDisplay(len)}</text>
+                          );
+                        })}
+                      </g>
+                    );
+                  })()}
+                </g>
+              )}
+              {/* Scale reference line */}
+              {isScalingFloorPlan && scaleRefPoints.length > 0 && (
+                <g>
+                  {scaleRefPoints.map((pt, i) => (
+                    <circle key={i} cx={pX(pt.x)} cy={pY(pt.y)} r={4} fill="#22c55e" stroke="#fff" strokeWidth={1} />
+                  ))}
+                  {scaleRefPoints.length === 2 && (
+                    <line x1={pX(scaleRefPoints[0].x)} y1={pY(scaleRefPoints[0].y)} x2={pX(scaleRefPoints[1].x)} y2={pY(scaleRefPoints[1].y)} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 3" />
+                  )}
+                </g>
+              )}
+              {/* Wall drawing preview — show placed points and line to cursor */}
+              {isDrawingWall && !isScalingFloorPlan && wallPoints.length > 0 && (
+                <g>
+                  {/* Lines between placed points */}
+                  {wallPoints.map((pt, i) => i > 0 ? (
+                    <line key={"wp"+i} x1={pX(wallPoints[i-1].x)} y1={pY(wallPoints[i-1].y)} x2={pX(pt.x)} y2={pY(pt.y)} stroke="#3b82f6" strokeWidth={2} opacity={0.4} />
+                  ) : null)}
+                  {/* Line from last point to cursor + live dimension label */}
+                  {wallMousePos && (() => {
+                    const last = wallPoints[wallPoints.length - 1];
+                    const x1 = pX(last.x), y1 = pY(last.y);
+                    const x2 = pX(wallMousePos.x), y2 = pY(wallMousePos.y);
+                    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+                    const dx = wallMousePos.x - last.x, dy = wallMousePos.y - last.y;
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    const label = toDisplay(len);
+                    return (
+                      <g>
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" opacity={0.6} />
+                        <rect x={mx - 26} y={my - 9} width={52} height={16} rx={4} fill="rgb(var(--forge-bg))" stroke="#3b82f6" strokeWidth={1} opacity={0.92} />
+                        <text x={mx} y={my + 3} textAnchor="middle" fontSize={9} fontWeight={600} fill="#60a5fa" fontFamily="'JetBrains Mono',monospace">{label}</text>
+                      </g>
+                    );
+                  })()}
+                  {/* Point markers */}
+                  {wallPoints.map((pt, i) => (
+                    <circle key={"wpc"+i} cx={pX(pt.x)} cy={pY(pt.y)} r={i === 0 ? 5 : 3} fill={i === 0 ? "#3b82f6" : "#60a5fa"} stroke="#fff" strokeWidth={1} />
+                  ))}
+                  {/* Snap indicator on first point */}
+                  {wallPoints.length >= 2 && wallMousePos && (() => {
+                    const first = wallPoints[0];
+                    const dx = wallMousePos.x - first.x;
+                    const dy = wallMousePos.y - first.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    return dist < WALL_SNAP_DIST ? (
+                      <circle cx={pX(first.x)} cy={pY(first.y)} r={8} fill="none" stroke="#22c55e" strokeWidth={2} opacity={0.8} />
+                    ) : null;
+                  })()}
+                </g>
+              )}
+              {!isCustomBlank && (
+                <>
+                  <text x={pX(roomW/2)} y={Math.max(10, pY(0)-20)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
+                  <text x={pX(roomW/2)} y={pY(roomL)+22} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+                  <text x={pX(0)-18} y={pY(roomL/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${pX(0)-18},${pY(roomL/2)})`}>{toDisplay(roomL)}</text>
+                </>
+              )}
+
+              {/* Draggable wall edge handles */}
+              {!isDrawingWall && !isCustomBlank && (
+                <g>
+                  {/* North wall (top) */}
+                  <line x1={pX(0)} y1={pY(0)} x2={pX(roomW)} y2={pY(0)} stroke="transparent" strokeWidth={8} cursor="ns-resize"
+                    onMouseDown={e=>handleWallEdgeDown("north",e)}
+                    onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+                    onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+                  {/* South wall (bottom) */}
+                  <line x1={pX(0)} y1={pY(roomL)} x2={pX(roomW)} y2={pY(roomL)} stroke="transparent" strokeWidth={8} cursor="ns-resize"
+                    onMouseDown={e=>handleWallEdgeDown("south",e)}
+                    onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+                    onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+                  {/* West wall (left) */}
+                  <line x1={pX(0)} y1={pY(0)} x2={pX(0)} y2={pY(roomL)} stroke="transparent" strokeWidth={8} cursor="ew-resize"
+                    onMouseDown={e=>handleWallEdgeDown("west",e)}
+                    onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+                    onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+                  {/* East wall (right) */}
+                  <line x1={pX(roomW)} y1={pY(0)} x2={pX(roomW)} y2={pY(roomL)} stroke="transparent" strokeWidth={8} cursor="ew-resize"
+                    onMouseDown={e=>handleWallEdgeDown("east",e)}
+                    onMouseEnter={e=>{(e.target as SVGLineElement).setAttribute("stroke","rgba(59,130,246,0.4)")}}
+                    onMouseLeave={e=>{(e.target as SVGLineElement).setAttribute("stroke","transparent")}} />
+                  {/* Highlight active drag edge */}
+                  {wallDragEdge === "north" && <line x1={pX(0)} y1={pY(0)} x2={pX(roomW)} y2={pY(0)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+                  {wallDragEdge === "south" && <line x1={pX(0)} y1={pY(roomL)} x2={pX(roomW)} y2={pY(roomL)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+                  {wallDragEdge === "west" && <line x1={pX(0)} y1={pY(0)} x2={pX(0)} y2={pY(roomL)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+                  {wallDragEdge === "east" && <line x1={pX(roomW)} y1={pY(0)} x2={pX(roomW)} y2={pY(roomL)} stroke="#3b82f6" strokeWidth={3} pointerEvents="none" />}
+                  {/* Delete button on selected wall */}
+                  {selectedEdge && !deletedWalls.has(selectedEdge) && (() => {
+                    let bx = 0, by = 0;
+                    if (selectedEdge === "north") { bx = pX(roomW/2); by = pY(0) - 16; }
+                    else if (selectedEdge === "south") { bx = pX(roomW/2); by = pY(roomL) + 16; }
+                    else if (selectedEdge === "west") { bx = pX(0) - 16; by = pY(roomL/2); }
+                    else if (selectedEdge === "east") { bx = pX(roomW) + 16; by = pY(roomL/2); }
+                    return (
+                      <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setDeletedWalls(prev => { const next = new Set(prev); next.add(selectedEdge!); return next; }); setSelectedEdge(null); }}>
+                        <circle cx={bx} cy={by} r={10} fill="#ef4444" />
+                        <path d="M-4,-4 L4,4 M4,-4 L-4,4" transform={`translate(${bx},${by})`} stroke="#fff" strokeWidth={1.5} strokeLinecap="round" />
+                      </g>
+                    );
+                  })()}
+                  {/* Restore button on deleted wall */}
+                  {selectedEdge && deletedWalls.has(selectedEdge) && (() => {
+                    let bx = 0, by = 0;
+                    if (selectedEdge === "north") { bx = pX(roomW/2); by = pY(0) - 16; }
+                    else if (selectedEdge === "south") { bx = pX(roomW/2); by = pY(roomL) + 16; }
+                    else if (selectedEdge === "west") { bx = pX(0) - 16; by = pY(roomL/2); }
+                    else if (selectedEdge === "east") { bx = pX(roomW) + 16; by = pY(roomL/2); }
+                    return (
+                      <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setDeletedWalls(prev => { const next = new Set(prev); next.delete(selectedEdge!); return next; }); setSelectedEdge(null); }}>
+                        <circle cx={bx} cy={by} r={10} fill="#22c55e" />
+                        <path d="M-4,0 L0,4 L4,-3" transform={`translate(${bx},${by})`} stroke="#fff" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </g>
+                    );
+                  })()}
+                </g>
+              )}
+
+              {showTable && (() => {
+                const tcx2 = pX(tableCenterX ?? roomW/2);
+                const tcy2 = pY(tableWallDist + tL/2);
+                const tRotHandleR = Math.max(tW, tL) * planScale / 2 + 20;
+                const tRotRad = (tableRotation - 90) * Math.PI / 180;
+                const trhx = tcx2 + tRotHandleR * Math.cos(tRotRad);
+                const trhy = tcy2 + tRotHandleR * Math.sin(tRotRad);
+                const tSel = isItemSelected("table");
+                return (
+                  <>
+                    <g transform={`rotate(${tableRotation},${tcx2},${tcy2})`}>
+                      {renderPlanTable()}
+                    </g>
+                    {/* Table edit-size handle — pencil/resize button */}
+                    {tSel && (
+                      <>
+                        <line x1={tcx2} y1={tcy2} x2={trhx} y2={trhy} stroke="#16a34a" strokeWidth={1} strokeDasharray="2 2" opacity={0.6}/>
+                        <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setTableEditW(String(Math.round(tW * 10) / 10)); setTableEditL(String(Math.round(tL * 10) / 10)); setShowTableSizeEditor(true); }}>
+                          <circle cx={trhx} cy={trhy} r={13} fill="#16a34a" stroke="#fff" strokeWidth={1.5}/>
+                          <text x={trhx} y={trhy} textAnchor="middle" dominantBaseline="central" fontSize={8} fontWeight="700" fill="#fff" style={{pointerEvents:"none",userSelect:"none"}}>W/L</text>
+                        </g>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Table drag preview from sidebar */}
+              {dragNewTable?.active && (() => {
+                const pw = 4 * planScale;
+                const ph = 8 * planScale;
+                return (
+                  <g opacity={0.5}>
+                    <rect x={pX(dragNewTable.worldX) - pw/2} y={pY(dragNewTable.worldY) - ph/2} width={pw} height={ph} rx={3} fill="#cbd5e1" fillOpacity={0.3} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="4 3" />
+                    <text x={pX(dragNewTable.worldX)} y={pY(dragNewTable.worldY)} textAnchor="middle" dominantBaseline="central" fontSize={9} fill="#3b82f6">Table</text>
+                  </g>
+                );
+              })()}
+
+              {/* Device drag preview from sidebar */}
+              {dragNewDevice?.active && (() => {
+                const item = dragNewDevice.item;
+                const isWallMount = item.wall === "front" || item.wall === "side";
+                const isCeiling = item.wall === "ceiling";
+                if (isWallMount && dragNewDevice.wall) {
+                  const wall = dragNewDevice.wall;
+                  const dw = item.w * planScale;
+                  let rx2: number, ry2: number, rw2: number, rh2: number;
+                  const wx = Math.max(0, Math.min(roomW, dragNewDevice.worldX));
+                  const wy = Math.max(0, Math.min(roomL, dragNewDevice.worldY));
+                  if (wall === "north") { rx2 = pX(wx) - dw / 2; ry2 = pY(0) + 2; rw2 = dw; rh2 = 6; }
+                  else if (wall === "south") { rx2 = pX(wx) - dw / 2; ry2 = pY(roomL) - 8; rw2 = dw; rh2 = 6; }
+                  else if (wall === "west") { rx2 = pX(0) + 2; ry2 = pY(wy) - dw / 2; rw2 = 6; rh2 = dw; }
+                  else { rx2 = pX(roomW) - 8; ry2 = pY(wy) - dw / 2; rw2 = 6; rh2 = dw; }
+                  return (
+                    <g opacity={0.6}>
+                      <rect x={rx2!} y={ry2!} width={rw2!} height={rh2!} rx={2} fill="#3b82f6" fillOpacity={0.3} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" />
+                      <text x={rx2! + rw2! / 2} y={ry2! - 6} textAnchor="middle" fontSize={7} fill="#3b82f6">{item.name}</text>
+                    </g>
+                  );
+                }
+                if (isCeiling) {
+                  return (
+                    <g opacity={0.6}>
+                      <circle cx={pX(dragNewDevice.worldX)} cy={pY(dragNewDevice.worldY)} r={8} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" />
+                      <text x={pX(dragNewDevice.worldX)} y={pY(dragNewDevice.worldY) - 12} textAnchor="middle" fontSize={7} fill="#3b82f6">{item.name}</text>
+                    </g>
+                  );
+                }
+                // Floor device
+                const fw = item.w * planScale;
+                const fh = item.h * planScale;
+                return (
+                  <g opacity={0.6}>
+                    <rect x={pX(dragNewDevice.worldX) - fw / 2} y={pY(dragNewDevice.worldY) - fh / 2} width={fw} height={fh} rx={3} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" />
+                    <text x={pX(dragNewDevice.worldX)} y={pY(dragNewDevice.worldY) - fh / 2 - 6} textAnchor="middle" fontSize={7} fill="#3b82f6">{item.name}</text>
+                  </g>
+                );
+              })()}
+
+              {/* Chair drag preview from sidebar */}
+              {dragNewChair?.active && (() => {
+                const cW2 = Math.max(6, 1.48 * planScale);
+                const rx2 = Math.max(1, cW2 * 0.18);
+                const cx2 = pX(dragNewChair.worldX);
+                const cy2 = pY(dragNewChair.worldY);
+                return (
+                  <g opacity={0.5}>
+                    <rect x={cx2-cW2/2} y={cy2-cW2/2} width={cW2} height={cW2} rx={rx2} fill="#d1d5db" stroke="#3b82f6" strokeWidth={1} />
+                  </g>
+                );
+              })()}
+
+              {/* Drawn walls */}
+              {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
+                const angle = dev.wallAngle!;
+                const len = dev.w;
+                const x1 = dev.x - Math.cos(angle) * len / 2;
+                const y1 = dev.y - Math.sin(angle) * len / 2;
+                const x2 = dev.x + Math.cos(angle) * len / 2;
+                const y2 = dev.y + Math.sin(angle) * len / 2;
+                const isSelected = selectedUid === dev.uid || selectedUids.has(dev.uid);
+                const midX = pX(dev.x);
+                const midY = pY(dev.y);
+                return (
+                  <g key={dev.uid}
+                    style={{cursor:isDrawingWall?"crosshair":"grab",pointerEvents:isDrawingWall?"none":"auto"}}
+                    onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)}
+                    onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}}
+                  >
+                    {(() => {
+                      const wallThickPx = (dev.h ?? 0.15) * planScale;
+                      const halfOff = wallThickPx / 2;
+                      const px1 = pX(x1), py1 = pY(y1), px2 = pX(x2), py2 = pY(y2);
+                      const perpX = -Math.sin(angle) * halfOff;
+                      const perpY = Math.cos(angle) * halfOff;
+                      const extX = Math.cos(angle) * halfOff;
+                      const extY = Math.sin(angle) * halfOff;
+                      const ex1 = px1 - extX, ey1 = py1 - extY;
+                      const ex2 = px2 + extX, ey2 = py2 + extY;
+                      const wallColor = isSelected ? "#3b82f6" : "rgb(var(--text-muted))";
+                      const rectD = `M${ex1+perpX},${ey1+perpY} L${ex2+perpX},${ey2+perpY} L${ex2-perpX},${ey2-perpY} L${ex1-perpX},${ey1-perpY} Z`;
+                      return (
+                        <>
+                          {isSelected && <path d={rectD} fill="#3b82f6" fillOpacity={0.12} stroke="#3b82f6" strokeWidth={2} strokeLinejoin="miter"/>}
+                          <path d={rectD} fill={cc.card} stroke="none"/>
+                          <line x1={ex1+perpX} y1={ey1+perpY} x2={ex2+perpX} y2={ey2+perpY} stroke={wallColor} strokeWidth={1} strokeLinecap="butt"/>
+                          <line x1={ex1-perpX} y1={ey1-perpY} x2={ex2-perpX} y2={ey2-perpY} stroke={wallColor} strokeWidth={1} strokeLinecap="butt"/>
+                        </>
+                      );
+                    })()}
+                    {isSelected && (
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setPlacedDoors(prev=>prev.filter(d=>d.wallUid!==dev.uid));setSelectedUid(null);}}>
+                        <circle cx={midX} cy={midY-12} r={7} fill="#ef4444"/>
+                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${midX},${midY-12})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* Placed doors and windows — rendered after drawn walls so glass line is not covered by wall fill */}
+              {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
+                const c = getDoorCoords(door);
+                const dSel = isItemSelected(`door:${door.id}`);
+                const color = door.type === "window" ? "#64748b" : "#64748b";
+                const selColor = "#3b82f6";
+                const px1 = pX(c.x1), py1 = pY(c.y1), px2 = pX(c.x2), py2 = pY(c.y2);
+                const segLen = Math.sqrt((px2-px1)**2 + (py2-py1)**2);
+
+                if (door.type === "window") {
+                  const npx = -(py2-py1)/segLen, npy = (px2-px1)/segLen;
+                  // Match jamb marks exactly to the drawn wall's face lines, or use a sensible default for room walls
+                  let halfThick = 4;
+                  if (door.wall === "drawn" && door.wallUid) {
+                    const wDev = placedDevices.find(d => d.uid === door.wallUid);
+                    if (wDev) halfThick = (wDev.h ?? 0.333) * planScale / 2;
+                  }
+                  const wColor = dSel ? selColor : "#94a3b8";
+                  const midX = (px1+px2)/2, midY = (py1+py2)/2;
+                  return (
+                    <g key={`door-${door.id}`} style={{cursor:"grab"}}
+                      onClick={e => { e.stopPropagation(); if (dragStartedRef.current) { dragStartedRef.current = false; return; } toggleSelect(`door:${door.id}`, e.ctrlKey || e.metaKey); setSelectedUid(null); }}
+                      onMouseDown={e => { e.stopPropagation(); pushUndo(); setDoorDragId(door.id); setDoorDragStart({svgX:0,svgY:0,origWall:door.wall,origPos:door.pos}); }}
+                    >
+                      {dSel && <line x1={px1} y1={py1} x2={px2} y2={py2} stroke={selColor} strokeWidth={halfThick*2+4} strokeLinecap="butt" opacity={0.1}/>}
+                      {/* Glass line along wall centerline */}
+                      <line x1={px1} y1={py1} x2={px2} y2={py2} stroke={wColor} strokeWidth={1.5} strokeLinecap="butt"/>
+                      {/* End jamb lines spanning exactly from one wall face to the other */}
+                      <line x1={px1-npx*halfThick} y1={py1-npy*halfThick} x2={px1+npx*halfThick} y2={py1+npy*halfThick} stroke={wColor} strokeWidth={1.5} strokeLinecap="square"/>
+                      <line x1={px2-npx*halfThick} y1={py2-npy*halfThick} x2={px2+npx*halfThick} y2={py2+npy*halfThick} stroke={wColor} strokeWidth={1.5} strokeLinecap="square"/>
+                      {dSel && (
+                        <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.filter(d => d.id !== door.id)); clearSelection(); }}>
+                          <circle cx={midX} cy={midY-14} r={7} fill="#ef4444" />
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${midX},${midY-14})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round" />
+                        </g>
+                      )}
+                    </g>
+                  );
+                }
+
+                // Architectural door symbol: jambs + panel + quarter-circle arc
+                const wdx = (px2-px1)/segLen, wdy = (py2-py1)/segLen;
+                // Hinge end: flipped swaps which endpoint is the hinge
+                const hx = door.flipped ? px2 : px1, hy = door.flipped ? py2 : py1;
+                const ox = door.flipped ? px1 : px2, oy = door.flipped ? py1 : py2;
+                // Inward perpendicular towards room centre
+                const rcx = pX(isCustomBlank && drawnBounds ? drawnBounds.centerX : roomW/2);
+                const rcy = pY(isCustomBlank && drawnBounds ? drawnBounds.centerY : roomL/2);
+                const midX = (px1+px2)/2, midY = (py1+py2)/2;
+                const p1x = -wdy, p1y = wdx;
+                const dot = p1x*(rcx-midX) + p1y*(rcy-midY);
+                const perp = dot >= 0 ? {x:p1x,y:p1y} : {x:wdy,y:-wdx};
+                const panX = hx + perp.x * segLen;
+                const panY = hy + perp.y * segLen;
+                const cross = (panX-hx)*(oy-hy) - (panY-hy)*(ox-hx);
+                const sweep = cross > 0 ? 1 : 0;
+                const stroke = dSel ? selColor : color;
+
+                return (
+                  <g key={`door-${door.id}`}
+                    style={{cursor: doorDragId === door.id ? "grabbing" : "grab"}}
+                    onClick={e => { e.stopPropagation(); if (dragStartedRef.current) { dragStartedRef.current = false; return; } toggleSelect(`door:${door.id}`, e.ctrlKey || e.metaKey); setSelectedUid(null); }}
+                    onMouseDown={e => { e.stopPropagation(); pushUndo(); setDoorDragId(door.id); setDoorDragStart({svgX:0,svgY:0,origWall:door.wall,origPos:door.pos}); }}
+                  >
+                    {dSel && <path d={`M ${hx} ${hy} L ${panX} ${panY} A ${segLen} ${segLen} 0 0 ${sweep} ${ox} ${oy}`} fill="none" stroke={selColor} strokeWidth={10} strokeLinecap="round" opacity={0.12}/>}
+                    {/* Door panel + swing arc */}
+                    <path d={`M ${hx} ${hy} L ${panX} ${panY} A ${segLen} ${segLen} 0 0 ${sweep} ${ox} ${oy}`} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinecap="round"/>
+                    {/* Controls when selected */}
+                    {dSel && (
+                      <>
+                        {/* Flip button */}
+                        <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.map(d => d.id === door.id ? {...d, flipped: !d.flipped} : d)); }}>
+                          <circle cx={midX} cy={midY - 14} r={7} fill="#3b82f6"/>
+                          <path d="M-3,0 L0,-2.5 L0,-1 L3,-1 L3,1 L0,1 L0,2.5 Z" transform={`translate(${midX},${midY-14})`} fill="#fff"/>
+                        </g>
+                        {/* Delete button */}
+                        <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.filter(d => d.id !== door.id)); clearSelection(); }}>
+                          <circle cx={midX} cy={midY + 14} r={7} fill="#ef4444" />
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${midX},${midY+14})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round" />
+                        </g>
+                      </>
+                    )}
+                  </g>
+                );
+              })}
+              {/* Preview of door being dragged from sidebar */}
+              {dragNewDoor?.active && dragNewDoor.wall && (() => {
+                const preview: PlacedDoor = { id: 0, wall: dragNewDoor.wall, pos: dragNewDoor.pos, width: dragNewDoor.type === "window" ? 2.0 : 3.0, type: dragNewDoor.type, wallUid: dragNewDoor.wallUid };
+                const c = getDoorCoords(preview);
+                const ppx1 = pX(c.x1), ppy1 = pY(c.y1), ppx2 = pX(c.x2), ppy2 = pY(c.y2);
+                const pSegLen = Math.sqrt((ppx2-ppx1)**2 + (ppy2-ppy1)**2);
+                if (dragNewDoor.type === "window") {
+                  const pnpx = -(ppy2-ppy1)/pSegLen, pnpy = (ppx2-ppx1)/pSegLen;
+                  let pHalfThick = 4;
+                  if (dragNewDoor.wallUid) {
+                    const wDev = placedDevices.find(d => d.uid === dragNewDoor.wallUid);
+                    if (wDev) pHalfThick = (wDev.h ?? 0.333) * planScale / 2;
+                  }
+                  return (
+                    <g opacity={0.7}>
+                      <line x1={ppx1} y1={ppy1} x2={ppx2} y2={ppy2} stroke="#3b82f6" strokeWidth={1.5} strokeLinecap="butt"/>
+                      <line x1={ppx1-pnpx*pHalfThick} y1={ppy1-pnpy*pHalfThick} x2={ppx1+pnpx*pHalfThick} y2={ppy1+pnpy*pHalfThick} stroke="#3b82f6" strokeWidth={1.5} strokeLinecap="square"/>
+                      <line x1={ppx2-pnpx*pHalfThick} y1={ppy2-pnpy*pHalfThick} x2={ppx2+pnpx*pHalfThick} y2={ppy2+pnpy*pHalfThick} stroke="#3b82f6" strokeWidth={1.5} strokeLinecap="square"/>
+                    </g>
+                  );
+                }
+                const pwdx = (ppx2-ppx1)/pSegLen, pwdy = (ppy2-ppy1)/pSegLen;
+                const prcx = pX(isCustomBlank && drawnBounds ? drawnBounds.centerX : roomW/2);
+                const prcy = pY(isCustomBlank && drawnBounds ? drawnBounds.centerY : roomL/2);
+                const pmidX = (ppx1+ppx2)/2, pmidY = (ppy1+ppy2)/2;
+                const pp1x = -pwdy, pp1y = pwdx;
+                const pdot = pp1x*(prcx-pmidX) + pp1y*(prcy-pmidY);
+                const pperp = pdot >= 0 ? {x:pp1x,y:pp1y} : {x:pwdy,y:-pwdx};
+                const ppanX = ppx1 + pperp.x * pSegLen, ppanY = ppy1 + pperp.y * pSegLen;
+                const pcross = (ppanX-ppx1)*(ppy2-ppy1) - (ppanY-ppy1)*(ppx2-ppx1);
+                const psweep = pcross > 0 ? 1 : 0;
+                return (
+                  <g opacity={0.6}>
+                    <line x1={ppx1 - pperp.x*5} y1={ppy1 - pperp.y*5} x2={ppx1 + pperp.x*5} y2={ppy1 + pperp.y*5} stroke="#3b82f6" strokeWidth={2} strokeLinecap="round"/>
+                    <line x1={ppx2 - pperp.x*5} y1={ppy2 - pperp.y*5} x2={ppx2 + pperp.x*5} y2={ppy2 + pperp.y*5} stroke="#3b82f6" strokeWidth={2} strokeLinecap="round"/>
+                    <path d={`M ${ppx1} ${ppy1} L ${ppanX} ${ppanY} A ${pSegLen} ${pSegLen} 0 0 ${psweep} ${ppx2} ${ppy2}`} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeLinecap="round"/>
+                  </g>
+                );
+              })()}
+
+              {/* (Wall drawing preview is now rendered above with the grid) */}
+
+              {placedDevices.filter(d => d.wall !== "ceiling" && d.mountWall !== "ceiling" && !(d.id === "wall-partition" && d.wallAngle !== undefined)).map(dev=>{
+                const isSelected=selectedUid===dev.uid||selectedUids.has(dev.uid), isDragging=dragUid===dev.uid;
+                const devPx=pX(dev.x), devPy=pY(dev.y||0.1);
+                if(dev.type==="display"){
+                  const dw=dev.w*planScale, mw=dev.mountWall||"north";
+                  let rx2:number,ry2:number,rw2:number,rh2:number;
+                  if(mw==="north")      {rx2=devPx-dw/2;ry2=pY(0)+2;rw2=dw;rh2=6;}
+                  else if(mw==="south") {rx2=devPx-dw/2;ry2=pY(roomL)-8;rw2=dw;rh2=6;}
+                  else if(mw==="west")  {rx2=pX(0)+2;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
+                  else                  {rx2=pX(roomW)-8;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {isSelected&&<rect x={rx2-4} y={ry2-4} width={rw2+8} height={rh2+8} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
+                    {/* Blue boundary */}
+                    <rect x={rx2-1} y={ry2-1} width={rw2+2} height={rh2+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                    {/* Bezel */}
+                    <rect x={rx2} y={ry2} width={rw2} height={rh2} rx={0.5} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={1}/>
+                    {/* Screen inset */}
+                    <rect x={rx2+1} y={ry2+0.5} width={rw2-2} height={rh2-1} rx={0.3} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
+                    <text x={rx2+rw2/2} y={ry2+rh2+12} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                if(dev.type==="camera"){
+                  const mw=dev.mountWall||"north", isCeiling=dev.wall==="ceiling";
+                  const isSoundbarCam = dev.id==="soundbar-cam";
+                  const hfovDeg = dev.hfov || 70;
+                  const halfAngle = (hfovDeg / 2) * Math.PI / 180;
+                  // FOV reach = distance from wall to opposite wall along that axis
+                  const fovReachN = roomL * planScale;
+                  const fovReachW = roomW * planScale;
+                  let cpx:number,cpy:number;
+                  // Room boundary in plan-view pixels
+                  const rxMin=pX(0), rxMax=pX(roomW), ryMin=pY(0), ryMax=pY(roomL);
+                  // Clip a line from (ox,oy)->(ex,ey) to the room rect, return clamped endpoint
+                  const clipToRoom=(ox:number,oy:number,ex:number,ey:number)=>{
+                    let t=1;const dx=ex-ox,dy=ey-oy;
+                    if(dx!==0){if(dx>0){t=Math.min(t,(rxMax-ox)/dx);}else{t=Math.min(t,(rxMin-ox)/dx);}}
+                    if(dy!==0){if(dy>0){t=Math.min(t,(ryMax-oy)/dy);}else{t=Math.min(t,(ryMin-oy)/dy);}}
+                    t=Math.max(0,t);
+                    return {x:ox+dx*t,y:oy+dy*t};
+                  };
+                  let fovL1:{x:number,y:number}|null=null, fovL2:{x:number,y:number}|null=null;
+                  if(isCeiling){cpx=devPx;cpy=pY(dev.y);}
+                  else if(mw==="north"){
+                    cpx=devPx;cpy=pY(0.1);
+                    const reach=Math.min(fovReachN,200);const spread=reach*Math.tan(halfAngle);
+                    fovL1=clipToRoom(cpx,cpy,cpx-spread,cpy+reach); fovL2=clipToRoom(cpx,cpy,cpx+spread,cpy+reach);
+                  } else if(mw==="south"){
+                    cpx=devPx;cpy=pY(roomL-0.1);
+                    const reach=Math.min(fovReachN,200);const spread=reach*Math.tan(halfAngle);
+                    fovL1=clipToRoom(cpx,cpy,cpx-spread,cpy-reach); fovL2=clipToRoom(cpx,cpy,cpx+spread,cpy-reach);
+                  } else if(mw==="west"){
+                    cpx=pX(0.1);cpy=pY(dev.y);
+                    const reach=Math.min(fovReachW,200);const spread=reach*Math.tan(halfAngle);
+                    fovL1=clipToRoom(cpx,cpy,cpx+reach,cpy-spread); fovL2=clipToRoom(cpx,cpy,cpx+reach,cpy+spread);
+                  } else {
+                    cpx=pX(roomW-0.1);cpy=pY(dev.y);
+                    const reach=Math.min(fovReachW,200);const spread=reach*Math.tan(halfAngle);
+                    fovL1=clipToRoom(cpx,cpy,cpx-reach,cpy-spread); fovL2=clipToRoom(cpx,cpy,cpx-reach,cpy+spread);
+                  }
+                  const fovLines = fovL1&&fovL2 ? (()=>{
+                    const arcR=20;
+                    const a1=Math.atan2(fovL1.y-cpy,fovL1.x-cpx);
+                    const a2=Math.atan2(fovL2.y-cpy,fovL2.x-cpx);
+                    const ax1=cpx+arcR*Math.cos(a1), ay1=cpy+arcR*Math.sin(a1);
+                    const ax2=cpx+arcR*Math.cos(a2), ay2=cpy+arcR*Math.sin(a2);
+                    const largeArc=hfovDeg>180?1:0;
+                    // Direction camera faces into room
+                    const facingA=mw==="north"?Math.PI/2:mw==="south"?-Math.PI/2:mw==="west"?0:Math.PI;
+                    // Sweep should go from a1 to a2 through the facing direction
+                    // Use cross product to determine if sweep=1 gives the correct arc
+                    let sweep=1;
+                    // Check if midpoint of sweep=1 arc is on the facing side
+                    const midSweep1=(a1+a2)/2+((a2-a1+Math.PI*3)%(Math.PI*2)-Math.PI>0?0:Math.PI);
+                    // Simpler: just check if going a1->a2 clockwise (sweep=1) passes through facing
+                    let diff=(a2-a1+Math.PI*2)%(Math.PI*2);
+                    const midA1=a1+diff/2;
+                    const midA1Alt=a1+diff/2+Math.PI;
+                    // Which mid-angle is closer to facing direction?
+                    const distMid=Math.abs(((midA1-facingA+Math.PI*3)%(Math.PI*2))-Math.PI);
+                    const distAlt=Math.abs(((midA1Alt-facingA+Math.PI*3)%(Math.PI*2))-Math.PI);
+                    if(distMid>distAlt) sweep=0;
+                    const arcPath=`M${ax1} ${ay1} A${arcR} ${arcR} 0 ${largeArc} ${sweep} ${ax2} ${ay2}`;
+                    // Label at midpoint of arc on the facing side
+                    const labelA=sweep===1?midA1:midA1Alt;
+                    const lx=cpx+(arcR+10)*Math.cos(labelA), ly=cpy+(arcR+10)*Math.sin(labelA);
+                    return <>
+                      <line x1={cpx} y1={cpy} x2={fovL1.x} y2={fovL1.y} stroke={dev.color} strokeWidth={1} strokeDasharray="6 4" opacity={0.5}/>
+                      <line x1={cpx} y1={cpy} x2={fovL2.x} y2={fovL2.y} stroke={dev.color} strokeWidth={1} strokeDasharray="6 4" opacity={0.5}/>
+                      <path d={arcPath} fill="none" stroke={dev.color} strokeWidth={1} opacity={0.6}/>
+                      <text x={lx} y={ly+4} textAnchor="middle" fontSize={8} fill={dev.color} fontFamily="'JetBrains Mono',monospace" opacity={0.8}>{hfovDeg}°</text>
+                    </>;
+                  })() : null;
+                  if(isSoundbarCam){
+                    // Top-down view: slim rectangle (width × depth) like Rally Bar from above
+                    const barW=dev.w*planScale, barD=Math.max(dev.h*planScale, 6);
+                    const isHoriz=mw==="north"||mw==="south";
+                    const bw=isHoriz?barW:barD, bh=isHoriz?barD:barW;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={cpx-bw/2-3} y={cpy-bh/2-3} width={bw+6} height={bh+6} rx={4} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {fovLines}
+                      {/* Green boundary outline */}
+                      <rect x={cpx-bw/2-1} y={cpy-bh/2-1} width={bw+2} height={bh+2} rx={3} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Main body */}
+                      <rect x={cpx-bw/2} y={cpy-bh/2} width={bw} height={bh} rx={2} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.8}/>
+                      {/* Fabric mesh area */}
+                      <rect x={cpx-bw*0.44} y={cpy-bh*0.35} width={bw*0.88} height={bh*0.7} rx={1.5} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.3}/>
+                      <text x={cpx} y={cpy-(isHoriz?bh:bw)/2-6} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  if(isCeiling){
+                    const purpleColor="#a855f7";
+                    const cw=16, ch=10;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={cpx-cw/2-3} y={cpy-ch/2-3} width={cw+6} height={ch+6} rx={5} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Purple boundary */}
+                      <rect x={cpx-cw/2-1} y={cpy-ch/2-1} width={cw+2} height={ch+2} rx={4} fill="none" stroke={purpleColor+"88"} strokeWidth={0.8}/>
+                      {/* Body */}
+                      <rect x={cpx-cw/2} y={cpy-ch/2} width={cw} height={ch} rx={3} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.8}/>
+                      <text x={cpx} y={cpy-ch/2-6} textAnchor="middle" fontSize={7} fill={purpleColor} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  {const camRot=mw==="west"?90:mw==="east"?-90:mw==="south"?180:0;
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {isSelected&&<rect x={cpx-14} y={cpy-10} width={28} height={20} rx={4} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" transform={`rotate(${camRot},${cpx},${cpy})`}/>}
+                    {fovLines}
+                    <g transform={`rotate(${camRot},${cpx},${cpy})`}>
+                      <rect x={cpx-8} y={cpy-5} width={16} height={10} rx={2.5} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                    </g>
+                    <text x={cpx} y={cpy-(mw==="west"||mw==="east"?12:14)} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                  </g>);}
+                }
+                // Floor furniture (chairs, tables, etc.)
+                if (dev.type === "furniture" && (dev.mountWall === "floor" || !dev.mountWall)) {
+                  const fw = dev.w * planScale;
+                  const fh = dev.h * planScale;
+                  const isChair = dev.id === "side-chair" || dev.id === "exec-chair";
+                  const cW2 = Math.max(6, fw);
+                  const cD2 = Math.max(5, fh);
+                  const cB2 = Math.max(2, cD2 * 0.2);
+                  const rx2 = Math.max(1, cW2 * 0.18);
+                  const fpx = devPx, fpy = pY(dev.y);
+                  const rot = dev.rotation || 0;
+                  if (isChair) {
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
+                      {isSelected && <rect x={fpx-cW2/2-3} y={fpy-cW2/2-3} width={cW2+6} height={cW2+6} rx={3} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      <rect x={fpx-cW2/2} y={fpy-cW2/2} width={cW2} height={cW2} rx={rx2} fill="#d1d5db" stroke={isSelected?"#3b82f6":"#b0b5be"} strokeWidth={isSelected?1.2:0.8}/>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={fpx+cW2*0.8} cy={fpy-cW2*0.8} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${fpx+cW2*0.8},${fpy-cW2*0.8})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
+                    </g>);
+                  }
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
+                    {isSelected && <rect x={fpx-fw/2-3} y={fpy-fh/2-3} width={fw+6} height={fh+6} rx={3} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                    <g transform={`rotate(${rot},${fpx},${fpy})`}>
+                      <rect x={fpx-fw/2} y={fpy-fh/2} width={fw} height={fh} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke={isSelected?"#3b82f6":"rgb(var(--text-muted))"} strokeWidth={1}/>
+                    </g>
+                    {dev.id !== "conf-table" && dev.id !== "round-table" && <text x={fpx} y={fpy+3} textAnchor="middle" fontSize={7} fill="rgb(var(--text-muted))">{dev.name}</text>}
+                    {isSelected && (
+                      <>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={fpx+fw/2+8} cy={fpy-fh/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${fpx+fw/2+8},${fpy-fh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setFurnitureEditUid(dev.uid);setFurnitureEditW(String(Math.round(dev.w*100)/100));setFurnitureEditL(String(Math.round(dev.h*100)/100));setShowFurnitureEditor(true);}}>
+                          <circle cx={fpx-fw/2-8} cy={fpy-fh/2-4} r={7} fill="#3b82f6"/>
+                          <path d="M-2.5,2 L2,-2.5 L3,-1.5 L-1.5,3 Z M-3,3 L-2.5,2 L-1.5,3 Z" transform={`translate(${fpx-fw/2-8},${fpy-fh/2-4})`} fill="#fff" stroke="none"/>
+                        </g>
+                      </>
+                    )}
+                  </g>);
+                }
+                if(dev.type==="mic"||dev.type==="speaker"){
+                  const mpx=devPx, mpy=pY(dev.y);
+                  const covR=dev.wall==="ceiling"?roomH*0.5*planScale:8;
+                  const isCeilingSpeaker=dev.type==="speaker"&&dev.wall==="ceiling";
+                  if(isCeilingSpeaker){
+                    const r=8;
+                    // EPR = 2 × H × tan(θ/2), H = ceiling height - ear height (4 ft)
+                    const dispDeg=dev.dispersion||90;
+                    const hAboveEar=roomH-4;
+                    const eprFt=2*hAboveEar*Math.tan((dispDeg/2)*Math.PI/180);
+                    const eprPx=(eprFt/2)*planScale;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<circle cx={mpx} cy={mpy} r={r+5} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Coverage area - EPR based */}
+                      <circle cx={mpx} cy={mpy} r={eprPx} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
+                      {/* Speaker body - outer rim */}
+                      <circle cx={mpx} cy={mpy} r={r} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Grille rings */}
+                      <circle cx={mpx} cy={mpy} r={r*0.75} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                      <circle cx={mpx} cy={mpy} r={r*0.5} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                      {/* Center cone */}
+                      <circle cx={mpx} cy={mpy} r={r*0.25} fill="#334155" stroke="#475569" strokeWidth={0.3}/>
+                      <text x={mpx} y={mpy-r-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Ceiling mic array - Shure MXA920 style square tile
+                  const isCeilingMic=dev.type==="mic"&&dev.wall==="ceiling";
+                  if(isCeilingMic){
+                    const tileS=Math.max(dev.w*planScale, 12);
+                    const cShape=dev.covShape||"round";
+                    const cRadius=(dev.covDiameter||6)/2*planScale;
+                    const cHalfW=(dev.covW||6)/2*planScale;
+                    const cHalfL=(dev.covL||6)/2*planScale;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={mpx-tileS/2-4} y={mpy-tileS/2-4} width={tileS+8} height={tileS+8} rx={3} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Coverage area - round or square */}
+                      {cShape==="round"
+                        ? <circle cx={mpx} cy={mpy} r={cRadius} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
+                        : <rect x={mpx-cHalfW} y={mpy-cHalfL} width={cHalfW*2} height={cHalfL*2} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
+                      }
+                      {/* Tile body */}
+                      <rect x={mpx-tileS/2} y={mpy-tileS/2} width={tileS} height={tileS} rx={1.5} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Mic hole grid - 3x3 */}
+                      {[-1,0,1].map(r=>[-1,0,1].map(c=><circle key={`${r}${c}`} cx={mpx+c*tileS*0.25} cy={mpy+r*tileS*0.25} r={1} fill="#334155"/>))}
+                      <text x={mpx} y={mpy-tileS/2-5} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Table mic - Shure MXA310 style
+                  const isTableMic=dev.id==="table-mic";
+                  if(isTableMic){
+                    const mr=7;
+                    const tmCovR=(dev.covDiameter||2)/2*planScale;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<circle cx={mpx} cy={mpy} r={mr+4} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Coverage area */}
+                      <circle cx={mpx} cy={mpy} r={tmCovR} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
+                      {/* Outer body */}
+                      <circle cx={mpx} cy={mpy} r={mr} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* LED ring */}
+                      <circle cx={mpx} cy={mpy} r={mr*0.7} fill="none" stroke={dev.color} strokeWidth={0.6} opacity={0.5}/>
+                      {/* Inner ring */}
+                      <circle cx={mpx} cy={mpy} r={mr*0.45} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                      {/* Center dot */}
+                      <circle cx={mpx} cy={mpy} r={mr*0.15} fill="#334155"/>
+                      <text x={mpx} y={mpy-mr-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Wall speaker - JBL Control 25-1 style box
+                  const isWallSpk=dev.id==="soundbar"&&dev.wall==="front";
+                  if(isWallSpk){
+                    const mw2=dev.mountWall||"north";
+                    const spkW=dev.w*planScale, spkD=Math.max(dev.w*0.9*planScale, 5);
+                    const isHoriz=mw2==="north"||mw2==="south";
+                    const bw=isHoriz?spkW:spkD, bh=isHoriz?spkD:spkW;
+                    let sx=mpx, sy=mpy;
+                    if(mw2==="north") sy=pY(0)+bh/2;
+                    else if(mw2==="south") sy=pY(roomL)-bh/2;
+                    else if(mw2==="west") sx=pX(0)+bw/2;
+                    else sx=pX(roomW)-bw/2;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Speaker body */}
+                      <rect x={sx-bw/2} y={sy-bh/2} width={bw} height={bh} rx={1.5} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Grille */}
+                      <rect x={sx-bw*0.35} y={sy-bh*0.35} width={bw*0.7} height={bh*0.7} rx={1} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.3}/>
+                      <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {isSelected&&<circle cx={mpx} cy={mpy} r={covR+6} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                    {dev.wall==="ceiling"&&<circle cx={mpx} cy={mpy} r={covR} fill={dev.color} opacity={0.05} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>}
+                    <circle cx={mpx} cy={mpy} r={5} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1.5}/>
+                    <circle cx={mpx} cy={mpy} r={2} fill={dev.color}/>
+                    <text x={mpx} y={mpy-10} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                if(dev.type==="control"){
+                  const mw=dev.mountWall||"floor";
+                  let cpx2:number,cpy2:number;
+                  if(mw==="north")      {cpx2=devPx;cpy2=pY(0.05);}
+                  else if(mw==="south") {cpx2=devPx;cpy2=pY(roomL-0.05);}
+                  else if(mw==="west")  {cpx2=pX(0.05);cpy2=pY(dev.y);}
+                  else if(mw==="east")  {cpx2=pX(roomW-0.05);cpy2=pY(dev.y);}
+                  else                  {cpx2=devPx;cpy2=pY(dev.y);}
+                  // TSW-1070 style wall touch panel
+                  const isWallPanel=dev.id==="touch-panel";
+                  if(isWallPanel){
+                    const pw=dev.w*planScale, pd=Math.max(4, dev.h*planScale*0.3);
+                    const isHoriz=mw==="north"||mw==="south";
+                    const bw=isHoriz?pw:pd, bh=isHoriz?pd:pw;
+                    let sx=cpx2, sy=cpy2;
+                    if(mw==="north") sy=pY(0)+bh/2;
+                    else if(mw==="south") sy=pY(roomL)-bh/2;
+                    else if(mw==="west") sx=pX(0)+bw/2;
+                    else if(mw==="east") sx=pX(roomW)-bw/2;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Purple boundary */}
+                      <rect x={sx-bw/2-1} y={sy-bh/2-1} width={bw+2} height={bh+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Panel body - dark glass */}
+                      <rect x={sx-bw/2} y={sy-bh/2} width={bw} height={bh} rx={1} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.8}/>
+                      {/* Screen */}
+                      <rect x={sx-bw/2+1} y={sy-bh/2+0.5} width={bw-2} height={bh-1} rx={0.5} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.3}/>
+                      <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Logitech Tap style table touch panel
+                  const isTableTouch=dev.id==="table-touch";
+                  if(isTableTouch){
+                    const tw=dev.w*planScale, th=dev.h*planScale;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={cpx2-tw/2-3} y={cpy2-th/2-3} width={tw+6} height={th+6} rx={4} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Purple boundary */}
+                      <rect x={cpx2-tw/2-1} y={cpy2-th/2-1} width={tw+2} height={th+2} rx={3} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Body - dark rounded rectangle */}
+                      <rect x={cpx2-tw/2} y={cpy2-th/2} width={tw} height={th} rx={2} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.8}/>
+                      {/* Screen area */}
+                      <rect x={cpx2-tw/2+1.5} y={cpy2-th/2+1} width={tw-3} height={th-2} rx={1} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
+                      <text x={cpx2} y={cpy2-th/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Cable Cubby - Extron Cable Cubby 1202 style
+                  const isCableCubby=dev.id==="byod-hub";
+                  if(isCableCubby){
+                    const cw=dev.w*planScale, ch=dev.h*planScale;
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {isSelected&&<rect x={cpx2-cw/2-3} y={cpy2-ch/2-3} width={cw+6} height={ch+6} rx={3} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      {/* Purple boundary */}
+                      <rect x={cpx2-cw/2-1} y={cpy2-ch/2-1} width={cw+2} height={ch+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Outer frame - brushed metal look */}
+                      <rect x={cpx2-cw/2} y={cpy2-ch/2} width={cw} height={ch} rx={1.5} fill="#374151" stroke="#4b5563" strokeWidth={0.8}/>
+                      {/* Inner cavity - dark recess */}
+                      <rect x={cpx2-cw/2+2} y={cpy2-ch/2+1.5} width={cw-4} height={ch-3} rx={1} fill={cc.deviceDeep} stroke="rgb(var(--border))" strokeWidth={0.4}/>
+                      {/* Cable port slots */}
+                      {[-1,0,1].map(i=><rect key={i} x={cpx2+i*cw*0.25-2} y={cpy2-ch/2+3} width={4} height={ch-6} rx={1} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.2}/>)}
+                      <text x={cpx2} y={cpy2-ch/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {isSelected&&<rect x={cpx2-8} y={cpy2-6} width={16} height={12} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
+                    <rect x={cpx2-5} y={cpy2-3.5} width={10} height={7} rx={2} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1}/>
+                    <text x={cpx2} y={cpy2+14} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                return null;
+              })}
+
+              {/* Marquee selection rectangle */}
+              {marquee && (() => {
+                const isWindow = marquee.curSvgX >= marquee.startSvgX;
+                const x = Math.min(marquee.startSvgX, marquee.curSvgX);
+                const y = Math.min(marquee.startSvgY, marquee.curSvgY);
+                const w = Math.abs(marquee.curSvgX - marquee.startSvgX);
+                const h = Math.abs(marquee.curSvgY - marquee.startSvgY);
+                return (
+                  <rect x={x} y={y} width={w} height={h}
+                    fill={isWindow ? "rgba(59,130,246,0.07)" : "rgba(34,197,94,0.07)"}
+                    stroke={isWindow ? "#3b82f6" : "#22c55e"}
+                    strokeWidth={0.8}
+                    strokeDasharray={isWindow ? undefined : "3 2"}
+                    pointerEvents="none"
+                  />
+                );
+              })()}
+            </g>
+          ) : (
+            <g>
+              <defs>
+                <linearGradient id="floorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor={cc.floorA} stopOpacity="1"/><stop offset="100%" stopColor={cc.floorB} stopOpacity="1"/>
+                </linearGradient>
+                <pattern id="carpetPattern" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="6" height="6" fill={cc.floorA}/>
+                  <line x1="0" y1="0" x2="0" y2="6" stroke={cc.grid} strokeWidth="0.8"/>
+                  <line x1="3" y1="0" x2="3" y2="6" stroke={cc.grid} strokeWidth="0.5"/>
+                  <line x1="0" y1="0" x2="6" y2="0" stroke={cc.grid} strokeWidth="0.8"/>
+                  <line x1="0" y1="3" x2="6" y2="3" stroke={cc.grid} strokeWidth="0.5"/>
+                </pattern>
+                <linearGradient id="backWallGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+                  <stop offset="0%" stopColor="#d1d5db" stopOpacity="0.5"/><stop offset="100%" stopColor="#e5e7eb" stopOpacity="0.4"/>
+                </linearGradient>
+                <linearGradient id="leftWallGrad" x1="100%" y1="100%" x2="0%" y2="0%">
+                  <stop offset="0%" stopColor="#c4c8cf" stopOpacity="0.45"/><stop offset="100%" stopColor="#d1d5db" stopOpacity="0.35"/>
+                </linearGradient>
+                <linearGradient id="screenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.3"/><stop offset="50%" stopColor="#3b82f6" stopOpacity="0.05"/><stop offset="100%" stopColor="#000000" stopOpacity="0"/>
+                </linearGradient>
+                <linearGradient id="tableTopGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#e2e8f0" stopOpacity="0.85"/><stop offset="50%" stopColor="#cbd5e1" stopOpacity="0.75"/><stop offset="100%" stopColor="rgb(var(--text-muted))" stopOpacity="0.65"/>
+                </linearGradient>
+                <linearGradient id="tableFrontGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="rgb(var(--text-muted))" stopOpacity="0.5"/><stop offset="100%" stopColor="rgb(var(--text-subtle))" stopOpacity="0.4"/>
+                </linearGradient>
+                <linearGradient id="tableSideGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="rgb(var(--text-muted))" stopOpacity="0.4"/><stop offset="100%" stopColor="#475569" stopOpacity="0.3"/>
+                </linearGradient>
+              </defs>
+
+              <polygon points={floorPts} fill="url(#floorGrad)" stroke="#b0b5be" strokeWidth={1}/>
+              <polygon points={floorPts} fill="url(#floorGrad)" stroke="none"/>
+              {Array.from({length:Math.ceil(roomW)+1},(_,i)=>(<line key={"gw"+i} x1={sX(i,0,0)} y1={sY(i,0,0)} x2={sX(i,roomL,0)} y2={sY(i,roomL,0)} stroke="rgb(var(--border))" strokeWidth={0.5} opacity={0.5}/>))}
+              {Array.from({length:Math.ceil(roomL)+1},(_,i)=>(<line key={"gl"+i} x1={sX(0,i,0)} y1={sY(0,i,0)} x2={sX(roomW,i,0)} y2={sY(roomW,i,0)} stroke="rgb(var(--border))" strokeWidth={0.5} opacity={0.5}/>))}
+              <polygon points={backWallPts} fill="url(#backWallGrad)" stroke="#b0b5be" strokeWidth={1}/>
+              <polygon points={leftWallPts} fill="url(#leftWallGrad)" stroke="#b0b5be" strokeWidth={1}/>
+              <line x1={sX(0,0,roomH)} y1={sY(0,0,roomH)} x2={sX(roomW,0,roomH)} y2={sY(roomW,0,roomH)} stroke="#b0b5be" strokeWidth={0.8} opacity={0.5}/>
+              <line x1={sX(0,0,roomH)} y1={sY(0,0,roomH)} x2={sX(0,roomL,roomH)} y2={sY(0,roomL,roomH)} stroke="#b0b5be" strokeWidth={0.8} opacity={0.5}/>
+              <text x={sX(roomW/2,roomL+0.3,0)} y={sY(roomW/2,roomL+0.3,0)+4} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+              <text x={sX(roomW+0.4,roomL/2,0)} y={sY(roomW+0.4,roomL/2,0)+4} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomL)}</text>
+              <text x={sX(-0.5,0,roomH/2)} y={sY(-0.5,0,roomH/2)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomH)}</text>
+
+
+              {showTable && render3DTable()}
+
+              {placedDevices.map(dev=>{
+                const isSelected=selectedUid===dev.uid||selectedUids.has(dev.uid), isDragging=dragUid===dev.uid;
+                const wrapDevice=(inner:React.ReactNode)=>(
+                  <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.8:1}>
+                    {isSelected&&<circle cx={sX(dev.x,dev.y,dev.z)} cy={sY(dev.x,dev.y,dev.z)} r={16} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.6}/>}
+                    {inner}
+                  </g>
+                );
+                if(dev.type==="display"){
+                  const hw2=dev.w/2, hh2=dev.h/2, mw=dev.mountWall||"north";
+                  let pts:string, innerPts:string, labelX:number, labelY:number;
+                  if(mw==="north"){
+                    pts=[`${sX(dev.x-hw2,0.02,dev.z+hh2)},${sY(dev.x-hw2,0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,0.02,dev.z+hh2)},${sY(dev.x+hw2,0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,0.02,dev.z-hh2)},${sY(dev.x+hw2,0.02,dev.z-hh2)}`,`${sX(dev.x-hw2,0.02,dev.z-hh2)},${sY(dev.x-hw2,0.02,dev.z-hh2)}`].join(" ");
+                    innerPts=[`${sX(dev.x-hw2+0.04,0.02,dev.z+hh2-0.03)},${sY(dev.x-hw2+0.04,0.02,dev.z+hh2-0.03)}`,`${sX(dev.x+hw2-0.04,0.02,dev.z+hh2-0.03)},${sY(dev.x+hw2-0.04,0.02,dev.z+hh2-0.03)}`,`${sX(dev.x+hw2-0.04,0.02,dev.z-hh2+0.03)},${sY(dev.x+hw2-0.04,0.02,dev.z-hh2+0.03)}`,`${sX(dev.x-hw2+0.04,0.02,dev.z-hh2+0.03)},${sY(dev.x-hw2+0.04,0.02,dev.z-hh2+0.03)}`].join(" ");
+                    labelX=sX(dev.x,0.02,dev.z); labelY=sY(dev.x,0.02,dev.z);
+                  } else if(mw==="south"){
+                    pts=[`${sX(dev.x-hw2,roomL-0.02,dev.z+hh2)},${sY(dev.x-hw2,roomL-0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,roomL-0.02,dev.z+hh2)},${sY(dev.x+hw2,roomL-0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,roomL-0.02,dev.z-hh2)},${sY(dev.x+hw2,roomL-0.02,dev.z-hh2)}`,`${sX(dev.x-hw2,roomL-0.02,dev.z-hh2)},${sY(dev.x-hw2,roomL-0.02,dev.z-hh2)}`].join(" ");
+                    innerPts=[`${sX(dev.x-hw2+0.04,roomL-0.02,dev.z+hh2-0.03)},${sY(dev.x-hw2+0.04,roomL-0.02,dev.z+hh2-0.03)}`,`${sX(dev.x+hw2-0.04,roomL-0.02,dev.z+hh2-0.03)},${sY(dev.x+hw2-0.04,roomL-0.02,dev.z+hh2-0.03)}`,`${sX(dev.x+hw2-0.04,roomL-0.02,dev.z-hh2+0.03)},${sY(dev.x+hw2-0.04,roomL-0.02,dev.z-hh2+0.03)}`,`${sX(dev.x-hw2+0.04,roomL-0.02,dev.z-hh2+0.03)},${sY(dev.x-hw2+0.04,roomL-0.02,dev.z-hh2+0.03)}`].join(" ");
+                    labelX=sX(dev.x,roomL-0.02,dev.z); labelY=sY(dev.x,roomL-0.02,dev.z);
+                  } else if(mw==="west"){
+                    pts=[`${sX(0.02,dev.y-hw2,dev.z+hh2)},${sY(0.02,dev.y-hw2,dev.z+hh2)}`,`${sX(0.02,dev.y+hw2,dev.z+hh2)},${sY(0.02,dev.y+hw2,dev.z+hh2)}`,`${sX(0.02,dev.y+hw2,dev.z-hh2)},${sY(0.02,dev.y+hw2,dev.z-hh2)}`,`${sX(0.02,dev.y-hw2,dev.z-hh2)},${sY(0.02,dev.y-hw2,dev.z-hh2)}`].join(" ");
+                    innerPts=[`${sX(0.02,dev.y-hw2+0.04,dev.z+hh2-0.03)},${sY(0.02,dev.y-hw2+0.04,dev.z+hh2-0.03)}`,`${sX(0.02,dev.y+hw2-0.04,dev.z+hh2-0.03)},${sY(0.02,dev.y+hw2-0.04,dev.z+hh2-0.03)}`,`${sX(0.02,dev.y+hw2-0.04,dev.z-hh2+0.03)},${sY(0.02,dev.y+hw2-0.04,dev.z-hh2+0.03)}`,`${sX(0.02,dev.y-hw2+0.04,dev.z-hh2+0.03)},${sY(0.02,dev.y-hw2+0.04,dev.z-hh2+0.03)}`].join(" ");
+                    labelX=sX(0.02,dev.y,dev.z); labelY=sY(0.02,dev.y,dev.z);
+                  } else {
+                    pts=[`${sX(roomW-0.02,dev.y-hw2,dev.z+hh2)},${sY(roomW-0.02,dev.y-hw2,dev.z+hh2)}`,`${sX(roomW-0.02,dev.y+hw2,dev.z+hh2)},${sY(roomW-0.02,dev.y+hw2,dev.z+hh2)}`,`${sX(roomW-0.02,dev.y+hw2,dev.z-hh2)},${sY(roomW-0.02,dev.y+hw2,dev.z-hh2)}`,`${sX(roomW-0.02,dev.y-hw2,dev.z-hh2)},${sY(roomW-0.02,dev.y-hw2,dev.z-hh2)}`].join(" ");
+                    innerPts=[`${sX(roomW-0.02,dev.y-hw2+0.04,dev.z+hh2-0.03)},${sY(roomW-0.02,dev.y-hw2+0.04,dev.z+hh2-0.03)}`,`${sX(roomW-0.02,dev.y+hw2-0.04,dev.z+hh2-0.03)},${sY(roomW-0.02,dev.y+hw2-0.04,dev.z+hh2-0.03)}`,`${sX(roomW-0.02,dev.y+hw2-0.04,dev.z-hh2+0.03)},${sY(roomW-0.02,dev.y+hw2-0.04,dev.z-hh2+0.03)}`,`${sX(roomW-0.02,dev.y-hw2+0.04,dev.z-hh2+0.03)},${sY(roomW-0.02,dev.y-hw2+0.04,dev.z-hh2+0.03)}`].join(" ");
+                    labelX=sX(roomW-0.02,dev.y,dev.z); labelY=sY(roomW-0.02,dev.y,dev.z);
+                  }
+                  const bdr=0.03;
+                  let borderPts:string;
+                  if(mw==="north"){
+                    borderPts=[`${sX(dev.x-hw2-bdr,0.02,dev.z+hh2+bdr)},${sY(dev.x-hw2-bdr,0.02,dev.z+hh2+bdr)}`,`${sX(dev.x+hw2+bdr,0.02,dev.z+hh2+bdr)},${sY(dev.x+hw2+bdr,0.02,dev.z+hh2+bdr)}`,`${sX(dev.x+hw2+bdr,0.02,dev.z-hh2-bdr)},${sY(dev.x+hw2+bdr,0.02,dev.z-hh2-bdr)}`,`${sX(dev.x-hw2-bdr,0.02,dev.z-hh2-bdr)},${sY(dev.x-hw2-bdr,0.02,dev.z-hh2-bdr)}`].join(" ");
+                  } else if(mw==="south"){
+                    borderPts=[`${sX(dev.x-hw2-bdr,roomL-0.02,dev.z+hh2+bdr)},${sY(dev.x-hw2-bdr,roomL-0.02,dev.z+hh2+bdr)}`,`${sX(dev.x+hw2+bdr,roomL-0.02,dev.z+hh2+bdr)},${sY(dev.x+hw2+bdr,roomL-0.02,dev.z+hh2+bdr)}`,`${sX(dev.x+hw2+bdr,roomL-0.02,dev.z-hh2-bdr)},${sY(dev.x+hw2+bdr,roomL-0.02,dev.z-hh2-bdr)}`,`${sX(dev.x-hw2-bdr,roomL-0.02,dev.z-hh2-bdr)},${sY(dev.x-hw2-bdr,roomL-0.02,dev.z-hh2-bdr)}`].join(" ");
+                  } else if(mw==="west"){
+                    borderPts=[`${sX(0.02,dev.y-hw2-bdr,dev.z+hh2+bdr)},${sY(0.02,dev.y-hw2-bdr,dev.z+hh2+bdr)}`,`${sX(0.02,dev.y+hw2+bdr,dev.z+hh2+bdr)},${sY(0.02,dev.y+hw2+bdr,dev.z+hh2+bdr)}`,`${sX(0.02,dev.y+hw2+bdr,dev.z-hh2-bdr)},${sY(0.02,dev.y+hw2+bdr,dev.z-hh2-bdr)}`,`${sX(0.02,dev.y-hw2-bdr,dev.z-hh2-bdr)},${sY(0.02,dev.y-hw2-bdr,dev.z-hh2-bdr)}`].join(" ");
+                  } else {
+                    borderPts=[`${sX(roomW-0.02,dev.y-hw2-bdr,dev.z+hh2+bdr)},${sY(roomW-0.02,dev.y-hw2-bdr,dev.z+hh2+bdr)}`,`${sX(roomW-0.02,dev.y+hw2+bdr,dev.z+hh2+bdr)},${sY(roomW-0.02,dev.y+hw2+bdr,dev.z+hh2+bdr)}`,`${sX(roomW-0.02,dev.y+hw2+bdr,dev.z-hh2-bdr)},${sY(roomW-0.02,dev.y+hw2+bdr,dev.z-hh2-bdr)}`,`${sX(roomW-0.02,dev.y-hw2-bdr,dev.z-hh2-bdr)},${sY(roomW-0.02,dev.y-hw2-bdr,dev.z-hh2-bdr)}`].join(" ");
+                  }
+                  // LG UH5J style - thin bezel, slim profile, screen with subtle gradient
+                  const bezel=0.012; // ~12mm thin bezel
+                  let screenPts:string;
+                  if(mw==="north"){
+                    screenPts=[`${sX(dev.x-hw2+bezel,0.02,dev.z+hh2-bezel)},${sY(dev.x-hw2+bezel,0.02,dev.z+hh2-bezel)}`,`${sX(dev.x+hw2-bezel,0.02,dev.z+hh2-bezel)},${sY(dev.x+hw2-bezel,0.02,dev.z+hh2-bezel)}`,`${sX(dev.x+hw2-bezel,0.02,dev.z-hh2+bezel)},${sY(dev.x+hw2-bezel,0.02,dev.z-hh2+bezel)}`,`${sX(dev.x-hw2+bezel,0.02,dev.z-hh2+bezel)},${sY(dev.x-hw2+bezel,0.02,dev.z-hh2+bezel)}`].join(" ");
+                  } else if(mw==="south"){
+                    screenPts=[`${sX(dev.x-hw2+bezel,roomL-0.02,dev.z+hh2-bezel)},${sY(dev.x-hw2+bezel,roomL-0.02,dev.z+hh2-bezel)}`,`${sX(dev.x+hw2-bezel,roomL-0.02,dev.z+hh2-bezel)},${sY(dev.x+hw2-bezel,roomL-0.02,dev.z+hh2-bezel)}`,`${sX(dev.x+hw2-bezel,roomL-0.02,dev.z-hh2+bezel)},${sY(dev.x+hw2-bezel,roomL-0.02,dev.z-hh2+bezel)}`,`${sX(dev.x-hw2+bezel,roomL-0.02,dev.z-hh2+bezel)},${sY(dev.x-hw2+bezel,roomL-0.02,dev.z-hh2+bezel)}`].join(" ");
+                  } else if(mw==="west"){
+                    screenPts=[`${sX(0.02,dev.y-hw2+bezel,dev.z+hh2-bezel)},${sY(0.02,dev.y-hw2+bezel,dev.z+hh2-bezel)}`,`${sX(0.02,dev.y+hw2-bezel,dev.z+hh2-bezel)},${sY(0.02,dev.y+hw2-bezel,dev.z+hh2-bezel)}`,`${sX(0.02,dev.y+hw2-bezel,dev.z-hh2+bezel)},${sY(0.02,dev.y+hw2-bezel,dev.z-hh2+bezel)}`,`${sX(0.02,dev.y-hw2+bezel,dev.z-hh2+bezel)},${sY(0.02,dev.y-hw2+bezel,dev.z-hh2+bezel)}`].join(" ");
+                  } else {
+                    screenPts=[`${sX(roomW-0.02,dev.y-hw2+bezel,dev.z+hh2-bezel)},${sY(roomW-0.02,dev.y-hw2+bezel,dev.z+hh2-bezel)}`,`${sX(roomW-0.02,dev.y+hw2-bezel,dev.z+hh2-bezel)},${sY(roomW-0.02,dev.y+hw2-bezel,dev.z+hh2-bezel)}`,`${sX(roomW-0.02,dev.y+hw2-bezel,dev.z-hh2+bezel)},${sY(roomW-0.02,dev.y+hw2-bezel,dev.z-hh2+bezel)}`,`${sX(roomW-0.02,dev.y-hw2+bezel,dev.z-hh2+bezel)},${sY(roomW-0.02,dev.y-hw2+bezel,dev.z-hh2+bezel)}`].join(" ");
+                  }
+                  // Power LED position (bottom center of bezel)
+                  let ledPx:number, ledPy:number;
+                  if(mw==="north"){ledPx=sX(dev.x,0.02,dev.z-hh2+bezel*0.5);ledPy=sY(dev.x,0.02,dev.z-hh2+bezel*0.5);}
+                  else if(mw==="south"){ledPx=sX(dev.x,roomL-0.02,dev.z-hh2+bezel*0.5);ledPy=sY(dev.x,roomL-0.02,dev.z-hh2+bezel*0.5);}
+                  else if(mw==="west"){ledPx=sX(0.02,dev.y,dev.z-hh2+bezel*0.5);ledPy=sY(0.02,dev.y,dev.z-hh2+bezel*0.5);}
+                  else{ledPx=sX(roomW-0.02,dev.y,dev.z-hh2+bezel*0.5);ledPy=sY(roomW-0.02,dev.y,dev.z-hh2+bezel*0.5);}
+                  return wrapDevice(<g>
+                    {/* Blue boundary */}
+                    <polygon points={borderPts} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
+                    {/* Bezel - thin black frame */}
+                    <polygon points={pts} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={1.5}/>
+                    {/* Screen - dark with subtle blue tint */}
+                    <polygon points={screenPts} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
+                    {/* Screen reflection highlight */}
+                    <polygon points={screenPts} fill="url(#screenGrad)" opacity={0.08}/>
+                    <text x={labelX} y={labelY+3} textAnchor="middle" fontSize={8} fill={dev.color} fontFamily="'JetBrains Mono',monospace" fontWeight={600} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                if(dev.type==="camera"){
+                  if(dev.wall==="ceiling"){
+                    const cpx=sX(dev.x,dev.y,roomH), cpy=sY(dev.x,dev.y,roomH);
+                    return wrapDevice(<g><circle cx={cpx} cy={cpy} r={6} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1.5}/><circle cx={cpx} cy={cpy} r={2.5} fill={dev.color}/><text x={cpx} y={cpy+14} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text></g>);
+                  }
+                  const mw=dev.mountWall||"north";
+                  const isSoundbarCam = dev.id==="soundbar-cam";
+
+                  if(isSoundbarCam){
+                    // Rally Bar style: wide slim bar mounted flush to wall
+                    const barW=dev.w/2, barH=0.044, barD=0.06;
+                    let bx=dev.x, by=dev.y;
+                    if(mw==="north") by=barD*0.5; else if(mw==="south") by=roomL-barD*0.5;
+                    else if(mw==="west") bx=barD*0.5; else bx=roomW-barD*0.5;
+                    const bpx=sX(bx,by,dev.z), bpy=sY(bx,by,dev.z);
+                    const lx=bpx, ly=bpy+16;
+                    if(mw==="north"||mw==="south"){
+                      const fDir=mw==="north"?barD/2:-barD/2;
+                      // Top face
+                      const topP=[`${sX(bx-barW,by-barD/2,dev.z+barH)},${sY(bx-barW,by-barD/2,dev.z+barH)}`,`${sX(bx+barW,by-barD/2,dev.z+barH)},${sY(bx+barW,by-barD/2,dev.z+barH)}`,`${sX(bx+barW,by+barD/2,dev.z+barH)},${sY(bx+barW,by+barD/2,dev.z+barH)}`,`${sX(bx-barW,by+barD/2,dev.z+barH)},${sY(bx-barW,by+barD/2,dev.z+barH)}`].join(" ");
+                      // Front face
+                      const frP=[`${sX(bx-barW,by+fDir,dev.z+barH)},${sY(bx-barW,by+fDir,dev.z+barH)}`,`${sX(bx+barW,by+fDir,dev.z+barH)},${sY(bx+barW,by+fDir,dev.z+barH)}`,`${sX(bx+barW,by+fDir,dev.z-barH)},${sY(bx+barW,by+fDir,dev.z-barH)}`,`${sX(bx-barW,by+fDir,dev.z-barH)},${sY(bx-barW,by+fDir,dev.z-barH)}`].join(" ");
+                      // Right side
+                      const rtP=[`${sX(bx+barW,by-barD/2,dev.z+barH)},${sY(bx+barW,by-barD/2,dev.z+barH)}`,`${sX(bx+barW,by+barD/2,dev.z+barH)},${sY(bx+barW,by+barD/2,dev.z+barH)}`,`${sX(bx+barW,by+barD/2,dev.z-barH)},${sY(bx+barW,by+barD/2,dev.z-barH)}`,`${sX(bx+barW,by-barD/2,dev.z-barH)},${sY(bx+barW,by-barD/2,dev.z-barH)}`].join(" ");
+                      // Camera lens position (center front)
+                      const lensPx=sX(bx,by+fDir+0.005,dev.z), lensPy=sY(bx,by+fDir+0.005,dev.z);
+                      // Speaker grille dots
+                      const grilleDots=[];
+                      for(let gi=-3;gi<=3;gi++){if(gi===0)continue; const gx=bx+gi*barW*0.22; grilleDots.push({x:sX(gx,by+fDir+0.003,dev.z),y:sY(gx,by+fDir+0.003,dev.z)});}
+                      return wrapDevice(<g>
+                        <polygon points={frP} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.6}/>
+                        <polygon points={rtP} fill="#0f1724" stroke={cc.deviceBorder} strokeWidth={0.5}/>
+                        <polygon points={topP} fill="rgb(var(--border))" stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                        {grilleDots.map((dot,gi)=><circle key={gi} cx={dot.x} cy={dot.y} r={0.8} fill="#334155"/>)}
+                        <circle cx={lensPx} cy={lensPy} r={3.5} fill={cc.deviceDeep} stroke="#475569" strokeWidth={0.7}/>
+                        <circle cx={lensPx} cy={lensPy} r={2} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                        <circle cx={lensPx} cy={lensPy} r={0.8} fill="#1e3a5f"/>
+                        <text x={lx} y={ly} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                      </g>);
+                    } else {
+                      const fDir=mw==="west"?barD/2:-barD/2;
+                      const topP=[`${sX(bx-barD/2,by-barW,dev.z+barH)},${sY(bx-barD/2,by-barW,dev.z+barH)}`,`${sX(bx+barD/2,by-barW,dev.z+barH)},${sY(bx+barD/2,by-barW,dev.z+barH)}`,`${sX(bx+barD/2,by+barW,dev.z+barH)},${sY(bx+barD/2,by+barW,dev.z+barH)}`,`${sX(bx-barD/2,by+barW,dev.z+barH)},${sY(bx-barD/2,by+barW,dev.z+barH)}`].join(" ");
+                      const frP=[`${sX(bx+fDir,by-barW,dev.z+barH)},${sY(bx+fDir,by-barW,dev.z+barH)}`,`${sX(bx+fDir,by+barW,dev.z+barH)},${sY(bx+fDir,by+barW,dev.z+barH)}`,`${sX(bx+fDir,by+barW,dev.z-barH)},${sY(bx+fDir,by+barW,dev.z-barH)}`,`${sX(bx+fDir,by-barW,dev.z-barH)},${sY(bx+fDir,by-barW,dev.z-barH)}`].join(" ");
+                      const rtP=[`${sX(bx-barD/2,by+barW,dev.z+barH)},${sY(bx-barD/2,by+barW,dev.z+barH)}`,`${sX(bx+barD/2,by+barW,dev.z+barH)},${sY(bx+barD/2,by+barW,dev.z+barH)}`,`${sX(bx+barD/2,by+barW,dev.z-barH)},${sY(bx+barD/2,by+barW,dev.z-barH)}`,`${sX(bx-barD/2,by+barW,dev.z-barH)},${sY(bx-barD/2,by+barW,dev.z-barH)}`].join(" ");
+                      const lensPx=sX(bx+fDir+0.005,by,dev.z), lensPy=sY(bx+fDir+0.005,by,dev.z);
+                      const grilleDots=[];
+                      for(let gi=-3;gi<=3;gi++){if(gi===0)continue; const gy=by+gi*barW*0.22; grilleDots.push({x:sX(bx+fDir+0.003,gy,dev.z),y:sY(bx+fDir+0.003,gy,dev.z)});}
+                      return wrapDevice(<g>
+                        <polygon points={frP} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.6}/>
+                        <polygon points={rtP} fill="#0f1724" stroke={cc.deviceBorder} strokeWidth={0.5}/>
+                        <polygon points={topP} fill="rgb(var(--border))" stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                        {grilleDots.map((dot,gi)=><circle key={gi} cx={dot.x} cy={dot.y} r={0.8} fill="#334155"/>)}
+                        <circle cx={lensPx} cy={lensPy} r={3.5} fill={cc.deviceDeep} stroke="#475569" strokeWidth={0.7}/>
+                        <circle cx={lensPx} cy={lensPy} r={2} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                        <circle cx={lensPx} cy={lensPy} r={0.8} fill="#1e3a5f"/>
+                        <text x={lx} y={ly} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                      </g>);
+                    }
+                  }
+
+                  const camW=0.12, camH2=0.06, camD=0.12;
+                  let bx=dev.x, by=dev.y;
+                  if(mw==="north") by=camD*0.5; else if(mw==="south") by=roomL-camD*0.5;
+                  else if(mw==="west") bx=camD*0.5; else bx=roomW-camD*0.5;
+                  const wallPx=sX(dev.x,dev.y,dev.z), wallPy=sY(dev.x,dev.y,dev.z);
+                  const bpx=sX(bx,by,dev.z), bpy=sY(bx,by,dev.z);
+                  let topP:string, frP:string, rtP:string, lensPx:number, lensPy:number;
+                  if(mw==="north"||mw==="south"){
+                    topP=[`${sX(bx-camW,by-0.04,dev.z+camH2)},${sY(bx-camW,by-0.04,dev.z+camH2)}`,`${sX(bx+camW,by-0.04,dev.z+camH2)},${sY(bx+camW,by-0.04,dev.z+camH2)}`,`${sX(bx+camW,by+0.04,dev.z+camH2)},${sY(bx+camW,by+0.04,dev.z+camH2)}`,`${sX(bx-camW,by+0.04,dev.z+camH2)},${sY(bx-camW,by+0.04,dev.z+camH2)}`].join(" ");
+                    const fDir=mw==="north"?0.04:-0.04;
+                    frP=[`${sX(bx-camW,by+fDir,dev.z+camH2)},${sY(bx-camW,by+fDir,dev.z+camH2)}`,`${sX(bx+camW,by+fDir,dev.z+camH2)},${sY(bx+camW,by+fDir,dev.z+camH2)}`,`${sX(bx+camW,by+fDir,dev.z-camH2)},${sY(bx+camW,by+fDir,dev.z-camH2)}`,`${sX(bx-camW,by+fDir,dev.z-camH2)},${sY(bx-camW,by+fDir,dev.z-camH2)}`].join(" ");
+                    rtP=[`${sX(bx+camW,by-0.04,dev.z+camH2)},${sY(bx+camW,by-0.04,dev.z+camH2)}`,`${sX(bx+camW,by+0.04,dev.z+camH2)},${sY(bx+camW,by+0.04,dev.z+camH2)}`,`${sX(bx+camW,by+0.04,dev.z-camH2)},${sY(bx+camW,by+0.04,dev.z-camH2)}`,`${sX(bx+camW,by-0.04,dev.z-camH2)},${sY(bx+camW,by-0.04,dev.z-camH2)}`].join(" ");
+                    lensPx=sX(bx,by+fDir+0.005,dev.z); lensPy=sY(bx,by+fDir+0.005,dev.z);
+                  } else {
+                    topP=[`${sX(bx-0.04,by-camW,dev.z+camH2)},${sY(bx-0.04,by-camW,dev.z+camH2)}`,`${sX(bx+0.04,by-camW,dev.z+camH2)},${sY(bx+0.04,by-camW,dev.z+camH2)}`,`${sX(bx+0.04,by+camW,dev.z+camH2)},${sY(bx+0.04,by+camW,dev.z+camH2)}`,`${sX(bx-0.04,by+camW,dev.z+camH2)},${sY(bx-0.04,by+camW,dev.z+camH2)}`].join(" ");
+                    const fDir=mw==="west"?0.04:-0.04;
+                    frP=[`${sX(bx+fDir,by-camW,dev.z+camH2)},${sY(bx+fDir,by-camW,dev.z+camH2)}`,`${sX(bx+fDir,by+camW,dev.z+camH2)},${sY(bx+fDir,by+camW,dev.z+camH2)}`,`${sX(bx+fDir,by+camW,dev.z-camH2)},${sY(bx+fDir,by+camW,dev.z-camH2)}`,`${sX(bx+fDir,by-camW,dev.z-camH2)},${sY(bx+fDir,by-camW,dev.z-camH2)}`].join(" ");
+                    rtP=[`${sX(bx-0.04,by+camW,dev.z+camH2)},${sY(bx-0.04,by+camW,dev.z+camH2)}`,`${sX(bx+0.04,by+camW,dev.z+camH2)},${sY(bx+0.04,by+camW,dev.z+camH2)}`,`${sX(bx+0.04,by+camW,dev.z-camH2)},${sY(bx+0.04,by+camW,dev.z-camH2)}`,`${sX(bx-0.04,by+camW,dev.z-camH2)},${sY(bx-0.04,by+camW,dev.z-camH2)}`].join(" ");
+                    lensPx=sX(bx+fDir+0.005,by,dev.z); lensPy=sY(bx+fDir+0.005,by,dev.z);
+                  }
+                  return wrapDevice(<g>
+                    <line x1={wallPx} y1={wallPy} x2={bpx} y2={bpy} stroke="#4b5563" strokeWidth={2.5} strokeLinecap="round"/>
+                    <polygon points={frP} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.6}/>
+                    <polygon points={rtP} fill="#1a2332" stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                    <polygon points={topP} fill="#2d3748" stroke="#475569" strokeWidth={0.5}/>
+                    <circle cx={lensPx} cy={lensPy} r={4} fill={cc.deviceDeep} stroke="#475569" strokeWidth={0.8}/>
+                    <circle cx={lensPx} cy={lensPy} r={2.5} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                    <circle cx={lensPx} cy={lensPy} r={1.2} fill="rgb(var(--border))"/>
+                    <text x={bpx} y={bpy+18} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                if(dev.type==="mic"){
+                  if(dev.wall==="ceiling"){
+                    const cpx=sX(dev.x,dev.y,roomH), cpy=sY(dev.x,dev.y,roomH);
+                    const fpx=sX(dev.x,dev.y,0), fpy=sY(dev.x,dev.y,0);
+                    // MXA920 square tile in isometric
+                    const ts=dev.w/2; // half tile size in meters
+                    const tilePts=[
+                      `${sX(dev.x-ts,dev.y-ts,roomH)},${sY(dev.x-ts,dev.y-ts,roomH)}`,
+                      `${sX(dev.x+ts,dev.y-ts,roomH)},${sY(dev.x+ts,dev.y-ts,roomH)}`,
+                      `${sX(dev.x+ts,dev.y+ts,roomH)},${sY(dev.x+ts,dev.y+ts,roomH)}`,
+                      `${sX(dev.x-ts,dev.y+ts,roomH)},${sY(dev.x-ts,dev.y+ts,roomH)}`
+                    ].join(" ");
+                    // Mic hole positions (3x3 grid)
+                    const micDots=[];
+                    for(let r=-1;r<=1;r++)for(let c=-1;c<=1;c++){
+                      const dx=c*ts*0.5, dy=r*ts*0.5;
+                      micDots.push({x:sX(dev.x+dx,dev.y+dy,roomH+0.002),y:sY(dev.x+dx,dev.y+dy,roomH+0.002)});
+                    }
+                    // LED strip
+                    const ledL={x:sX(dev.x-ts*0.4,dev.y+ts*0.85,roomH+0.002),y:sY(dev.x-ts*0.4,dev.y+ts*0.85,roomH+0.002)};
+                    const ledR={x:sX(dev.x+ts*0.4,dev.y+ts*0.85,roomH+0.002),y:sY(dev.x+ts*0.4,dev.y+ts*0.85,roomH+0.002)};
+                    const cShape3d=dev.covShape||"round";
+                    const covDia=dev.covDiameter||6;
+                    const covW3d=dev.covW||6;
+                    const covL3d=dev.covL||6;
+                    return wrapDevice(<g>
+                      {/* Coverage projection on floor */}
+                      <line x1={cpx} y1={cpy} x2={fpx} y2={fpy} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2" opacity={0.2}/>
+                      {cShape3d==="round" ? (
+                        <polygon points={Array.from({length:24},(_,i)=>{const a=(i/24)*Math.PI*2;const r=covDia/2;return `${sX(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),0)},${sY(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),0)}`;}).join(" ")} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="2 2"/>
+                      ) : (
+                        <polygon points={[
+                          `${sX(dev.x-covW3d/2,dev.y-covL3d/2,0)},${sY(dev.x-covW3d/2,dev.y-covL3d/2,0)}`,
+                          `${sX(dev.x+covW3d/2,dev.y-covL3d/2,0)},${sY(dev.x+covW3d/2,dev.y-covL3d/2,0)}`,
+                          `${sX(dev.x+covW3d/2,dev.y+covL3d/2,0)},${sY(dev.x+covW3d/2,dev.y+covL3d/2,0)}`,
+                          `${sX(dev.x-covW3d/2,dev.y+covL3d/2,0)},${sY(dev.x-covW3d/2,dev.y+covL3d/2,0)}`
+                        ].join(" ")} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="2 2"/>
+                      )}
+                      {/* Square tile */}
+                      <polygon points={tilePts} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* Mic hole dots */}
+                      {micDots.map((d,i)=><circle key={i} cx={d.x} cy={d.y} r={1} fill="#334155"/>)}
+                      <text x={cpx} y={cpy-14} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  const cpx=sX(dev.x,dev.y,dev.z), cpy=sY(dev.x,dev.y,dev.z);
+                  // Table mic - Shure MXA310 isometric disc on table
+                  if(dev.id==="table-mic"){
+                    const discR=dev.w/2; // radius in meters
+                    const discH=0.015; // very low profile
+                    const isoDisc=(r:number,z:number,n:number)=>Array.from({length:n},(_,i)=>{const a=(i/n)*Math.PI*2;return `${sX(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),z)},${sY(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),z)}`;}).join(" ");
+                    const tmCovR3d=(dev.covDiameter||2)/2;
+                    return wrapDevice(<g>
+                      {/* Coverage circle on table surface */}
+                      <polygon points={isoDisc(tmCovR3d,dev.z,24)} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="2 2"/>
+                      {/* Disc side/rim */}
+                      <polygon points={isoDisc(discR,dev.z,20)} fill="#2d3748" stroke="#475569" strokeWidth={0.5}/>
+                      {/* Top surface */}
+                      <polygon points={isoDisc(discR,dev.z+discH,24)} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                      {/* LED ring */}
+                      <polygon points={isoDisc(discR*0.7,dev.z+discH+0.001,20)} fill="none" stroke={dev.color} strokeWidth={0.6} opacity={0.5}/>
+                      {/* Inner circle */}
+                      <polygon points={isoDisc(discR*0.45,dev.z+discH+0.002,16)} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                      {/* Center dot */}
+                      <polygon points={isoDisc(discR*0.15,dev.z+discH+0.003,8)} fill="#334155"/>
+                      <text x={cpx} y={cpy-10} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  return wrapDevice(<g><circle cx={cpx} cy={cpy} r={4} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1}/><circle cx={cpx} cy={cpy} r={1.5} fill={dev.color}/><text x={cpx} y={cpy+12} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text></g>);
+                }
+                if(dev.type==="speaker"){
+                  const cpx=sX(dev.x,dev.y,dev.z), cpy=sY(dev.x,dev.y,dev.z);
+                  if(dev.wall==="front"){
+                    const hw=dev.w/2, hh=dev.h/2, depth=0.12, mw=dev.mountWall||"north";
+                    // Wall offset, front face, top face, side face
+                    let frontPts:string, topPts:string, sidePts:string, grillePts:string, lx2:number, ly2:number;
+                    if(mw==="north"){
+                      const wy=0.02, fy=wy+depth;
+                      frontPts=[`${sX(dev.x-hw,fy,dev.z+hh)},${sY(dev.x-hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z-hh)},${sY(dev.x+hw,fy,dev.z-hh)}`,`${sX(dev.x-hw,fy,dev.z-hh)},${sY(dev.x-hw,fy,dev.z-hh)}`].join(" ");
+                      topPts=[`${sX(dev.x-hw,wy,dev.z+hh)},${sY(dev.x-hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,wy,dev.z+hh)},${sY(dev.x+hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x-hw,fy,dev.z+hh)},${sY(dev.x-hw,fy,dev.z+hh)}`].join(" ");
+                      sidePts=[`${sX(dev.x+hw,wy,dev.z+hh)},${sY(dev.x+hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z-hh)},${sY(dev.x+hw,fy,dev.z-hh)}`,`${sX(dev.x+hw,wy,dev.z-hh)},${sY(dev.x+hw,wy,dev.z-hh)}`].join(" ");
+                      const gm=0.02; grillePts=[`${sX(dev.x-hw+gm,fy+0.001,dev.z+hh-gm)},${sY(dev.x-hw+gm,fy+0.001,dev.z+hh-gm)}`,`${sX(dev.x+hw-gm,fy+0.001,dev.z+hh-gm)},${sY(dev.x+hw-gm,fy+0.001,dev.z+hh-gm)}`,`${sX(dev.x+hw-gm,fy+0.001,dev.z-hh+gm)},${sY(dev.x+hw-gm,fy+0.001,dev.z-hh+gm)}`,`${sX(dev.x-hw+gm,fy+0.001,dev.z-hh+gm)},${sY(dev.x-hw+gm,fy+0.001,dev.z-hh+gm)}`].join(" ");
+                      lx2=sX(dev.x,fy,dev.z); ly2=sY(dev.x,fy,dev.z);
+                    } else if(mw==="south"){
+                      const wy=roomL-0.02, fy=wy-depth;
+                      frontPts=[`${sX(dev.x-hw,fy,dev.z+hh)},${sY(dev.x-hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z-hh)},${sY(dev.x+hw,fy,dev.z-hh)}`,`${sX(dev.x-hw,fy,dev.z-hh)},${sY(dev.x-hw,fy,dev.z-hh)}`].join(" ");
+                      topPts=[`${sX(dev.x-hw,wy,dev.z+hh)},${sY(dev.x-hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,wy,dev.z+hh)},${sY(dev.x+hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x-hw,fy,dev.z+hh)},${sY(dev.x-hw,fy,dev.z+hh)}`].join(" ");
+                      sidePts=[`${sX(dev.x+hw,wy,dev.z+hh)},${sY(dev.x+hw,wy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z+hh)},${sY(dev.x+hw,fy,dev.z+hh)}`,`${sX(dev.x+hw,fy,dev.z-hh)},${sY(dev.x+hw,fy,dev.z-hh)}`,`${sX(dev.x+hw,wy,dev.z-hh)},${sY(dev.x+hw,wy,dev.z-hh)}`].join(" ");
+                      const gm=0.02; grillePts=[`${sX(dev.x-hw+gm,fy-0.001,dev.z+hh-gm)},${sY(dev.x-hw+gm,fy-0.001,dev.z+hh-gm)}`,`${sX(dev.x+hw-gm,fy-0.001,dev.z+hh-gm)},${sY(dev.x+hw-gm,fy-0.001,dev.z+hh-gm)}`,`${sX(dev.x+hw-gm,fy-0.001,dev.z-hh+gm)},${sY(dev.x+hw-gm,fy-0.001,dev.z-hh+gm)}`,`${sX(dev.x-hw+gm,fy-0.001,dev.z-hh+gm)},${sY(dev.x-hw+gm,fy-0.001,dev.z-hh+gm)}`].join(" ");
+                      lx2=sX(dev.x,fy,dev.z); ly2=sY(dev.x,fy,dev.z);
+                    } else if(mw==="west"){
+                      const wx=0.02, fx=wx+depth;
+                      frontPts=[`${sX(fx,dev.y-hw,dev.z+hh)},${sY(fx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z+hh)},${sY(fx,dev.y+hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z-hh)},${sY(fx,dev.y+hw,dev.z-hh)}`,`${sX(fx,dev.y-hw,dev.z-hh)},${sY(fx,dev.y-hw,dev.z-hh)}`].join(" ");
+                      topPts=[`${sX(wx,dev.y-hw,dev.z+hh)},${sY(wx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y-hw,dev.z+hh)},${sY(fx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z+hh)},${sY(fx,dev.y+hw,dev.z+hh)}`,`${sX(wx,dev.y+hw,dev.z+hh)},${sY(wx,dev.y+hw,dev.z+hh)}`].join(" ");
+                      sidePts=[`${sX(wx,dev.y+hw,dev.z+hh)},${sY(wx,dev.y+hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z+hh)},${sY(fx,dev.y+hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z-hh)},${sY(fx,dev.y+hw,dev.z-hh)}`,`${sX(wx,dev.y+hw,dev.z-hh)},${sY(wx,dev.y+hw,dev.z-hh)}`].join(" ");
+                      const gm=0.02; grillePts=[`${sX(fx+0.001,dev.y-hw+gm,dev.z+hh-gm)},${sY(fx+0.001,dev.y-hw+gm,dev.z+hh-gm)}`,`${sX(fx+0.001,dev.y+hw-gm,dev.z+hh-gm)},${sY(fx+0.001,dev.y+hw-gm,dev.z+hh-gm)}`,`${sX(fx+0.001,dev.y+hw-gm,dev.z-hh+gm)},${sY(fx+0.001,dev.y+hw-gm,dev.z-hh+gm)}`,`${sX(fx+0.001,dev.y-hw+gm,dev.z-hh+gm)},${sY(fx+0.001,dev.y-hw+gm,dev.z-hh+gm)}`].join(" ");
+                      lx2=sX(fx,dev.y,dev.z); ly2=sY(fx,dev.y,dev.z);
+                    } else {
+                      const wx=roomW-0.02, fx=wx-depth;
+                      frontPts=[`${sX(fx,dev.y-hw,dev.z+hh)},${sY(fx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z+hh)},${sY(fx,dev.y+hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z-hh)},${sY(fx,dev.y+hw,dev.z-hh)}`,`${sX(fx,dev.y-hw,dev.z-hh)},${sY(fx,dev.y-hw,dev.z-hh)}`].join(" ");
+                      topPts=[`${sX(wx,dev.y-hw,dev.z+hh)},${sY(wx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y-hw,dev.z+hh)},${sY(fx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y+hw,dev.z+hh)},${sY(fx,dev.y+hw,dev.z+hh)}`,`${sX(wx,dev.y+hw,dev.z+hh)},${sY(wx,dev.y+hw,dev.z+hh)}`].join(" ");
+                      sidePts=[`${sX(wx,dev.y-hw,dev.z+hh)},${sY(wx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y-hw,dev.z+hh)},${sY(fx,dev.y-hw,dev.z+hh)}`,`${sX(fx,dev.y-hw,dev.z-hh)},${sY(fx,dev.y-hw,dev.z-hh)}`,`${sX(wx,dev.y-hw,dev.z-hh)},${sY(wx,dev.y-hw,dev.z-hh)}`].join(" ");
+                      const gm=0.02; grillePts=[`${sX(fx-0.001,dev.y-hw+gm,dev.z+hh-gm)},${sY(fx-0.001,dev.y-hw+gm,dev.z+hh-gm)}`,`${sX(fx-0.001,dev.y+hw-gm,dev.z+hh-gm)},${sY(fx-0.001,dev.y+hw-gm,dev.z+hh-gm)}`,`${sX(fx-0.001,dev.y+hw-gm,dev.z-hh+gm)},${sY(fx-0.001,dev.y+hw-gm,dev.z-hh+gm)}`,`${sX(fx-0.001,dev.y-hw+gm,dev.z-hh+gm)},${sY(fx-0.001,dev.y-hw+gm,dev.z-hh+gm)}`].join(" ");
+                      lx2=sX(fx,dev.y,dev.z); ly2=sY(fx,dev.y,dev.z);
+                    }
+                    return wrapDevice(<g>
+                      {/* Front face - dark with grille */}
+                      <polygon points={frontPts} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.6}/>
+                      {/* Grille inset */}
+                      <polygon points={grillePts} fill={cc.deviceDeep} stroke="rgb(var(--border))" strokeWidth={0.3}/>
+                      {/* Top face */}
+                      <polygon points={topPts} fill="rgb(var(--border))" stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                      {/* Side face */}
+                      <polygon points={sidePts} fill="#151d2b" stroke={cc.deviceBorderLight} strokeWidth={0.5}/>
+                      <text x={lx2} y={ly2+18} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  const isoCircS=(r:number,z:number,n:number)=>Array.from({length:n},(_,i)=>{const a=(i/n)*Math.PI*2;return `${sX(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),z)},${sY(dev.x+r*Math.cos(a),dev.y+r*Math.sin(a),z)}`;}).join(" ");
+                  const spx=sX(dev.x,dev.y,roomH), spy=sY(dev.x,dev.y,roomH);
+                  const sfpx=sX(dev.x,dev.y,0), sfpy=sY(dev.x,dev.y,0);
+                  const spkDispDeg=dev.dispersion||90;
+                  const spkH=roomH-4;
+                  const spkEpr=2*spkH*Math.tan((spkDispDeg/2)*Math.PI/180);
+                  const spkEprR=spkEpr/2;
+                  return wrapDevice(<g>
+                    {/* Coverage cone */}
+                    <line x1={spx} y1={spy} x2={sfpx} y2={sfpy} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2" opacity={0.15}/>
+                    <polygon points={Array.from({length:24},(_,i)=>{const a=(i/24)*Math.PI*2;return `${sX(dev.x+spkEprR*Math.cos(a),dev.y+spkEprR*Math.sin(a),0)},${sY(dev.x+spkEprR*Math.cos(a),dev.y+spkEprR*Math.sin(a),0)}`;}).join(" ")} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="2 2"/>
+                    {/* Outer rim - flush mount ring */}
+                    <polygon points={isoCircS(0.18,roomH,24)} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
+                    {/* Grille rings */}
+                    <polygon points={isoCircS(0.14,roomH+0.001,20)} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                    <polygon points={isoCircS(0.10,roomH+0.001,16)} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.4}/>
+                    {/* Center cone */}
+                    <polygon points={isoCircS(0.05,roomH+0.002,12)} fill="#334155" stroke="#475569" strokeWidth={0.3}/>
+                    <text x={cpx} y={cpy-12} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                  </g>);
+                }
+                if(dev.type==="furniture"){
+                  const hw2=dev.w/2, hh2=dev.h/2;
+                  const ftopPts=[`${sX(dev.x-hw2,dev.y-hh2,tH)},${sY(dev.x-hw2,dev.y-hh2,tH)}`,`${sX(dev.x+hw2,dev.y-hh2,tH)},${sY(dev.x+hw2,dev.y-hh2,tH)}`,`${sX(dev.x+hw2,dev.y+hh2,tH)},${sY(dev.x+hw2,dev.y+hh2,tH)}`,`${sX(dev.x-hw2,dev.y+hh2,tH)},${sY(dev.x-hw2,dev.y+hh2,tH)}`].join(" ");
+                  const ffrontPts=[`${sX(dev.x-hw2,dev.y+hh2,0)},${sY(dev.x-hw2,dev.y+hh2,0)}`,`${sX(dev.x+hw2,dev.y+hh2,0)},${sY(dev.x+hw2,dev.y+hh2,0)}`,`${sX(dev.x+hw2,dev.y+hh2,tH)},${sY(dev.x+hw2,dev.y+hh2,tH)}`,`${sX(dev.x-hw2,dev.y+hh2,tH)},${sY(dev.x-hw2,dev.y+hh2,tH)}`].join(" ");
+                  const frightPts=[`${sX(dev.x+hw2,dev.y-hh2,0)},${sY(dev.x+hw2,dev.y-hh2,0)}`,`${sX(dev.x+hw2,dev.y+hh2,0)},${sY(dev.x+hw2,dev.y+hh2,0)}`,`${sX(dev.x+hw2,dev.y+hh2,tH)},${sY(dev.x+hw2,dev.y+hh2,tH)}`,`${sX(dev.x+hw2,dev.y-hh2,tH)},${sY(dev.x+hw2,dev.y-hh2,tH)}`].join(" ");
+                  const lx=sX(dev.x,dev.y,tH), ly=sY(dev.x,dev.y,tH);
+                  return wrapDevice(<g><polygon points={ffrontPts} fill="#475569" opacity={0.2} stroke="rgb(var(--text-subtle))" strokeWidth={0.5}/><polygon points={frightPts} fill="#334155" opacity={0.2} stroke="rgb(var(--text-subtle))" strokeWidth={0.5}/><polygon points={ftopPts} fill="#334155" opacity={0.35} stroke="rgb(var(--text-muted))" strokeWidth={0.8}/><text x={lx} y={ly+3} textAnchor="middle" fontSize={7} fill="rgb(var(--text-muted))" fontWeight={500} className="dev-label">{dev.name}</text></g>);
+                }
+                if(dev.type==="control"){
+                  const mw=dev.mountWall||"floor";
+                  if(mw==="north"||mw==="south"||mw==="west"||mw==="east"){
+                    const hw2=dev.w/2, hh2=dev.h/2;
+                    const isPanel=dev.id==="touch-panel";
+                    const bezelW=isPanel?0.008:0; // thin bezel for TSW-1070
+                    let outerPts:string, screenPts:string, lx2:number, ly2:number;
+                    if(mw==="north"){
+                      outerPts=[`${sX(dev.x-hw2,0.02,dev.z+hh2)},${sY(dev.x-hw2,0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,0.02,dev.z+hh2)},${sY(dev.x+hw2,0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,0.02,dev.z-hh2)},${sY(dev.x+hw2,0.02,dev.z-hh2)}`,`${sX(dev.x-hw2,0.02,dev.z-hh2)},${sY(dev.x-hw2,0.02,dev.z-hh2)}`].join(" ");
+                      screenPts=[`${sX(dev.x-hw2+bezelW,0.02,dev.z+hh2-bezelW)},${sY(dev.x-hw2+bezelW,0.02,dev.z+hh2-bezelW)}`,`${sX(dev.x+hw2-bezelW,0.02,dev.z+hh2-bezelW)},${sY(dev.x+hw2-bezelW,0.02,dev.z+hh2-bezelW)}`,`${sX(dev.x+hw2-bezelW,0.02,dev.z-hh2+bezelW)},${sY(dev.x+hw2-bezelW,0.02,dev.z-hh2+bezelW)}`,`${sX(dev.x-hw2+bezelW,0.02,dev.z-hh2+bezelW)},${sY(dev.x-hw2+bezelW,0.02,dev.z-hh2+bezelW)}`].join(" ");
+                      lx2=sX(dev.x,0.02,dev.z);ly2=sY(dev.x,0.02,dev.z);
+                    } else if(mw==="south"){
+                      outerPts=[`${sX(dev.x-hw2,roomL-0.02,dev.z+hh2)},${sY(dev.x-hw2,roomL-0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,roomL-0.02,dev.z+hh2)},${sY(dev.x+hw2,roomL-0.02,dev.z+hh2)}`,`${sX(dev.x+hw2,roomL-0.02,dev.z-hh2)},${sY(dev.x+hw2,roomL-0.02,dev.z-hh2)}`,`${sX(dev.x-hw2,roomL-0.02,dev.z-hh2)},${sY(dev.x-hw2,roomL-0.02,dev.z-hh2)}`].join(" ");
+                      screenPts=[`${sX(dev.x-hw2+bezelW,roomL-0.02,dev.z+hh2-bezelW)},${sY(dev.x-hw2+bezelW,roomL-0.02,dev.z+hh2-bezelW)}`,`${sX(dev.x+hw2-bezelW,roomL-0.02,dev.z+hh2-bezelW)},${sY(dev.x+hw2-bezelW,roomL-0.02,dev.z+hh2-bezelW)}`,`${sX(dev.x+hw2-bezelW,roomL-0.02,dev.z-hh2+bezelW)},${sY(dev.x+hw2-bezelW,roomL-0.02,dev.z-hh2+bezelW)}`,`${sX(dev.x-hw2+bezelW,roomL-0.02,dev.z-hh2+bezelW)},${sY(dev.x-hw2+bezelW,roomL-0.02,dev.z-hh2+bezelW)}`].join(" ");
+                      lx2=sX(dev.x,roomL-0.02,dev.z);ly2=sY(dev.x,roomL-0.02,dev.z);
+                    } else if(mw==="west"){
+                      outerPts=[`${sX(0.02,dev.y-hw2,dev.z+hh2)},${sY(0.02,dev.y-hw2,dev.z+hh2)}`,`${sX(0.02,dev.y+hw2,dev.z+hh2)},${sY(0.02,dev.y+hw2,dev.z+hh2)}`,`${sX(0.02,dev.y+hw2,dev.z-hh2)},${sY(0.02,dev.y+hw2,dev.z-hh2)}`,`${sX(0.02,dev.y-hw2,dev.z-hh2)},${sY(0.02,dev.y-hw2,dev.z-hh2)}`].join(" ");
+                      screenPts=[`${sX(0.02,dev.y-hw2+bezelW,dev.z+hh2-bezelW)},${sY(0.02,dev.y-hw2+bezelW,dev.z+hh2-bezelW)}`,`${sX(0.02,dev.y+hw2-bezelW,dev.z+hh2-bezelW)},${sY(0.02,dev.y+hw2-bezelW,dev.z+hh2-bezelW)}`,`${sX(0.02,dev.y+hw2-bezelW,dev.z-hh2+bezelW)},${sY(0.02,dev.y+hw2-bezelW,dev.z-hh2+bezelW)}`,`${sX(0.02,dev.y-hw2+bezelW,dev.z-hh2+bezelW)},${sY(0.02,dev.y-hw2+bezelW,dev.z-hh2+bezelW)}`].join(" ");
+                      lx2=sX(0.02,dev.y,dev.z);ly2=sY(0.02,dev.y,dev.z);
+                    } else {
+                      outerPts=[`${sX(roomW-0.02,dev.y-hw2,dev.z+hh2)},${sY(roomW-0.02,dev.y-hw2,dev.z+hh2)}`,`${sX(roomW-0.02,dev.y+hw2,dev.z+hh2)},${sY(roomW-0.02,dev.y+hw2,dev.z+hh2)}`,`${sX(roomW-0.02,dev.y+hw2,dev.z-hh2)},${sY(roomW-0.02,dev.y+hw2,dev.z-hh2)}`,`${sX(roomW-0.02,dev.y-hw2,dev.z-hh2)},${sY(roomW-0.02,dev.y-hw2,dev.z-hh2)}`].join(" ");
+                      screenPts=[`${sX(roomW-0.02,dev.y-hw2+bezelW,dev.z+hh2-bezelW)},${sY(roomW-0.02,dev.y-hw2+bezelW,dev.z+hh2-bezelW)}`,`${sX(roomW-0.02,dev.y+hw2-bezelW,dev.z+hh2-bezelW)},${sY(roomW-0.02,dev.y+hw2-bezelW,dev.z+hh2-bezelW)}`,`${sX(roomW-0.02,dev.y+hw2-bezelW,dev.z-hh2+bezelW)},${sY(roomW-0.02,dev.y+hw2-bezelW,dev.z-hh2+bezelW)}`,`${sX(roomW-0.02,dev.y-hw2+bezelW,dev.z-hh2+bezelW)},${sY(roomW-0.02,dev.y-hw2+bezelW,dev.z-hh2+bezelW)}`].join(" ");
+                      lx2=sX(roomW-0.02,dev.y,dev.z);ly2=sY(roomW-0.02,dev.y,dev.z);
+                    }
+                    if(isPanel){
+                      return wrapDevice(<g>
+                        {/* Bezel - black glass frame */}
+                        <polygon points={outerPts} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={1}/>
+                        {/* Screen - dark with subtle tint */}
+                        <polygon points={screenPts} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
+                        {/* Screen reflection */}
+                        <polygon points={screenPts} fill="url(#screenGrad)" opacity={0.06}/>
+                        <text x={lx2} y={ly2+16} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                      </g>);
+                    }
+                    return wrapDevice(<g><polygon points={outerPts} fill={dev.color+"22"} stroke={dev.color} strokeWidth={1.2}/><text x={lx2} y={ly2+16} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text></g>);
+                  }
+                  const cpx=sX(dev.x,dev.y,dev.z), cpy=sY(dev.x,dev.y,dev.z);
+                  // Logitech Tap style - wedge base with angled screen
+                  if(dev.id==="table-touch"){
+                    const tw=dev.w/2, td=dev.h/2, baseH=0.02, screenH=0.06;
+                    // Base footprint on table
+                    const basePts=[
+                      `${sX(dev.x-tw,dev.y-td,dev.z)},${sY(dev.x-tw,dev.y-td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y-td,dev.z)},${sY(dev.x+tw,dev.y-td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y+td,dev.z)},${sY(dev.x+tw,dev.y+td,dev.z)}`,
+                      `${sX(dev.x-tw,dev.y+td,dev.z)},${sY(dev.x-tw,dev.y+td,dev.z)}`
+                    ].join(" ");
+                    // Top surface (angled - front higher than back)
+                    const topPts=[
+                      `${sX(dev.x-tw,dev.y-td,dev.z+screenH)},${sY(dev.x-tw,dev.y-td,dev.z+screenH)}`,
+                      `${sX(dev.x+tw,dev.y-td,dev.z+screenH)},${sY(dev.x+tw,dev.y-td,dev.z+screenH)}`,
+                      `${sX(dev.x+tw,dev.y+td,dev.z+baseH)},${sY(dev.x+tw,dev.y+td,dev.z+baseH)}`,
+                      `${sX(dev.x-tw,dev.y+td,dev.z+baseH)},${sY(dev.x-tw,dev.y+td,dev.z+baseH)}`
+                    ].join(" ");
+                    // Screen inset
+                    const si=0.01;
+                    const scrPts=[
+                      `${sX(dev.x-tw+si,dev.y-td+si,dev.z+screenH-0.002)},${sY(dev.x-tw+si,dev.y-td+si,dev.z+screenH-0.002)}`,
+                      `${sX(dev.x+tw-si,dev.y-td+si,dev.z+screenH-0.002)},${sY(dev.x+tw-si,dev.y-td+si,dev.z+screenH-0.002)}`,
+                      `${sX(dev.x+tw-si,dev.y+td-si,dev.z+baseH+0.002)},${sY(dev.x+tw-si,dev.y+td-si,dev.z+baseH+0.002)}`,
+                      `${sX(dev.x-tw+si,dev.y+td-si,dev.z+baseH+0.002)},${sY(dev.x-tw+si,dev.y+td-si,dev.z+baseH+0.002)}`
+                    ].join(" ");
+                    // Front face (the taller edge)
+                    const frontPts=[
+                      `${sX(dev.x-tw,dev.y-td,dev.z)},${sY(dev.x-tw,dev.y-td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y-td,dev.z)},${sY(dev.x+tw,dev.y-td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y-td,dev.z+screenH)},${sY(dev.x+tw,dev.y-td,dev.z+screenH)}`,
+                      `${sX(dev.x-tw,dev.y-td,dev.z+screenH)},${sY(dev.x-tw,dev.y-td,dev.z+screenH)}`
+                    ].join(" ");
+                    // Right side
+                    const rightPts=[
+                      `${sX(dev.x+tw,dev.y-td,dev.z)},${sY(dev.x+tw,dev.y-td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y+td,dev.z)},${sY(dev.x+tw,dev.y+td,dev.z)}`,
+                      `${sX(dev.x+tw,dev.y+td,dev.z+baseH)},${sY(dev.x+tw,dev.y+td,dev.z+baseH)}`,
+                      `${sX(dev.x+tw,dev.y-td,dev.z+screenH)},${sY(dev.x+tw,dev.y-td,dev.z+screenH)}`
+                    ].join(" ");
+                    const lx=sX(dev.x,dev.y,dev.z+screenH), ly=sY(dev.x,dev.y,dev.z+screenH);
+                    return wrapDevice(<g>
+                      {/* Front face */}
+                      <polygon points={frontPts} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.5}/>
+                      {/* Right side */}
+                      <polygon points={rightPts} fill="#0f1724" stroke={cc.deviceBorder} strokeWidth={0.5}/>
+                      {/* Top/screen surface */}
+                      <polygon points={topPts} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.6}/>
+                      {/* Screen */}
+                      <polygon points={scrPts} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
+                      <polygon points={scrPts} fill="url(#screenGrad)" opacity={0.05}/>
+                      <text x={lx} y={ly-8} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  // Cable Cubby - Extron 1202 flush-mount in table
+                  if(dev.id==="byod-hub"){
+                    const cw=dev.w/2, cd=dev.h/2, cDepth=0.06;
+                    // Frame sits flush with table, cavity is recessed
+                    const framePts=[
+                      `${sX(dev.x-cw,dev.y-cd,dev.z)},${sY(dev.x-cw,dev.y-cd,dev.z)}`,
+                      `${sX(dev.x+cw,dev.y-cd,dev.z)},${sY(dev.x+cw,dev.y-cd,dev.z)}`,
+                      `${sX(dev.x+cw,dev.y+cd,dev.z)},${sY(dev.x+cw,dev.y+cd,dev.z)}`,
+                      `${sX(dev.x-cw,dev.y+cd,dev.z)},${sY(dev.x-cw,dev.y+cd,dev.z)}`
+                    ].join(" ");
+                    // Inner cavity (recessed)
+                    const ci=0.015;
+                    const cavityPts=[
+                      `${sX(dev.x-cw+ci,dev.y-cd+ci,dev.z-cDepth)},${sY(dev.x-cw+ci,dev.y-cd+ci,dev.z-cDepth)}`,
+                      `${sX(dev.x+cw-ci,dev.y-cd+ci,dev.z-cDepth)},${sY(dev.x+cw-ci,dev.y-cd+ci,dev.z-cDepth)}`,
+                      `${sX(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)},${sY(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)}`,
+                      `${sX(dev.x-cw+ci,dev.y+cd-ci,dev.z-cDepth)},${sY(dev.x-cw+ci,dev.y+cd-ci,dev.z-cDepth)}`
+                    ].join(" ");
+                    // Inner wall (front)
+                    const innerFrontPts=[
+                      `${sX(dev.x-cw+ci,dev.y+cd-ci,dev.z)},${sY(dev.x-cw+ci,dev.y+cd-ci,dev.z)}`,
+                      `${sX(dev.x+cw-ci,dev.y+cd-ci,dev.z)},${sY(dev.x+cw-ci,dev.y+cd-ci,dev.z)}`,
+                      `${sX(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)},${sY(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)}`,
+                      `${sX(dev.x-cw+ci,dev.y+cd-ci,dev.z-cDepth)},${sY(dev.x-cw+ci,dev.y+cd-ci,dev.z-cDepth)}`
+                    ].join(" ");
+                    // Inner wall (right)
+                    const innerRightPts=[
+                      `${sX(dev.x+cw-ci,dev.y-cd+ci,dev.z)},${sY(dev.x+cw-ci,dev.y-cd+ci,dev.z)}`,
+                      `${sX(dev.x+cw-ci,dev.y+cd-ci,dev.z)},${sY(dev.x+cw-ci,dev.y+cd-ci,dev.z)}`,
+                      `${sX(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)},${sY(dev.x+cw-ci,dev.y+cd-ci,dev.z-cDepth)}`,
+                      `${sX(dev.x+cw-ci,dev.y-cd+ci,dev.z-cDepth)},${sY(dev.x+cw-ci,dev.y-cd+ci,dev.z-cDepth)}`
+                    ].join(" ");
+                    const lx=sX(dev.x,dev.y,dev.z), ly=sY(dev.x,dev.y,dev.z);
+                    return wrapDevice(<g>
+                      {/* Metal frame - flush with table */}
+                      <polygon points={framePts} fill="#4b5563" stroke="#6b7280" strokeWidth={0.6}/>
+                      {/* Inner walls */}
+                      <polygon points={innerFrontPts} fill="rgb(var(--border))" stroke={cc.deviceBorderLight} strokeWidth={0.3}/>
+                      <polygon points={innerRightPts} fill="#151d2b" stroke={cc.deviceBorderLight} strokeWidth={0.3}/>
+                      {/* Cavity bottom */}
+                      <polygon points={cavityPts} fill={cc.deviceDeep} stroke="rgb(var(--border))" strokeWidth={0.3}/>
+                      <text x={lx} y={ly-12} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text>
+                    </g>);
+                  }
+                  return wrapDevice(<g><rect x={cpx-8} y={cpy-5} width={16} height={10} rx={2} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1} transform={`skewX(-15) translate(${cpx*0.04},0)`}/><text x={cpx} y={cpy+16} textAnchor="middle" fontSize={6} fill={dev.color} className="dev-label">{dev.name}</text></g>);
+                }
+                return null;
+              })}
+
+              {placedDevices.length===0&&(
+                <text x="300" y="410" textAnchor="middle" fontSize={10} fill="#334155" fontFamily="Inter,sans-serif">Click devices from the catalog to place them in the room</text>
+              )}
+            </g>
+          )}
+        </svg>
+
+        {/* AutoCAD-style length input — appears at cursor when drawing walls */}
+        {isDrawingWall && wallPoints.length > 0 && cursorScreenPos && (
+          <div style={{position:"absolute",left:cursorScreenPos.x+18,top:cursorScreenPos.y+14,zIndex:50,pointerEvents:"none"}}>
+            <div style={{pointerEvents:"auto",background:cc.panel,border:"1.5px solid #3b82f6",borderRadius:6,padding:"3px 8px",display:"flex",alignItems:"center",gap:6,boxShadow:"0 2px 12px rgba(0,0,0,0.3)"}}>
+              <span style={{fontSize:10,color:"#3b82f6",fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>L</span>
+              <input
+                ref={wallInputRef}
+                value={wallLengthInput}
+                onChange={e => setWallLengthInput(e.target.value)}
+                onKeyDown={handleWallInputKeyDown}
+                placeholder="10' or 12'6&quot;"
+                style={{background:"transparent",border:"none",outline:"none",fontSize:13,fontFamily:"'JetBrains Mono',monospace",width:110,color:"rgb(var(--text-body))"}}
+              />
+            </div>
+            <div style={{marginTop:3,fontSize:9,color:"rgb(var(--text-subtle))",paddingLeft:2}}>Enter to place · Esc to cancel</div>
+          </div>
+        )}
+
+        {/* 3D/Plan toggle — hidden for now, keeping code for later use */}
+        {false && <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",display:"flex",background:"rgba(10,15,26,0.9)",borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setViewMode("3d")} style={{padding:"8px 20px",fontSize:14,fontWeight:viewMode==="3d"?700:400,background:viewMode==="3d"?"rgba(59,130,246,0.2)":"transparent",border:"none",color:viewMode==="3d"?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer",borderRight:"1px solid rgb(var(--border))"}}>3D View</button>
+          <button onClick={()=>setViewMode("plan")} style={{padding:"8px 20px",fontSize:14,fontWeight:viewMode==="plan"?700:400,background:viewMode==="plan"?"rgba(59,130,246,0.2)":"transparent",border:"none",color:viewMode==="plan"?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer"}}>Plan View</button>
+        </div>}
+        <div style={{position:"absolute",bottom:10,left:10,display:"flex",gap:12,fontSize:10,color:"#475569"}}>
+          <span>Click catalog items to add</span>
+          <span>Drag devices to reposition</span>
+          <span>Click to select, × to remove</span>
+        </div>
+        {/* Ceiling height control */}
+        <div style={{position:"absolute",bottom:12,right:60,display:"flex",alignItems:"center",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",padding:"5px 8px"}}>
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))",whiteSpace:"nowrap"}}>Ceiling</span>
+          <input type="number" className="no-spin" step={1} value={Math.floor(roomH)}
+            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(v + (roomH - Math.floor(roomH)))}}
+            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
+            style={{width:30,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
+            onFocus={e=>e.target.style.borderColor="#3b82f6"}
+          />
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>ft</span>
+          <input type="number" className="no-spin" step={1} value={Math.round((roomH - Math.floor(roomH)) * 12)}
+            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(Math.floor(roomH) + v/12)}}
+            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
+            style={{width:26,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
+            onFocus={e=>e.target.style.borderColor="#3b82f6"}
+          />
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>in</span>
+        </div>
+        {/* Zoom controls */}
+        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
+          <button onClick={()=>{setZoom(1);setPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(zoom*100)}%</button>
+          <button onClick={()=>setZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
+        </div>
+
+        {/* Furniture item size editor */}
+        {showFurnitureEditor && (
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:cc.panel,border:"1px solid rgb(var(--border))",borderRadius:10,padding:"18px 20px",zIndex:50,minWidth:220,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+            <div style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))",marginBottom:14}}>Edit Size</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,fontSize:12,color:"rgb(var(--text-subtle))"}}>
+                Width (ft)
+                <input
+                  type="number" step="0.1" min="0.5" max="30"
+                  value={furnitureEditW}
+                  onChange={e => setFurnitureEditW(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { const w=parseFloat(furnitureEditW),l=parseFloat(furnitureEditL); pushUndo(); setPlacedDevices(prev=>prev.map(d=>d.uid===furnitureEditUid?{...d,w:!isNaN(w)&&w>0?Math.max(0.5,Math.min(30,w)):d.w,h:!isNaN(l)&&l>0?Math.max(0.5,Math.min(30,l)):d.h}:d)); setShowFurnitureEditor(false); } if (e.key === "Escape") setShowFurnitureEditor(false); }}
+                  autoFocus
+                  style={{width:80,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:5,padding:"5px 8px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:12,outline:"none",textAlign:"right"}}
+                  onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                  onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                />
+              </label>
+              <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,fontSize:12,color:"rgb(var(--text-subtle))"}}>
+                Length (ft)
+                <input
+                  type="number" step="0.1" min="0.5" max="30"
+                  value={furnitureEditL}
+                  onChange={e => setFurnitureEditL(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { const w=parseFloat(furnitureEditW),l=parseFloat(furnitureEditL); pushUndo(); setPlacedDevices(prev=>prev.map(d=>d.uid===furnitureEditUid?{...d,w:!isNaN(w)&&w>0?Math.max(0.5,Math.min(30,w)):d.w,h:!isNaN(l)&&l>0?Math.max(0.5,Math.min(30,l)):d.h}:d)); setShowFurnitureEditor(false); } if (e.key === "Escape") setShowFurnitureEditor(false); }}
+                  style={{width:80,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:5,padding:"5px 8px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:12,outline:"none",textAlign:"right"}}
+                  onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                  onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                />
+              </label>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowFurnitureEditor(false)} style={{padding:"6px 14px",borderRadius:5,fontSize:12,background:"none",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer"}}>Cancel</button>
+              <button onClick={() => { const w=parseFloat(furnitureEditW),l=parseFloat(furnitureEditL); pushUndo(); setPlacedDevices(prev=>prev.map(d=>d.uid===furnitureEditUid?{...d,w:!isNaN(w)&&w>0?Math.max(0.5,Math.min(30,w)):d.w,h:!isNaN(l)&&l>0?Math.max(0.5,Math.min(30,l)):d.h}:d)); setShowFurnitureEditor(false); }} style={{padding:"6px 14px",borderRadius:5,fontSize:12,fontWeight:600,background:"#3b82f6",border:"none",color:"#fff",cursor:"pointer"}}>Apply</button>
+            </div>
+          </div>
+        )}
+
+        {/* Table size editor popover */}
+        {showTableSizeEditor && (
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",background:cc.panel,border:"1px solid rgb(var(--border))",borderRadius:10,padding:"18px 20px",zIndex:50,minWidth:220,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
+            <div style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))",marginBottom:14}}>Table Dimensions</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,fontSize:12,color:"rgb(var(--text-subtle))"}}>
+                Width (ft)
+                <input
+                  type="number" step="0.1" min="0.5" max="20"
+                  value={tableEditW}
+                  onChange={e => setTableEditW(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { const w=parseFloat(tableEditW),l=parseFloat(tableEditL); pushUndo(); if(!isNaN(w)&&w>0) setTableWidth(Math.max(0.5,Math.min(20,w))); if(!isNaN(l)&&l>0) setTableLengthOverride(Math.max(0.5,Math.min(30,l))); setShowTableSizeEditor(false); } if (e.key === "Escape") setShowTableSizeEditor(false); }}
+                  autoFocus
+                  style={{width:80,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:5,padding:"5px 8px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:12,outline:"none",textAlign:"right"}}
+                  onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                  onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                />
+              </label>
+              <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,fontSize:12,color:"rgb(var(--text-subtle))"}}>
+                Length (ft)
+                <input
+                  type="number" step="0.1" min="0.5" max="30"
+                  value={tableEditL}
+                  onChange={e => setTableEditL(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { const w=parseFloat(tableEditW),l=parseFloat(tableEditL); pushUndo(); if(!isNaN(w)&&w>0) setTableWidth(Math.max(0.5,Math.min(20,w))); if(!isNaN(l)&&l>0) setTableLengthOverride(Math.max(0.5,Math.min(30,l))); setShowTableSizeEditor(false); } if (e.key === "Escape") setShowTableSizeEditor(false); }}
+                  style={{width:80,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:5,padding:"5px 8px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:12,outline:"none",textAlign:"right"}}
+                  onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                  onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                />
+              </label>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowTableSizeEditor(false)} style={{padding:"6px 14px",borderRadius:5,fontSize:12,background:"none",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer"}}>Cancel</button>
+              <button onClick={() => { const w=parseFloat(tableEditW),l=parseFloat(tableEditL); pushUndo(); if(!isNaN(w)&&w>0) setTableWidth(Math.max(0.5,Math.min(20,w))); if(!isNaN(l)&&l>0) setTableLengthOverride(Math.max(0.5,Math.min(30,l))); setShowTableSizeEditor(false); }} style={{padding:"6px 14px",borderRadius:5,fontSize:12,fontWeight:600,background:"#3b82f6",border:"none",color:"#fff",cursor:"pointer"}}>Apply</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      </div>{/* end Row 1 */}
+
+      {/* Row: Ceiling Speakers */}
+      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers</div>
+      </div>
+      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        <svg ref={ceilSvgRef} width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
+          style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
+          onMouseMove={e=>{
+            if(isCeilPanning){const dx=(e.clientX-ceilPanStart.x)/ceilZoom;const dy=(e.clientY-ceilPanStart.y)/ceilZoom;setCeilPan({x:ceilPanStart.px+dx,y:ceilPanStart.py+dy});return;}
+            if(ceilDragUid && ceilDragStart && ceilSvgRef.current){
+              const svg=ceilSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
+              const cScale=Math.min(380/roomW,270/roomL);
+              const cOffX=(600-roomW*cScale)/2;const cOffY=(420-roomL*cScale)/2;
+              const worldX=Math.max(0,Math.min(roomW,(svgP.x-cOffX)/cScale));
+              const worldY=Math.max(0,Math.min(roomL,(svgP.y-cOffY)/cScale));
+              setPlacedDevices(prev=>prev.map(d=>d.uid===ceilDragUid?{...d,x:worldX,y:worldY}:d));
+            }
+          }}
+          onMouseUp={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
+          onMouseLeave={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
+          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
+>
+          {(() => {
+            const cScale = Math.min(380/roomW, 270/roomL);
+            const cOffX = (600 - roomW*cScale)/2;
+            const cOffY = (420 - roomL*cScale)/2;
+            const cpX = (x: number) => cOffX + x*cScale;
+            const cpY = (y: number) => cOffY + y*cScale;
+            const ceilingDevices = placedDevices.filter(d => (d.wall === "ceiling" || d.mountWall === "ceiling") && d.type === "speaker");
+            return (
+              <g>
+                {!isCustomBlank && (<>
+                  {/* Room outline */}
+                  <rect x={cpX(0)} y={cpY(0)} width={roomW*cScale} height={roomL*cScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
+                  {/* Door */}
+                  <rect x={cpX(roomW)-1} y={cpY(roomL*0.7)} width={3} height={roomL*0.15*cScale} fill="#475569"/>
+                  <text x={cpX(roomW)+10} y={cpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
+                  <text x={cpX(roomW/2)} y={Math.max(12,cpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
+                  <text x={cpX(roomW/2)} y={cpY(roomL)+10} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+                  <text x={cpX(-0.05)} y={cpY(roomL/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${cpX(-0.05)},${cpY(roomL/2)})`}>{toDisplay(roomL)}</text>
+                  {/* Table outline (reference) */}
+                  {showTable && (
+                    <rect x={cpX(roomW/2 - tableWidth/2)} y={cpY(tableWallDist)} width={tableWidth*cScale} height={(Math.max(1.5,tableSeats*0.35))*cScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
+                  )}
+                </>)}
+                {/* Drawn walls from floor plan */}
+                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
+                  const angle = dev.wallAngle!;
+                  const len = dev.w;
+                  const wx1 = dev.x - Math.cos(angle) * len / 2;
+                  const wy1 = dev.y - Math.sin(angle) * len / 2;
+                  const wx2 = dev.x + Math.cos(angle) * len / 2;
+                  const wy2 = dev.y + Math.sin(angle) * len / 2;
+                  return <line key={"cw"+dev.uid} x1={cpX(wx1)} y1={cpY(wy1)} x2={cpX(wx2)} y2={cpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                })}
+                {/* Doors/windows from floor plan */}
+                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
+                  const c = getDoorCoords(door);
+                  const color = door.type === "window" ? "#60a5fa" : "#475569";
+                  return <g key={"cd"+door.id}><line x1={cpX(c.x1)} y1={cpY(c.y1)} x2={cpX(c.x2)} y2={cpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={cpX(c.labelX)} y={cpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
+                })}
+                {/* Ceiling-mounted devices */}
+                {ceilingDevices.map(dev => {
+                  const dx = cpX(dev.x);
+                  const dy = cpY(dev.y);
+                  const isDragging = ceilDragUid === dev.uid;
+                  const isSelected = selectedUid === dev.uid;
+                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setCeilDragUid(dev.uid); setCeilDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
+                  if (dev.type === "speaker") {
+                    const earHeight = 4;  // 4 ft ear height
+                    const effectiveH = Math.max(0.5, roomH - earHeight);
+                    const dispRad = ((dev.dispersion || 90) / 2) * Math.PI / 180;
+                    const covDia = 2 * effectiveH * Math.tan(dispRad);
+                    const r = covDia / 2 * cScale;
+                    return (
+                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                        {isSelected && <circle cx={dx} cy={dy} r={10} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                        <circle cx={dx} cy={dy} r={r} fill="rgba(168,85,247,0.08)" stroke="#a855f7" strokeWidth={0.8} strokeDasharray="3 2"/>
+                        <circle cx={dx} cy={dy} r={6} fill="#a855f7" opacity={0.8}/>
+                        <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill="#a855f7" fontWeight={600}>{dev.name}</text>
+                        <text x={dx} y={dy+26} textAnchor="middle" fontSize={6} fill="#a855f780">{toDisplay(covDia)} dia</text>
+                      </g>
+                    );
+                  }
+                  if (dev.type === "mic") {
+                    const mouthHeight = 4;  // 4 ft mouth/ear height
+                    const effectiveH = Math.max(0.5, roomH - mouthHeight);
+                    const pickupAngle = 120;
+                    const pickupRad = (pickupAngle / 2) * Math.PI / 180;
+                    const covDia = 2 * effectiveH * Math.tan(pickupRad);
+                    const r = Math.min(covDia / 2 * cScale, Math.max(roomW, roomL) * cScale * 0.6);
+                    return (
+                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                        {isSelected && <circle cx={dx} cy={dy} r={9} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                        <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
+                        <circle cx={dx} cy={dy} r={5} fill="#22c55e" opacity={0.8}/>
+                        <text x={dx} y={dy+14} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
+                      </g>
+                    );
+                  }
+                  if (dev.type === "camera") {
+                    return (
+                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                        {isSelected && <rect x={dx-12} y={dy-9} width={24} height={18} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={4}/>}
+                        <rect x={dx-8} y={dy-5} width={16} height={10} rx={3} fill="rgba(245,158,11,0.15)" stroke="#f59e0b" strokeWidth={1}/>
+                        <circle cx={dx} cy={dy} r={3} fill="#f59e0b" opacity={0.8}/>
+                        <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill="#f59e0b" fontWeight={600}>{dev.name}</text>
+                      </g>
+                    );
+                  }
+                  return (
+                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                      {isSelected && <rect x={dx-10} y={dy-10} width={20} height={20} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
+                      <rect x={dx-6} y={dy-6} width={12} height={12} rx={2} fill={dev.color+"22"} stroke={dev.color} strokeWidth={0.8}/>
+                      <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600}>{dev.name}</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
+        </svg>
+        {/* Ceiling zoom controls */}
+        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setCeilZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
+          <button onClick={()=>{setCeilZoom(1);setCeilPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(ceilZoom*100)}%</button>
+          <button onClick={()=>setCeilZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
+        </div>
+      </div>{/* end ceiling speakers */}
+
+      {/* Row 2: Ceiling Microphones */}
+      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones</div>
+      </div>
+      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        <svg ref={micSvgRef} width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
+          style={{background:cc.card,cursor:isMicPanning?"grabbing":micDragUid?"grabbing":panMode?"grab":"default"}}
+          onMouseMove={e=>{
+            if(isMicPanning){const dx=(e.clientX-micPanStart.x)/micZoom;const dy=(e.clientY-micPanStart.y)/micZoom;setMicPan({x:micPanStart.px+dx,y:micPanStart.py+dy});return;}
+            if(micDragUid && micDragStart && micSvgRef.current){
+              const svg=micSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
+              const mScale=Math.min(380/roomW,270/roomL);
+              const mOffX=(600-roomW*mScale)/2;const mOffY=(420-roomL*mScale)/2;
+              const worldX=Math.max(0,Math.min(roomW,(svgP.x-mOffX)/mScale));
+              const worldY=Math.max(0,Math.min(roomL,(svgP.y-mOffY)/mScale));
+              setPlacedDevices(prev=>prev.map(d=>d.uid===micDragUid?{...d,x:worldX,y:worldY}:d));
+            }
+          }}
+          onMouseUp={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
+          onMouseLeave={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
+          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsMicPanning(true);setMicPanStart({x:e.clientX,y:e.clientY,px:micPan.x,py:micPan.y});}}}
+>
+          {(() => {
+            const mScale = Math.min(380/roomW, 270/roomL);
+            const mOffX = (600 - roomW*mScale)/2;
+            const mOffY = (420 - roomL*mScale)/2;
+            const mpX = (x: number) => mOffX + x*mScale;
+            const mpY = (y: number) => mOffY + y*mScale;
+            const micDevices = placedDevices.filter(d => (d.wall === "ceiling" || d.mountWall === "ceiling") && d.type === "mic");
+            return (
+              <g>
+                {!isCustomBlank && (<>
+                  <rect x={mpX(0)} y={mpY(0)} width={roomW*mScale} height={roomL*mScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
+                  <rect x={mpX(roomW)-1} y={mpY(roomL*0.7)} width={3} height={roomL*0.15*mScale} fill="#475569"/>
+                  <text x={mpX(roomW)+10} y={mpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
+                  <text x={mpX(roomW/2)} y={Math.max(12,mpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
+                  <text x={mpX(roomW/2)} y={mpY(roomL)+10} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+                  <text x={mpX(-0.05)} y={mpY(roomL/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${mpX(-0.05)},${mpY(roomL/2)})`}>{toDisplay(roomL)}</text>
+                  {showTable && (
+                    <rect x={mpX(roomW/2 - tableWidth/2)} y={mpY(tableWallDist)} width={tableWidth*mScale} height={(Math.max(1.5,tableSeats*0.35))*mScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
+                  )}
+                </>)}
+                {/* Drawn walls from floor plan */}
+                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
+                  const angle = dev.wallAngle!;
+                  const len = dev.w;
+                  const wx1 = dev.x - Math.cos(angle) * len / 2;
+                  const wy1 = dev.y - Math.sin(angle) * len / 2;
+                  const wx2 = dev.x + Math.cos(angle) * len / 2;
+                  const wy2 = dev.y + Math.sin(angle) * len / 2;
+                  return <line key={"mw"+dev.uid} x1={mpX(wx1)} y1={mpY(wy1)} x2={mpX(wx2)} y2={mpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                })}
+                {/* Doors/windows from floor plan */}
+                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
+                  const c = getDoorCoords(door);
+                  const color = door.type === "window" ? "#60a5fa" : "#475569";
+                  return <g key={"md"+door.id}><line x1={mpX(c.x1)} y1={mpY(c.y1)} x2={mpX(c.x2)} y2={mpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={mpX(c.labelX)} y={mpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
+                })}
+                {/* Mic devices */}
+                {micDevices.map(dev => {
+                  const dx = mpX(dev.x);
+                  const dy = mpY(dev.y);
+                  const isDragging = micDragUid === dev.uid;
+                  const isSelected = selectedUid === dev.uid;
+                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setMicDragUid(dev.uid); setMicDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
+                  const mouthHeight = 4;  // 4 ft mouth/ear height
+                  const effectiveH = Math.max(0.5, roomH - mouthHeight);
+                  const pickupAngle = 120;
+                  const pickupRad = (pickupAngle / 2) * Math.PI / 180;
+                  const covDia = 2 * effectiveH * Math.tan(pickupRad);
+                  const r = Math.min(covDia / 2 * mScale, Math.max(roomW, roomL) * mScale * 0.6);
+                  return (
+                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                      {isSelected && <circle cx={dx} cy={dy} r={9} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
+                      <circle cx={dx} cy={dy} r={5} fill="#22c55e" opacity={0.8}/>
+                      <text x={dx} y={dy+14} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
+                      <text x={dx} y={dy+24} textAnchor="middle" fontSize={6} fill="#22c55e80">{toDisplay(covDia)} dia</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
+        </svg>
+        {/* Mic zoom controls */}
+        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setMicZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
+          <button onClick={()=>{setMicZoom(1);setMicPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(micZoom*100)}%</button>
+          <button onClick={()=>setMicZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
+        </div>
+      </div>
+
+      {/* Row 3: Wall Speakers */}
+      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers</div>
+      </div>
+      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        <svg ref={wallSpkSvgRef} width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
+          style={{background:cc.card,cursor:isWallSpkPanning?"grabbing":wallSpkDragUid?"grabbing":panMode?"grab":"default"}}
+          onMouseMove={e=>{
+            if(isWallSpkPanning){const dx=(e.clientX-wallSpkPanStart.x)/wallSpkZoom;const dy=(e.clientY-wallSpkPanStart.y)/wallSpkZoom;setWallSpkPan({x:wallSpkPanStart.px+dx,y:wallSpkPanStart.py+dy});return;}
+            if(wallSpkDragUid && wallSpkSvgRef.current){
+              const svg=wallSpkSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
+              const wScale=Math.min(380/roomW,270/roomL);
+              const wOffX=(600-roomW*wScale)/2;const wOffY=(420-roomL*wScale)/2;
+              const dev=placedDevices.find(d=>d.uid===wallSpkDragUid);
+              if(dev){
+                const mw=dev.mountWall||"north";
+                if(mw==="north"||mw==="south"){
+                  const worldX=Math.max(0,Math.min(roomW,(svgP.x-wOffX)/wScale));
+                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallSpkDragUid?{...d,x:worldX}:d));
+                } else {
+                  const worldY=Math.max(0,Math.min(roomL,(svgP.y-wOffY)/wScale));
+                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallSpkDragUid?{...d,y:worldY}:d));
+                }
+              }
+            }
+          }}
+          onMouseUp={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
+          onMouseLeave={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
+          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsWallSpkPanning(true);setWallSpkPanStart({x:e.clientX,y:e.clientY,px:wallSpkPan.x,py:wallSpkPan.y});}}}
+>
+          {(() => {
+            const wScale = Math.min(380/roomW, 270/roomL);
+            const wOffX = (600 - roomW*wScale)/2;
+            const wOffY = (420 - roomL*wScale)/2;
+            const wpX = (x: number) => wOffX + x*wScale;
+            const wpY = (y: number) => wOffY + y*wScale;
+            const wallSpeakers = placedDevices.filter(d => d.type === "speaker" && d.wall !== "ceiling" && d.mountWall !== "ceiling");
+            return (
+              <g>
+                {!isCustomBlank && (<>
+                  <rect x={wpX(0)} y={wpY(0)} width={roomW*wScale} height={roomL*wScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
+                  <text x={wpX(roomW/2)} y={Math.max(12,wpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
+                  <text x={wpX(roomW/2)} y={wpY(roomL)+10} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+                  <text x={wpX(-0.05)} y={wpY(roomL/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${wpX(-0.05)},${wpY(roomL/2)})`}>{toDisplay(roomL)}</text>
+                  <rect x={wpX(roomW)-1} y={wpY(roomL*0.7)} width={3} height={roomL*0.15*wScale} fill="#475569"/>
+                  <text x={wpX(roomW)+10} y={wpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
+                  {showTable && (
+                    <rect x={wpX(roomW/2 - tableWidth/2)} y={wpY(tableWallDist)} width={tableWidth*wScale} height={(Math.max(1.5,tableSeats*0.35))*wScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
+                  )}
+                </>)}
+                {/* Drawn walls from floor plan */}
+                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
+                  const angle = dev.wallAngle!;
+                  const len = dev.w;
+                  const wx1 = dev.x - Math.cos(angle) * len / 2;
+                  const wy1 = dev.y - Math.sin(angle) * len / 2;
+                  const wx2 = dev.x + Math.cos(angle) * len / 2;
+                  const wy2 = dev.y + Math.sin(angle) * len / 2;
+                  return <line key={"wsw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                })}
+                {/* Doors/windows from floor plan */}
+                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
+                  const c = getDoorCoords(door);
+                  const color = door.type === "window" ? "#60a5fa" : "#475569";
+                  return <g key={"wsd"+door.id}><line x1={wpX(c.x1)} y1={wpY(c.y1)} x2={wpX(c.x2)} y2={wpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={wpX(c.labelX)} y={wpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
+                })}
+                {/* Table from floor plan */}
+                {showTable && !tableDeleted && (() => {
+                  const tcx = tableCenterX ?? roomW/2;
+                  const tcy = tableWallDist + tL/2;
+                  const tw2 = tW/2 * wScale;
+                  const tl2 = tL/2 * wScale;
+                  return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
+                })()}
+                {/* Chairs from floor plan */}
+                {placedDevices.filter(d => (d.id === "side-chair" || d.id === "exec-chair") && d.mountWall === "floor").map(dev => {
+                  const cw = Math.max(4, 0.45 * wScale);
+                  const cd = Math.max(3, 0.38 * wScale);
+                  return <rect key={"wsc"+dev.uid} x={wpX(dev.x)-cw/2} y={wpY(dev.y)-cd/2} width={cw} height={cd} rx={1} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.5} opacity={0.5} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
+                })}
+                {/* Wall speaker devices */}
+                {wallSpeakers.map(dev => {
+                  const dx = wpX(dev.x);
+                  const dy = wpY(dev.y);
+                  const mw = dev.mountWall || "north";
+                  const isDragging = wallSpkDragUid === dev.uid;
+                  const isSelected = selectedUid === dev.uid;
+                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setWallSpkDragUid(dev.uid); setSelectedUid(dev.uid); };
+                  // Position on wall edge
+                  let sx = dx, sy = dy;
+                  if (mw === "north") sy = wpY(0) + 4;
+                  else if (mw === "south") sy = wpY(roomL) - 4;
+                  else if (mw === "west") sx = wpX(0) + 4;
+                  else if (mw === "east") sx = wpX(roomW) - 4;
+                  // Coverage cone into room
+                  const coneLen = Math.min(roomW, roomL) * 0.4 * wScale;
+                  const coneSpread = coneLen * 0.6;
+                  let conePts = "";
+                  if (mw === "north") conePts = `${sx},${sy} ${sx-coneSpread},${sy+coneLen} ${sx+coneSpread},${sy+coneLen}`;
+                  else if (mw === "south") conePts = `${sx},${sy} ${sx-coneSpread},${sy-coneLen} ${sx+coneSpread},${sy-coneLen}`;
+                  else if (mw === "west") conePts = `${sx},${sy} ${sx+coneLen},${sy-coneSpread} ${sx+coneLen},${sy+coneSpread}`;
+                  else conePts = `${sx},${sy} ${sx-coneLen},${sy-coneSpread} ${sx-coneLen},${sy+coneSpread}`;
+                  return (
+                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                      {isSelected && <circle cx={sx} cy={sy} r={10} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      <polygon points={conePts} fill="rgba(249,115,22,0.08)" stroke="#f97316" strokeWidth={0.6} strokeDasharray="3 2"/>
+                      <rect x={sx-7} y={sy-4} width={14} height={8} rx={2} fill="#f97316" opacity={0.8}/>
+                      <text x={sx} y={sy+18} textAnchor="middle" fontSize={7} fill="#f97316" fontWeight={600}>{dev.name}</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
+        </svg>
+        {/* Wall speaker zoom controls */}
+        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setWallSpkZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
+          <button onClick={()=>{setWallSpkZoom(1);setWallSpkPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(wallSpkZoom*100)}%</button>
+          <button onClick={()=>setWallSpkZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
+        </div>
+      </div>
+
+      {/* Row 4: Wall Microphones */}
+      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones</div>
+      </div>
+      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        <svg ref={wallMicSvgRef} width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
+          style={{background:cc.card,cursor:isWallMicPanning?"grabbing":wallMicDragUid?"grabbing":panMode?"grab":"default"}}
+          onMouseMove={e=>{
+            if(isWallMicPanning){const dx=(e.clientX-wallMicPanStart.x)/wallMicZoom;const dy=(e.clientY-wallMicPanStart.y)/wallMicZoom;setWallMicPan({x:wallMicPanStart.px+dx,y:wallMicPanStart.py+dy});return;}
+            if(wallMicDragUid && wallMicSvgRef.current){
+              const svg=wallMicSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
+              const wScale=Math.min(380/roomW,270/roomL);
+              const wOffX=(600-roomW*wScale)/2;const wOffY=(420-roomL*wScale)/2;
+              const dev=placedDevices.find(d=>d.uid===wallMicDragUid);
+              if(dev){
+                const mw=dev.mountWall||"north";
+                if(mw==="north"||mw==="south"){
+                  const worldX=Math.max(0,Math.min(roomW,(svgP.x-wOffX)/wScale));
+                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallMicDragUid?{...d,x:worldX}:d));
+                } else {
+                  const worldY=Math.max(0,Math.min(roomL,(svgP.y-wOffY)/wScale));
+                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallMicDragUid?{...d,y:worldY}:d));
+                }
+              }
+            }
+          }}
+          onMouseUp={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
+          onMouseLeave={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
+          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsWallMicPanning(true);setWallMicPanStart({x:e.clientX,y:e.clientY,px:wallMicPan.x,py:wallMicPan.y});}}}
+>
+          {(() => {
+            const wScale = Math.min(380/roomW, 270/roomL);
+            const wOffX = (600 - roomW*wScale)/2;
+            const wOffY = (420 - roomL*wScale)/2;
+            const wpX = (x: number) => wOffX + x*wScale;
+            const wpY = (y: number) => wOffY + y*wScale;
+            const wallMics = placedDevices.filter(d => d.type === "mic" && d.wall !== "ceiling" && d.mountWall !== "ceiling" && d.wall !== "table");
+            return (
+              <g>
+                {!isCustomBlank && (<>
+                  <rect x={wpX(0)} y={wpY(0)} width={roomW*wScale} height={roomL*wScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
+                  <text x={wpX(roomW/2)} y={Math.max(12,wpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
+                  <text x={wpX(roomW/2)} y={wpY(roomL)+10} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
+                  <text x={wpX(-0.05)} y={wpY(roomL/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${wpX(-0.05)},${wpY(roomL/2)})`}>{toDisplay(roomL)}</text>
+                  <rect x={wpX(roomW)-1} y={wpY(roomL*0.7)} width={3} height={roomL*0.15*wScale} fill="#475569"/>
+                  <text x={wpX(roomW)+10} y={wpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
+                  {showTable && (
+                    <rect x={wpX(roomW/2 - tableWidth/2)} y={wpY(tableWallDist)} width={tableWidth*wScale} height={(Math.max(1.5,tableSeats*0.35))*wScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
+                  )}
+                </>)}
+                {/* Drawn walls from floor plan */}
+                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
+                  const angle = dev.wallAngle!;
+                  const len = dev.w;
+                  const wx1 = dev.x - Math.cos(angle) * len / 2;
+                  const wy1 = dev.y - Math.sin(angle) * len / 2;
+                  const wx2 = dev.x + Math.cos(angle) * len / 2;
+                  const wy2 = dev.y + Math.sin(angle) * len / 2;
+                  return <line key={"wmw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                })}
+                {/* Doors/windows from floor plan */}
+                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
+                  const c = getDoorCoords(door);
+                  const color = door.type === "window" ? "#60a5fa" : "#475569";
+                  return <g key={"wmd"+door.id}><line x1={wpX(c.x1)} y1={wpY(c.y1)} x2={wpX(c.x2)} y2={wpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={wpX(c.labelX)} y={wpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
+                })}
+                {/* Table from floor plan */}
+                {showTable && !tableDeleted && (() => {
+                  const tcx = tableCenterX ?? roomW/2;
+                  const tcy = tableWallDist + tL/2;
+                  const tw2 = tW/2 * wScale;
+                  const tl2 = tL/2 * wScale;
+                  return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
+                })()}
+                {/* Chairs from floor plan */}
+                {placedDevices.filter(d => (d.id === "side-chair" || d.id === "exec-chair") && d.mountWall === "floor").map(dev => {
+                  const cw = Math.max(4, 0.45 * wScale);
+                  const cd = Math.max(3, 0.38 * wScale);
+                  return <rect key={"wmc"+dev.uid} x={wpX(dev.x)-cw/2} y={wpY(dev.y)-cd/2} width={cw} height={cd} rx={1} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.5} opacity={0.5} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
+                })}
+                {/* Wall mic devices */}
+                {wallMics.map(dev => {
+                  const dx = wpX(dev.x);
+                  const dy = wpY(dev.y);
+                  const mw = dev.mountWall || "north";
+                  const isDragging = wallMicDragUid === dev.uid;
+                  const isSelected = selectedUid === dev.uid;
+                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setWallMicDragUid(dev.uid); setSelectedUid(dev.uid); };
+                  let sx = dx, sy = dy;
+                  if (mw === "north") sy = wpY(0) + 4;
+                  else if (mw === "south") sy = wpY(roomL) - 4;
+                  else if (mw === "west") sx = wpX(0) + 4;
+                  else if (mw === "east") sx = wpX(roomW) - 4;
+                  // Pickup cone into room
+                  const coneLen = Math.min(roomW, roomL) * 0.35 * wScale;
+                  const coneSpread = coneLen * 0.7;
+                  let conePts = "";
+                  if (mw === "north") conePts = `${sx},${sy} ${sx-coneSpread},${sy+coneLen} ${sx+coneSpread},${sy+coneLen}`;
+                  else if (mw === "south") conePts = `${sx},${sy} ${sx-coneSpread},${sy-coneLen} ${sx+coneSpread},${sy-coneLen}`;
+                  else if (mw === "west") conePts = `${sx},${sy} ${sx+coneLen},${sy-coneSpread} ${sx+coneLen},${sy+coneSpread}`;
+                  else conePts = `${sx},${sy} ${sx-coneLen},${sy-coneSpread} ${sx-coneLen},${sy+coneSpread}`;
+                  return (
+                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                      {isSelected && <circle cx={sx} cy={sy} r={10} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                      <polygon points={conePts} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.6} strokeDasharray="3 2"/>
+                      <circle cx={sx} cy={sy} r={5} fill="#22c55e" opacity={0.8}/>
+                      <text x={sx} y={sy+18} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
+        </svg>
+        {/* Wall mic zoom controls */}
+        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
+          <button onClick={()=>setWallMicZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
+          <button onClick={()=>{setWallMicZoom(1);setWallMicPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(wallMicZoom*100)}%</button>
+          <button onClick={()=>setWallMicZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
+        </div>
+      </div>
+      </>
+      </div>{/* end scrollable canvas */}
+
+      {/* ── Right Panel: Placed Devices ──────────────────── */}
+      <div style={{width:bomOpen?220:44,background:cc.panel,borderLeft:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,transition:"width 0.2s"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1px solid rgb(var(--border))",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",userSelect:"none"}} onClick={()=>setBomOpen(!bomOpen)}>
+          {bomOpen && <span style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))",whiteSpace:"nowrap"}}>Bill of Materials <span style={{color:"rgb(var(--text-subtle))",fontWeight:400}}>({placedDevices.filter(d=>d.type!=="furniture").length})</span></span>}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,transform:bomOpen?"none":"rotate(180deg)",transition:"transform 0.2s"}}>
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </div>
+        {bomOpen && <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
+          {placedDevices.filter(d=>d.type!=="furniture").length===0 ? (
+            <div style={{fontSize:13,color:"#334155",textAlign:"center",marginTop:24}}>No devices placed yet</div>
+          ) : (
+            placedDevices.filter(d=>d.type!=="furniture").map(d=>{
+              const isCam=d.type==="camera";
+              const isCeilMic=d.type==="mic"&&d.wall==="ceiling";
+              const isCeilSpk=d.type==="speaker"&&d.wall==="ceiling";
+              const isTableMic=d.id==="table-mic";
+              const hasPanel=selectedUid===d.uid&&showHfov&&(isCam||isCeilMic||isCeilSpk||isTableMic);
+              return (
+              <div key={d.uid}>
+                <div onClick={()=>{if(selectedUid===d.uid){setSelectedUid(null);setShowHfov(false);}else{setSelectedUid(d.uid);setShowHfov(true);}}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",fontSize:14,color:selectedUid===d.uid?"#60a5fa":"rgb(var(--text-muted))",marginBottom:hasPanel?0:4,background:selectedUid===d.uid?"rgba(59,130,246,0.1)":"rgb(var(--forge-surface) / 0.3)",border:"1px solid "+(selectedUid===d.uid?"rgba(59,130,246,0.3)":"transparent"),borderRadius:hasPanel?"6px 6px 0 0":6,cursor:"pointer"}}>
+                  <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4}}>{d.icon==="confbar"?<Video size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="soundbar"?<SoundbarIcon size={14} color="rgb(var(--text-muted))"/>:d.icon==="monitor"?<Monitor size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="presentation"?<Presentation size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="tv"?<LedWallIcon size={14} color="rgb(var(--text-muted))"/>:d.icon} {d.name}</span>
+                  <button onClick={e=>{e.stopPropagation();removeDevice(d.uid);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16,opacity:0.5,padding:0,marginLeft:6}}>×</button>
+                </div>
+                {selectedUid===d.uid&&isCam&&showHfov&&(
+                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>HFOV</span>
+                    <span style={{display:"flex",alignItems:"center",gap:4}}>
+                      <input type="number" className="no-spin" step={1} value={d.hfov||70}
+                        onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,hfov:v}:p))}}
+                        onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,hfov:Math.min(180,Math.max(10,p.hfov||70))}:p))}
+                        style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                        onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                      />
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>°</span>
+                    </span>
+                  </div>
+                )}
+                {selectedUid===d.uid&&isCeilMic&&showHfov&&(
+                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Shape</span>
+                      <div style={{display:"flex",gap:4}}>
+                        {(["round","square"] as const).map(s=>(
+                          <button key={s} onClick={e=>{e.stopPropagation();setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covShape:s}:p))}}
+                            style={{padding:"2px 8px",fontSize:12,borderRadius:3,cursor:"pointer",
+                              background:(d.covShape||"round")===s?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",
+                              border:"1px solid "+((d.covShape||"round")===s?"rgba(59,130,246,0.4)":"#334155"),
+                              color:(d.covShape||"round")===s?"#60a5fa":"rgb(var(--text-subtle))",textTransform:"capitalize"}}>{s}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {(d.covShape||"round")==="round" ? (
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Diameter</span>
+                        <span style={{display:"flex",alignItems:"center",gap:4}}>
+                          <input type="number" className="no-spin" step={1} value={Math.round(d.covDiameter||20)}
+                            onClick={e=>e.stopPropagation()}
+                            onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:v}:p))}}
+                            onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:Math.min(100,Math.max(1,p.covDiameter||20))}:p))}
+                            style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                            onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                          />
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                          <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Width</span>
+                          <span style={{display:"flex",alignItems:"center",gap:4}}>
+                            <input type="number" className="no-spin" step={1} value={Math.round(d.covW||20)}
+                              onClick={e=>e.stopPropagation()}
+                              onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covW:v}:p))}}
+                              onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covW:Math.min(100,Math.max(1,p.covW||20))}:p))}
+                              style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                              onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                            />
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
+                          </span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Length</span>
+                          <span style={{display:"flex",alignItems:"center",gap:4}}>
+                            <input type="number" className="no-spin" step={1} value={Math.round(d.covL||20)}
+                              onClick={e=>e.stopPropagation()}
+                              onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covL:v}:p))}}
+                              onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covL:Math.min(100,Math.max(1,p.covL||20))}:p))}
+                              style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                              onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                            />
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {selectedUid===d.uid&&isCeilSpk&&showHfov&&(
+                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Dispersion</span>
+                      <span style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="number" className="no-spin" step={1} value={d.dispersion||90}
+                          onClick={e=>e.stopPropagation()}
+                          onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,dispersion:v}:p))}}
+                          onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,dispersion:Math.min(360,Math.max(10,p.dispersion||90))}:p))}
+                          style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                          onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                        />
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>°</span>
+                      </span>
+                    </div>
+                    <div style={{fontSize:11,color:"#475569",marginTop:6}}>
+                      EPR: {toDisplay(2*(roomH-4)*Math.tan(((d.dispersion||90)/2)*Math.PI/180))} dia
+                    </div>
+                  </div>
+                )}
+                {selectedUid===d.uid&&isTableMic&&showHfov&&(
+                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Diameter</span>
+                    <span style={{display:"flex",alignItems:"center",gap:4}}>
+                      <input type="number" className="no-spin" step={1} value={d.covDiameter||6}
+                        onClick={e=>e.stopPropagation()}
+                        onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:v}:p))}}
+                        onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:Math.min(40,Math.max(1,p.covDiameter||6))}:p))}
+                        style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
+                        onFocus={e=>e.target.style.borderColor="#3b82f6"}
+                      />
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+            );})
+
+          )}
+        </div>}
+      </div>
+
+    </div>
+
+    {/* Custom Room Confirmation Modal */}
+    {showCustomConfirm && (
+      <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}} onClick={()=>setShowCustomConfirm(false)} />
+        <div style={{position:"relative",width:"100%",maxWidth:420,borderRadius:12,border:"1px solid rgb(var(--border))",background:"rgb(var(--forge-bg))",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+            <div style={{width:36,height:36,borderRadius:8,background:"rgba(245,158,11,0.1)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <div style={{fontSize:16,fontWeight:600,color:"rgb(var(--text-heading))"}}>Create your own Room?</div>
+          </div>
+          <p style={{fontSize:13,color:"rgb(var(--text-muted))",lineHeight:1.6,marginBottom:20}}>
+            Selecting this option will remove the automatically created plan using site survey information. Do you want to continue?
+          </p>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button
+              onClick={()=>setShowCustomConfirm(false)}
+              style={{padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:500,background:"transparent",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer"}}
+            >Cancel</button>
+            <button
+              onClick={()=>{setShowCustomConfirm(false);setPlacedDevices([]);setPlacedDoors([]);setShowTable(false);setTableDeleted(true);setDeletedChairs(new Set());setRoomSizeMode("custom");setStep(2);}}
+              style={{padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:600,background:"#3b82f6",border:"none",color:"#fff",cursor:"pointer"}}
+            >Yes, continue</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {showSurveyConfirm && (
+      <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}} onClick={()=>setShowSurveyConfirm(false)} />
+        <div style={{position:"relative",width:"100%",maxWidth:420,borderRadius:12,border:"1px solid rgb(var(--border))",background:"rgb(var(--forge-bg))",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+            <div style={{width:36,height:36,borderRadius:8,background:"rgba(245,158,11,0.1)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <div style={{fontSize:16,fontWeight:600,color:"rgb(var(--text-heading))"}}>Switch to Site Survey?</div>
+          </div>
+          <p style={{fontSize:13,color:"rgb(var(--text-muted))",lineHeight:1.6,marginBottom:20}}>
+            Switching to Site Survey will remove your custom-drawn room layout. Do you want to continue?
+          </p>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button
+              onClick={()=>setShowSurveyConfirm(false)}
+              style={{padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:500,background:"transparent",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer"}}
+            >Cancel</button>
+            <button
+              onClick={()=>{setShowSurveyConfirm(false);setPlacedDevices(prev => prev.filter(d => d.id !== "wall-partition"));setPlacedDoors([]);setShowTable(false);setTableDeleted(true);setDeletedChairs(new Set());setDeletedWalls(new Set());setRoomSizeMode("survey");setStep(2);}}
+              style={{padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:600,background:"#3b82f6",border:"none",color:"#fff",cursor:"pointer"}}
+            >Yes, continue</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </div>
+  );
+}
