@@ -36,7 +36,7 @@ const navItems = [
   { href: "/projects", label: "Projects", icon: ToolsIcon },
   { href: "/project-management", label: "Schedule", icon: ScheduleIcon },
   { href: "/board", label: "Board", icon: BoardIcon },
-  { href: "/inventory", label: "Inventory", icon: InventoryIcon },
+  { href: "/inventory", label: "Library", icon: InventoryIcon },
   { href: "/calculators", label: "Calculators", icon: CalculatorIcon },
 ];
 

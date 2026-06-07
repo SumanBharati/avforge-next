@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+type Section = "org" | "avforge" | "inventory";
+
 type Category = "Display" | "Audio" | "Control" | "Networking" | "Cable" | "Mount" | "Other";
 
 type InventoryItem = {
@@ -49,7 +51,116 @@ const SAMPLE_ITEMS: InventoryItem[] = [
   { id: uid(), name: "HDMI 2.1 Cable 10ft", brand: "Monoprice", model: "MP-8K-10", category: "Cable", quantity: 30, location: "Shelf C-4", condition: "New", serialNumber: "", notes: "" },
 ];
 
-export default function InventoryPage() {
+// ── Icons ────────────────────────────────────────────────────────────────────
+
+function BuildingIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M9 21V9" />
+    </svg>
+  );
+}
+
+function SparkleIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+    </svg>
+  );
+}
+
+function BoxIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  );
+}
+
+// ── Landing — 3 cards ────────────────────────────────────────────────────────
+
+const CARDS: { key: Section; label: string; description: string; icon: React.ReactNode; iconBg: string; iconColor: string; stat?: string }[] = [
+  {
+    key: "org",
+    label: "My Organization's Equipment Library",
+    description: "Curated catalog of approved equipment specific to your organization.",
+    icon: <BuildingIcon size={28} />,
+    iconBg: "bg-violet-500/10",
+    iconColor: "text-violet-400",
+  },
+  {
+    key: "avforge",
+    label: "AV Forge Library",
+    description: "Vetted AV products and full specifications maintained by AV Forge.",
+    icon: <SparkleIcon size={28} />,
+    iconBg: "bg-blue-500/10",
+    iconColor: "text-blue-400",
+  },
+  {
+    key: "inventory",
+    label: "Inventory",
+    description: "Track equipment your organization currently has in stock.",
+    icon: <BoxIcon size={28} />,
+    iconBg: "bg-emerald-500/10",
+    iconColor: "text-emerald-400",
+    stat: `${SAMPLE_ITEMS.length} SKUs`,
+  },
+];
+
+function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
+  return (
+    <div className="animate-fade-in px-8 py-6">
+      <div className="mb-8">
+        <h2 className="text-xl font-bold text-heading">Library</h2>
+        <p className="mt-1 text-[13px] text-muted">Browse equipment catalogs and manage your organization's stock.</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        {CARDS.map(({ key, label, description, icon, iconBg, iconColor, stat }) => (
+          <button
+            key={key}
+            onClick={() => onSelect(key)}
+            className="group flex flex-col rounded-2xl border border-border bg-forge-surface/20 p-6 text-left transition-all duration-150 hover:border-border hover:bg-forge-surface/40 hover:shadow-lg"
+          >
+            <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
+              {icon}
+            </div>
+            <div className="flex-1">
+              <div className="text-[15px] font-semibold text-heading leading-snug">{label}</div>
+              <div className="mt-2 text-[13px] text-muted leading-relaxed">{description}</div>
+            </div>
+            <div className="mt-6 flex items-center justify-between">
+              {stat ? (
+                <span className="text-[12px] font-medium text-subtle">{stat}</span>
+              ) : (
+                <span className="text-[12px] text-subtle italic">Coming soon</span>
+              )}
+              <span className={`text-[12px] font-medium transition-colors ${iconColor} opacity-0 group-hover:opacity-100`}>
+                Open →
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Inventory section ────────────────────────────────────────────────────────
+
+function InventoryView({ onBack }: { onBack: () => void }) {
   const [items, setItems] = useState<InventoryItem[]>(SAMPLE_ITEMS);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -100,12 +211,18 @@ export default function InventoryPage() {
 
   return (
     <div className="animate-fade-in px-8 py-6">
-
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors"
+          >
+            <ArrowLeftIcon />
+            Library
+          </button>
+          <span className="text-border">/</span>
           <h2 className="text-xl font-bold text-heading">Inventory</h2>
-          <p className="mt-1 text-[13px] text-muted">Track equipment your organization has in stock.</p>
         </div>
         <button
           onClick={openNew}
@@ -252,7 +369,6 @@ export default function InventoryPage() {
                 </svg>
               </button>
             </div>
-
             <div className="p-6 space-y-4">
               <div>
                 <label className={labelCls}>Item Name *</label>
@@ -301,7 +417,6 @@ export default function InventoryPage() {
                 <textarea value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} className={inputCls + " resize-none"} rows={2} placeholder="Optional notes…" />
               </div>
             </div>
-
             <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
               <button onClick={() => { setShowModal(false); setEditing(null); }} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
                 Cancel
@@ -315,4 +430,70 @@ export default function InventoryPage() {
       )}
     </div>
   );
+}
+
+// ── Placeholder sections ─────────────────────────────────────────────────────
+
+function PlaceholderView({ label, description, icon, iconBg, iconColor, onBack }: {
+  label: string; description: string; icon: React.ReactNode;
+  iconBg: string; iconColor: string; onBack: () => void;
+}) {
+  return (
+    <div className="animate-fade-in px-8 py-6">
+      <div className="mb-6 flex items-center gap-3">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors">
+          <ArrowLeftIcon />
+          Library
+        </button>
+        <span className="text-border">/</span>
+        <h2 className="text-xl font-bold text-heading">{label}</h2>
+      </div>
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className={`mb-4 flex h-16 w-16 items-center justify-center rounded-2xl ${iconBg} ${iconColor}`}>
+          {icon}
+        </div>
+        <div className="text-[16px] font-semibold text-heading">{label}</div>
+        <div className="mt-2 text-[13px] text-muted max-w-sm">{description}</div>
+        <div className="mt-4 rounded-full border border-border px-4 py-1.5 text-[12px] text-subtle">Coming soon</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Root ─────────────────────────────────────────────────────────────────────
+
+export default function LibraryPage() {
+  const [activeSection, setActiveSection] = useState<Section | null>(null);
+
+  if (activeSection === "inventory") {
+    return <InventoryView onBack={() => setActiveSection(null)} />;
+  }
+
+  if (activeSection === "org") {
+    return (
+      <PlaceholderView
+        label="My Organization's Equipment Library"
+        description="Build a curated catalog of approved equipment for your organization."
+        icon={<BuildingIcon size={30} />}
+        iconBg="bg-violet-500/10"
+        iconColor="text-violet-400"
+        onBack={() => setActiveSection(null)}
+      />
+    );
+  }
+
+  if (activeSection === "avforge") {
+    return (
+      <PlaceholderView
+        label="AV Forge Library"
+        description="A vetted catalog of AV products with full specs and pricing, maintained by AV Forge."
+        icon={<SparkleIcon size={30} />}
+        iconBg="bg-blue-500/10"
+        iconColor="text-blue-400"
+        onBack={() => setActiveSection(null)}
+      />
+    );
+  }
+
+  return <LandingView onSelect={setActiveSection} />;
 }

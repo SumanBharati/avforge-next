@@ -4,11 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import BoardPageSkeleton from "@/components/skeletons/BoardPageSkeleton";
 
+type Subtask = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
 type Card = {
   id: string;
   title: string;
   description?: string;
   descriptionShown?: boolean;
+  subtasks?: Subtask[];
 };
 
 type Column = {
@@ -83,6 +90,7 @@ export default function BoardPage() {
   const [newCardTitle, setNewCardTitle] = useState("");
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [colorPickerColumnId, setColorPickerColumnId] = useState<string | null>(null);
+  const [customColor, setCustomColor] = useState("#6366f1");
   const [openCard, setOpenCard] = useState<{ columnId: string; card: Card } | null>(null);
 
   const dragCard = useRef<{ columnId: string; cardId: string } | null>(null);
@@ -182,6 +190,26 @@ export default function BoardPage() {
     setOpenCard(null);
   }
 
+  function duplicateCard(columnId: string, cardId: string) {
+    setBoard((b) => ({
+      columns: b.columns.map((c) => {
+        if (c.id !== columnId) return c;
+        const idx = c.cards.findIndex((card) => card.id === cardId);
+        if (idx < 0) return c;
+        const original = c.cards[idx];
+        const copy: Card = {
+          ...original,
+          id: uid(),
+          title: `${original.title} (copy)`,
+          subtasks: original.subtasks?.map((s) => ({ ...s, id: uid() })),
+        };
+        const next = [...c.cards];
+        next.splice(idx + 1, 0, copy);
+        return { ...c, cards: next };
+      }),
+    }));
+  }
+
   function moveCard(fromColumnId: string, cardId: string, toColumnId: string, toIndex: number) {
     setBoard((b) => {
       const from = b.columns.find((c) => c.id === fromColumnId);
@@ -224,8 +252,6 @@ export default function BoardPage() {
 
   if (!hydrated) return <BoardPageSkeleton />;
 
-  const totalCards = board.columns.reduce((s, c) => s + c.cards.length, 0);
-
   return (
     <div className="animate-fade-in flex h-full flex-col px-8 py-6" style={{ minHeight: "calc(100vh - 72px)" }}>
       <div className="mb-5 flex items-center gap-3">
@@ -237,7 +263,7 @@ export default function BoardPage() {
         <div>
           <h1 className="text-[22px] font-bold text-heading">Board</h1>
           <p className="text-[13px] text-subtle">
-            Track your individual tasks across columns. {totalCards} {totalCards === 1 ? "card" : "cards"}.
+            Track your individual tasks across columns.
           </p>
         </div>
       </div>
@@ -246,7 +272,7 @@ export default function BoardPage() {
         {board.columns.map((column) => (
           <div
             key={column.id}
-            className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-forge-panel/60"
+            className="flex w-[300px] shrink-0 flex-col rounded-xl border border-border bg-forge-panel/60"
             draggable={editingColumnId !== column.id}
             onDragStart={(e) => {
               if (dragCard.current) return;
@@ -271,7 +297,7 @@ export default function BoardPage() {
           >
             {column.color && (
               <div
-                className="h-1.5 w-full"
+                className="h-1.5 w-full rounded-t-xl"
                 style={{ backgroundColor: column.color }}
               />
             )}
@@ -341,13 +367,13 @@ export default function BoardPage() {
                 </button>
                 {colorPickerColumnId === column.id && (
                   <div
-                    className="absolute right-0 top-7 z-20 w-[168px] rounded-lg border border-border bg-forge-bg p-2 shadow-xl"
+                    className="absolute right-0 top-7 z-20 w-[196px] rounded-lg border border-border bg-forge-bg p-2 shadow-xl"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-subtle">
                       Column color
                     </div>
-                    <div className="grid grid-cols-6 gap-1">
+                    <div className="grid grid-cols-7 gap-1">
                       {COLUMN_COLORS.map((c) => {
                         const active = (column.color ?? null) === c.value;
                         return (
@@ -382,6 +408,49 @@ export default function BoardPage() {
                           </button>
                         );
                       })}
+                    </div>
+                    <div className="mt-2.5 border-t border-border pt-2.5">
+                      <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+                        Custom color
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md border border-border">
+                          <input
+                            type="color"
+                            value={customColor}
+                            onChange={(e) => setCustomColor(e.target.value)}
+                            className="absolute -inset-1 h-10 w-10 cursor-pointer opacity-0"
+                            title="Pick a custom color"
+                          />
+                          <div
+                            className="h-full w-full rounded-md"
+                            style={{ backgroundColor: customColor }}
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          value={customColor}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setCustomColor(v);
+                          }}
+                          maxLength={7}
+                          className="min-w-0 flex-1 rounded-md border border-border bg-forge-surface px-2 py-1 font-mono text-[11px] text-body outline-none focus:border-blue-500/60"
+                          placeholder="#rrggbb"
+                        />
+                        <button
+                          onClick={() => {
+                            if (/^#[0-9a-fA-F]{6}$/.test(customColor)) {
+                              setColumnColor(column.id, customColor);
+                              setColorPickerColumnId(null);
+                            }
+                          }}
+                          disabled={!/^#[0-9a-fA-F]{6}$/.test(customColor)}
+                          className="rounded-md bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Apply
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -494,13 +563,26 @@ export default function BoardPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            duplicateCard(column.id, card.id);
+                          }}
+                          className="rounded p-0.5 text-faint hover:bg-forge-card hover:text-secondary"
+                          title="Duplicate card"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                            <rect x="5" y="5" width="8" height="9" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                            <path d="M3 11V3a1 1 0 0 1 1-1h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
                             deleteCard(column.id, card.id);
                           }}
                           className="rounded p-0.5 text-faint hover:bg-red-500/10 hover:text-red-400"
                           title="Delete card"
                         >
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            <path d="M2 4h12M5 4V2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5L13 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
                       </div>
@@ -534,6 +616,21 @@ export default function BoardPage() {
                           {card.description}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {(card.subtasks?.length ?? 0) > 0 && editingCard?.cardId !== card.id && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <div className="flex-1 h-1 overflow-hidden rounded-full bg-forge-card">
+                        <div
+                          className="h-full rounded-full bg-green-500 transition-all"
+                          style={{
+                            width: `${(card.subtasks!.filter(s => s.done).length / card.subtasks!.length) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted">
+                        {card.subtasks!.filter(s => s.done).length}/{card.subtasks!.length}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -669,10 +766,14 @@ function CardDetailModal({
 }) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description ?? "");
+  const [subtasks, setSubtasks] = useState<Subtask[]>(card.subtasks ?? []);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
 
   useEffect(() => {
     setTitle(card.title);
     setDescription(card.description ?? "");
+    setSubtasks(card.subtasks ?? []);
   }, [card.id]);
 
   function commitTitle() {
@@ -686,60 +787,180 @@ function CardDetailModal({
     if (v !== (card.description ?? "")) onSave({ description: v });
   }
 
+  function toggleSubtask(id: string) {
+    const updated = subtasks.map((s) => (s.id === id ? { ...s, done: !s.done } : s));
+    setSubtasks(updated);
+    onSave({ subtasks: updated });
+  }
+
+  function addSubtask() {
+    const t = newSubtaskTitle.trim();
+    if (!t) return;
+    const updated = [...subtasks, { id: uid(), title: t, done: false }];
+    setSubtasks(updated);
+    onSave({ subtasks: updated });
+    setNewSubtaskTitle("");
+  }
+
+  function deleteSubtask(id: string) {
+    const updated = subtasks.filter((s) => s.id !== id);
+    setSubtasks(updated);
+    onSave({ subtasks: updated });
+  }
+
+  function commitSubtaskTitle(id: string, value: string) {
+    const t = value.trim();
+    if (!t) {
+      deleteSubtask(id);
+      return;
+    }
+    const updated = subtasks.map((s) => (s.id === id ? { ...s, title: t } : s));
+    setSubtasks(updated);
+    onSave({ subtasks: updated });
+    setEditingSubtaskId(null);
+  }
+
+  const doneCount = subtasks.filter((s) => s.done).length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[560px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
-        <div className="mb-1 flex items-start justify-between gap-4">
-          <div className="flex-1">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-subtle">in {column}</div>
+      <div className="relative w-full max-w-[560px] max-h-[85vh] animate-fade-in rounded-xl border border-border bg-forge-surface shadow-2xl flex flex-col">
+        <div className="p-6 pb-0">
+          <div className="mb-1 flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="mb-1 text-[11px] uppercase tracking-wide text-subtle">in {column}</div>
+              <textarea
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    (e.target as HTMLTextAreaElement).blur();
+                  }
+                }}
+                rows={1}
+                className="w-full resize-none rounded border border-transparent bg-transparent text-lg font-semibold text-heading outline-none hover:border-border focus:border-blue-500"
+              />
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-forge-card hover:text-secondary"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4 flex flex-col gap-5">
+          <div>
+            <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wide text-subtle">
+              Description
+            </label>
             <textarea
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  (e.target as HTMLTextAreaElement).blur();
-                }
-              }}
-              rows={1}
-              className="w-full resize-none rounded border border-transparent bg-transparent text-lg font-semibold text-heading outline-none hover:border-border focus:border-blue-500"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={commitDescription}
+              placeholder="Add a more detailed description..."
+              rows={4}
+              className="forge-input w-full resize-y text-[13px]"
             />
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-forge-card hover:text-secondary"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="block text-[12px] font-semibold uppercase tracking-wide text-subtle">
+                Checklist
+              </label>
+              {subtasks.length > 0 && (
+                <span className="text-[11px] text-muted">{doneCount} / {subtasks.length}</span>
+              )}
+            </div>
+
+            {subtasks.length > 0 && (
+              <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-forge-card">
+                <div
+                  className="h-full rounded-full bg-green-500 transition-all duration-300"
+                  style={{ width: `${(doneCount / subtasks.length) * 100}%` }}
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-0.5">
+              {subtasks.map((subtask) => (
+                <div
+                  key={subtask.id}
+                  className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-forge-card/50"
+                >
+                  <button
+                    onClick={() => toggleSubtask(subtask.id)}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
+                      subtask.done
+                        ? "border-green-500 bg-green-500"
+                        : "border-border hover:border-blue-500"
+                    }`}
+                  >
+                    {subtask.done && (
+                      <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                  {editingSubtaskId === subtask.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={subtask.title}
+                      onBlur={(e) => commitSubtaskTitle(subtask.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitSubtaskTitle(subtask.id, (e.target as HTMLInputElement).value);
+                        else if (e.key === "Escape") setEditingSubtaskId(null);
+                      }}
+                      className="flex-1 rounded border border-blue-500/40 bg-forge-surface px-1.5 py-0.5 text-[13px] text-body outline-none"
+                    />
+                  ) : (
+                    <span
+                      onClick={() => setEditingSubtaskId(subtask.id)}
+                      className={`flex-1 cursor-text text-[13px] leading-snug ${subtask.done ? "text-muted line-through" : "text-body"}`}
+                    >
+                      {subtask.title}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => deleteSubtask(subtask.id)}
+                    className="shrink-0 rounded p-0.5 text-faint opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-2 flex gap-2">
+              <input
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addSubtask();
+                  else if (e.key === "Escape") setNewSubtaskTitle("");
+                }}
+                placeholder="Add a sub-task..."
+                className="flex-1 rounded-lg border border-border bg-forge-surface px-2.5 py-1.5 text-[13px] text-body outline-none placeholder:text-faint focus:border-blue-500/60"
+              />
+              {newSubtaskTitle.trim() && (
+                <button onClick={addSubtask} className="forge-btn-primary text-[12px]">
+                  Add
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="mt-5">
-          <label className="mb-1.5 block text-[12px] font-semibold uppercase tracking-wide text-subtle">
-            Description
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={commitDescription}
-            placeholder="Add a more detailed description..."
-            rows={6}
-            className="forge-input w-full resize-y text-[13px]"
-          />
-        </div>
-
-        <div className="mt-6 flex items-center justify-between">
-          <button
-            onClick={() => {
-              if (confirm("Delete this card?")) onDelete();
-            }}
-            className="rounded-lg px-3 py-2 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/10"
-          >
-            Delete card
-          </button>
+        <div className="border-t border-border px-6 py-4 flex items-center justify-end">
           <button onClick={onClose} className="forge-btn-primary text-[13px]">
             Done
           </button>
