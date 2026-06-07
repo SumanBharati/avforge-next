@@ -42,12 +42,15 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [filterClient, setFilterClient] = useState("");
   const [filterStage, setFilterStage] = useState("");
   const [filterSales, setFilterSales] = useState("");
 
   useEffect(() => {
-    if (!orgLoading && activeOrg) loadProjects();
+    if (orgLoading) return;
+    if (!activeOrg) { setLoading(false); return; }
+    loadProjects();
   }, [activeOrg?.id, orgLoading]);
 
   async function loadProjects() {
@@ -80,9 +83,9 @@ export default function ProjectsPage() {
 
   async function handleCreate(data: { name: string; jobNumber: string; clientName: string; address: string; city: string; state: string; zipCode: string; clientEmail: string; clientPhone: string }) {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user || !activeOrg) return;
 
-    if (!activeOrg) return;
+    setCreateError("");
     const { error } = await supabase.from("projects").insert({
       org_id: activeOrg.id,
       user_id: user.id,
@@ -99,10 +102,14 @@ export default function ProjectsPage() {
       phase: "opportunity",
     });
 
-    if (!error) {
-      await loadProjects();
-      setShowModal(false);
+    if (error) {
+      console.error("Failed to create project:", error);
+      setCreateError(error.message);
+      return;
     }
+
+    await loadProjects();
+    setShowModal(false);
   }
 
   async function handleDelete(id: string) {
@@ -252,7 +259,7 @@ export default function ProjectsPage() {
       )}
 
       {/* ── New Project Modal ────────────────────────── */}
-      {showModal && <NewProjectModal onClose={() => setShowModal(false)} onCreate={handleCreate} existingClients={uniqueClients} />}
+      {showModal && <NewProjectModal onClose={() => { setShowModal(false); setCreateError(""); }} onCreate={handleCreate} existingClients={uniqueClients} error={createError} />}
     </div>
   );
 }
@@ -264,12 +271,14 @@ function NewProjectModal({
   onUpdate,
   existingClients,
   initialValues,
+  error,
 }: {
   onClose: () => void;
   onCreate: (data: { name: string; jobNumber: string; clientName: string; address: string; city: string; state: string; zipCode: string; clientEmail: string; clientPhone: string }) => void;
   onUpdate?: (data: { name: string; jobNumber: string; clientName: string; address: string; city: string; state: string; zipCode: string; clientEmail: string; clientPhone: string }) => void;
   existingClients: string[];
   initialValues?: { name: string; jobNumber: string; clientName: string; address: string; city: string; state: string; zipCode: string; clientEmail: string; clientPhone: string };
+  error?: string;
 }) {
   const isEdit = !!initialValues;
   const [name, setName] = useState(initialValues?.name ?? "");
@@ -391,6 +400,10 @@ function NewProjectModal({
               </div>
             </div>
           </div>
+
+          {error && (
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>
+          )}
 
           <div className="mt-2 flex items-center justify-end gap-3">
             <button type="button" onClick={onClose} className="rounded-lg px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:text-body">Cancel</button>

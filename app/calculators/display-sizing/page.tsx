@@ -32,12 +32,11 @@ export default function DisplaySizingPage() {
   const [c2MinElem, setC2MinElem] = useState('');
   const [c3Farthest, setC3Farthest] = useState('');
   const [c3ImageH, setC3ImageH] = useState('');
-  const [c1Floor, setC1Floor] = useState('');
-  const [c2Floor, setC2Floor] = useState('');
-  const [c3Floor, setC3Floor] = useState('');
-  const [results1, setResults1] = useState<CalcResult | null>(null);
-  const [results2, setResults2] = useState<CalcResult | null>(null);
-  const [results3, setResults3] = useState<CalcResult | null>(null);
+  const [colFloors, setColFloors] = useState(['', '', '']);
+  const [colResults, setColResults] = useState<(CalcResult | null)[]>([null, null, null]);
+
+  const updateFloor = (i: number, v: string) => setColFloors(f => { const n = [...f]; n[i] = v; return n; });
+  const updateResult = (i: number, r: CalcResult | null) => setColResults(rs => { const n = [...rs]; n[i] = r; return n; });
 
   const compute = (imageH: number, farthestViewer: number, floorToBottom: number | null, minElemH: number): CalcResult => {
     const ar = aspectRatio || 1.78;
@@ -54,52 +53,41 @@ export default function DisplaySizingPage() {
     return { imageH, minElemH, farthestViewer, floorToBottom: fb, closestViewer, maxCVPlane, imageW: w, imageDiag: diag, viewingRatio: vr };
   };
 
+  const resolveFromImageH = (h: number, pctElem: number) =>
+    pctElem > 0 ? { fv: h * 2 * pctElem, pctEH: pctElem } : { fv: h * 6, pctEH: 3 };
+
+  const resolveFromFarthest = (fv: number, pctElem: number) =>
+    pctElem > 0 ? { h: fv / (2 * pctElem), minE: pctElem } : { h: fv / 6, minE: 3 };
+
   const calcCol1 = () => {
     const h = parseFloat(c1ImageH);
     if (!h || h <= 0) return;
-    const pctElem = parseFloat(c1MinElem);
-    let fv: number, pctEH: number;
-    if (pctElem && pctElem > 0) {
-      fv = h * 2 * pctElem;
-      pctEH = pctElem;
-    } else {
-      fv = h * 6;
-      pctEH = 3;
-    }
-    const fb = parseFloat(c1Floor) || 0;
-    setResults1(compute(h, fv, fb || null, pctEH));
+    const { fv, pctEH } = resolveFromImageH(h, parseFloat(c1MinElem) || 0);
+    const fb = parseFloat(colFloors[0]) || 0;
+    updateResult(0, compute(h, fv, fb || null, pctEH));
   };
 
   const calcCol2 = () => {
     const fv = parseFloat(c2Farthest);
     if (!fv || fv <= 0) return;
-    const pctElem = parseFloat(c2MinElem);
-    let h: number, minE: number;
-    if (pctElem && pctElem > 0) {
-      h = fv / (2 * pctElem);
-      minE = pctElem;
-    } else {
-      h = fv / 6;
-      minE = 3;
-    }
-    const fb = parseFloat(c2Floor) || 0;
-    setResults2(compute(h, fv, fb || null, minE));
+    const { h, minE } = resolveFromFarthest(fv, parseFloat(c2MinElem) || 0);
+    const fb = parseFloat(colFloors[1]) || 0;
+    updateResult(1, compute(h, fv, fb || null, minE));
   };
 
   const calcCol3 = () => {
     const fv = parseFloat(c3Farthest);
     const h = parseFloat(c3ImageH);
     if (!fv || fv <= 0 || !h || h <= 0) return;
-    const vr = fv / h;
-    const pctEH = vr / 2;
-    const fb = parseFloat(c3Floor) || 0;
-    setResults3(compute(h, fv, fb || null, pctEH));
+    const pctEH = (fv / h) / 2;
+    const fb = parseFloat(colFloors[2]) || 0;
+    updateResult(2, compute(h, fv, fb || null, pctEH));
   };
 
   const reset = () => {
     setC1ImageH(''); setC1MinElem(''); setC2Farthest(''); setC2MinElem(''); setC3Farthest(''); setC3ImageH('');
-    setC1Floor(''); setC2Floor(''); setC3Floor('');
-    setResults1(null); setResults2(null); setResults3(null);
+    setColFloors(['', '', '']);
+    setColResults([null, null, null]);
   };
 
   const presets = [
@@ -160,48 +148,48 @@ export default function DisplaySizingPage() {
 
                 <div style={rowLabel}>Image Height</div>
                 <div style={{ padding: 2 }}><input type="number" value={c1ImageH} onChange={e => setC1ImageH(e.target.value)} placeholder="enter" style={cellInput} /></div>
-                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{results2 ? fmt(results2.imageH) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{colResults[1] ? fmt(colResults[1].imageH) : '0.00'}</div></div>
                 <div style={{ padding: 2 }}><input type="number" value={c3ImageH} onChange={e => setC3ImageH(e.target.value)} placeholder="enter" style={cellInput} /></div>
 
                 <div style={rowLabel}>Minimum %Element Height</div>
                 <div style={{ padding: 2 }}><input type="number" value={c1MinElem} onChange={e => setC1MinElem(e.target.value)} placeholder="enter %" style={cellInput} /></div>
                 <div style={{ padding: 2 }}><input type="number" value={c2MinElem} onChange={e => setC2MinElem(e.target.value)} placeholder="enter %" style={cellInput} /></div>
-                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{results3 ? fmt(results3.minElemH) + '%' : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{colResults[2] ? fmt(colResults[2].minElemH) + '%' : '0.00'}</div></div>
 
                 <div style={rowLabel}>Farthest Viewer</div>
-                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{results1 ? fmt(results1.farthestViewer) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellKeyOutput}>{colResults[0] ? fmt(colResults[0].farthestViewer) : '0.00'}</div></div>
                 <div style={{ padding: 2 }}><input type="number" value={c2Farthest} onChange={e => setC2Farthest(e.target.value)} placeholder="enter" style={cellInput} /></div>
                 <div style={{ padding: 2 }}><input type="number" value={c3Farthest} onChange={e => setC3Farthest(e.target.value)} placeholder="enter" style={cellInput} /></div>
 
                 <div style={rowLabel}>Floor to Bottom of Image*</div>
-                <div style={{ padding: 2 }}><input type="number" value={c1Floor} onChange={e => setC1Floor(e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
-                <div style={{ padding: 2 }}><input type="number" value={c2Floor} onChange={e => setC2Floor(e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
-                <div style={{ padding: 2 }}><input type="number" value={c3Floor} onChange={e => setC3Floor(e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[0]} onChange={e => updateFloor(0, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[1]} onChange={e => updateFloor(1, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[2]} onChange={e => updateFloor(2, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
 
                 <div style={rowLabel}>Closest Viewer</div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results1 ? fmt(results1.closestViewer) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results2 ? fmt(results2.closestViewer) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results3 ? fmt(results3.closestViewer) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].closestViewer) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[1] ? fmt(colResults[1].closestViewer) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[2] ? fmt(colResults[2].closestViewer) : '0.00'}</div></div>
 
                 <div style={rowLabel}>Max Length of CV Plane</div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results1 ? fmt(results1.maxCVPlane) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results2 ? fmt(results2.maxCVPlane) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results3 ? fmt(results3.maxCVPlane) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].maxCVPlane) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[1] ? fmt(colResults[1].maxCVPlane) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[2] ? fmt(colResults[2].maxCVPlane) : '0.00'}</div></div>
 
                 <div style={rowLabel}>Image Width</div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results1 ? fmt(results1.imageW) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results2 ? fmt(results2.imageW) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results3 ? fmt(results3.imageW) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].imageW) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[1] ? fmt(colResults[1].imageW) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[2] ? fmt(colResults[2].imageW) : '0.00'}</div></div>
 
                 <div style={rowLabel}>Image Diagonal</div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results1 ? fmt(results1.imageDiag) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results2 ? fmt(results2.imageDiag) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results3 ? fmt(results3.imageDiag) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].imageDiag) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[1] ? fmt(colResults[1].imageDiag) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[2] ? fmt(colResults[2].imageDiag) : '0.00'}</div></div>
 
                 <div style={rowLabel}>Viewing Ratio</div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results1 ? fmt(results1.viewingRatio) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results2 ? fmt(results2.viewingRatio) : '0.00'}</div></div>
-                <div style={{ padding: 2 }}><div style={cellOutput}>{results3 ? fmt(results3.viewingRatio) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].viewingRatio) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[1] ? fmt(colResults[1].viewingRatio) : '0.00'}</div></div>
+                <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[2] ? fmt(colResults[2].viewingRatio) : '0.00'}</div></div>
 
                 <div style={{ padding: '8px 4px', fontSize: 10, color: '#475569' }}>*Optional input</div>
                 <div style={{ padding: '6px 2px' }}><button onClick={calcCol1} style={calcBtn}>Calculate</button></div>

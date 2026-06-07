@@ -125,15 +125,22 @@ export default function SignalFlowPage() {
   const [modalModel, setModalModel] = useState("");
 
   // Annotation tools
-  const [activeTool, setActiveTool] = useState<"text"|"shape"|"pencil"|"highlight"|null>(null);
+  const [activeTool, setActiveTool] = useState<"text"|"shape"|"pencil"|"highlight"|"eraser"|null>(null);
   const [shapeSubtype, setShapeSubtype] = useState<"rect"|"circle"|"line"|"arrow">("rect");
   const [toolColor, setToolColor] = useState("#374151");
   const [hlColor, setHlColor] = useState("#fbbf24");
+  const [hlSubtype, setHlSubtype] = useState<"rect"|"freehand">("rect");
   const [strokeW, setStrokeW] = useState(2);
   const [annotations, setAnnotations] = useState<any[]>([]);
   const [liveAnnot, setLiveAnnot] = useState<any>(null);
-  const [textInput, setTextInput] = useState<{cssX:number,cssY:number,svgX:number,svgY:number}|null>(null);
+  const [textInput, setTextInput] = useState<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
   const [textValue, setTextValue] = useState("");
+  const [textFontSize, setTextFontSize] = useState(14);
+  const [textBold, setTextBold] = useState(false);
+  const [textItalic, setTextItalic] = useState(false);
+  const [textAlign, setTextAlign] = useState<"left"|"center"|"right">("left");
+  const [editingAnnotId, setEditingAnnotId] = useState<string|null>(null);
+  const editingAnnotIdRef = useRef<string|null>(null);
   const [selectedAnnotId, setSelectedAnnotId] = useState<string|null>(null);
   const drawRef = useRef<{sx:number,sy:number,pts?:{x:number,y:number}[]}|null>(null);
   const annotIdRef = useRef(1);
@@ -434,28 +441,76 @@ export default function SignalFlowPage() {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  const eraseAtPoint = (x: number, y: number) => {
+    const R = 15;
+    setAnnotations(prev => prev.filter((a: any) => {
+      if (a.type === "pencil") {
+        const pts = [...a.d.matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)];
+        return !pts.some((m: any) => {
+          const dx = parseFloat(m[1]) - x, dy = parseFloat(m[2]) - y;
+          return dx*dx + dy*dy < R*R;
+        });
+      }
+      if (a.type === "highlight") {
+        if (a.sub === "freehand") {
+          const pts = [...a.d.matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)];
+          return !pts.some((m:any) => { const dx=parseFloat(m[1])-x,dy=parseFloat(m[2])-y; return dx*dx+dy*dy<R*R*16; });
+        }
+        return !(x >= a.x - R && x <= a.x + a.w + R && y >= a.y - R && y <= a.y + a.h + R);
+      }
+      if (a.type === "shape") {
+        const minX = Math.min(a.x1, a.x2), maxX = Math.max(a.x1, a.x2);
+        const minY = Math.min(a.y1, a.y2), maxY = Math.max(a.y1, a.y2);
+        return !(x >= minX - R && x <= maxX + R && y >= minY - R && y <= maxY + R);
+      }
+      if (a.type === "text") {
+        const dx = a.x - x, dy = a.y - y;
+        return dx*dx + dy*dy >= R*R*9;
+      }
+      return true;
+    }));
+  };
+
   const handleToolDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     const {x, y} = getSVGCoords(e);
+    if (activeTool === "eraser") {
+      eraseAtPoint(x, y);
+      drawRef.current = {sx: x, sy: y};
+      return;
+    }
     if (activeTool === "text") {
       const rect = canvasRef.current!.getBoundingClientRect();
-      setTextInput({cssX: e.clientX - rect.left, cssY: e.clientY - rect.top, svgX: x, svgY: y});
+      const ti = {cssX: e.clientX - rect.left, cssY: e.clientY - rect.top, svgX: x, svgY: y, clientX: e.clientX, clientY: e.clientY};
+      textInputRef.current = ti;
+      textValueRef.current = "";
+      setTextInput(ti);
       setTextValue("");
       return;
     }
-    drawRef.current = {sx: x, sy: y, pts: activeTool === "pencil" ? [{x, y}] : undefined};
+    drawRef.current = {sx: x, sy: y, pts: (activeTool === "pencil" || (activeTool === "highlight" && hlSubtype === "freehand")) ? [{x, y}] : undefined};
   };
 
   const handleToolMove = (e: React.MouseEvent) => {
     if (!drawRef.current) return;
     const {x, y} = getSVGCoords(e);
     const {sx, sy} = drawRef.current;
+    if (activeTool === "eraser") {
+      eraseAtPoint(x, y);
+      return;
+    }
     if (activeTool === "pencil") {
       drawRef.current.pts!.push({x, y});
       const d = drawRef.current.pts!.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
       setLiveAnnot({type:"pencil", d, color:toolColor, sw:strokeW});
     } else if (activeTool === "highlight") {
-      setLiveAnnot({type:"highlight", x:Math.min(sx,x), y:Math.min(sy,y), w:Math.abs(x-sx), h:Math.abs(y-sy), color:hlColor});
+      if (hlSubtype === "freehand") {
+        drawRef.current.pts!.push({x, y});
+        const d = drawRef.current.pts!.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+        setLiveAnnot({type:"highlight", sub:"freehand", d, color:hlColor});
+      } else {
+        setLiveAnnot({type:"highlight", sub:"rect", x:Math.min(sx,x), y:Math.min(sy,y), w:Math.abs(x-sx), h:Math.abs(y-sy), color:hlColor});
+      }
     } else if (activeTool === "shape") {
       setLiveAnnot({type:"shape", sub:shapeSubtype, x1:sx, y1:sy, x2:x, y2:y, color:toolColor, sw:strokeW});
     }
@@ -470,13 +525,53 @@ export default function SignalFlowPage() {
     drawRef.current = null;
   };
 
+  const textValueRef = useRef("");
+  const textInputRef = useRef<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const commitTextRef = useRef<()=>void>(()=>{});
+
+  // Force-focus + select-all when editor opens
+  useEffect(() => {
+    if (!textInput || !textareaRef.current) return;
+    const el = textareaRef.current;
+    el.focus();
+    el.select();
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [textInput?.clientX, textInput?.clientY]);
+
+  // Save on click outside the editor
+  useEffect(() => {
+    if (!textInput) return;
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('[data-texteditor]')) {
+        commitTextRef.current();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [textInput?.clientX, textInput?.clientY]);
+
   const commitText = () => {
-    if (cancelTextRef.current) { cancelTextRef.current = false; setTextInput(null); setTextValue(""); return; }
-    if (textInput && textValue.trim()) {
-      setAnnotations(prev=>[...prev, {id:`a${annotIdRef.current++}`, type:"text", x:textInput.svgX, y:textInput.svgY+14, text:textValue, color:toolColor, size:14}]);
+    if (cancelTextRef.current) { cancelTextRef.current = false; textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null; return; }
+    const editId = editingAnnotIdRef.current;
+    const val = textValueRef.current;
+    const ti = textInputRef.current;
+    if (ti && val.trim()) {
+      if (editId) {
+        setAnnotations(prev => prev.map((a:any) => a.id === editId
+          ? {...a, text:val, color:toolColor, size:textFontSize, bold:textBold, italic:textItalic, align:textAlign}
+          : a
+        ));
+      } else {
+        setAnnotations(prev=>[...prev, {id:`a${annotIdRef.current++}`, type:"text", x:ti.svgX, y:ti.svgY+textFontSize, text:val, color:toolColor, size:textFontSize, bold:textBold, italic:textItalic, align:textAlign}]);
+      }
     }
-    setTextInput(null); setTextValue("");
+    textInputRef.current = null;
+    setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null;
   };
+  commitTextRef.current = commitText;
 
   const renderAnnotation = (a: any, isLive = false) => {
     const key = isLive ? "live" : a.id;
@@ -485,9 +580,14 @@ export default function SignalFlowPage() {
     if (a.type === "pencil") return (
       <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
     );
-    if (a.type === "highlight") return (
-      <rect key={key} x={a.x} y={a.y} width={a.w} height={a.h} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
-    );
+    if (a.type === "highlight") {
+      if (a.sub === "freehand") return (
+        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+      );
+      return (
+        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+      );
+    }
     if (a.type === "shape") {
       const {sub,x1,y1,x2,y2,color,sw} = a;
       const stroke = color||"#374151"; const sw2 = sw||2;
@@ -505,7 +605,26 @@ export default function SignalFlowPage() {
       }
     }
     if (a.type === "text") return (
-      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}>{a.text}</text>
+      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:"pointer",...selRing}}
+        onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}
+        onDoubleClick={e=>{
+          e.stopPropagation();
+          if(activeTool)return;
+          textValueRef.current = a.text;
+          setTextValue(a.text);
+          setTextFontSize(a.size||14);
+          setTextBold(a.bold||false);
+          setTextItalic(a.italic||false);
+          setTextAlign(a.align||"left");
+          setToolColor(a.color||"#374151");
+          editingAnnotIdRef.current = a.id;
+          setEditingAnnotId(a.id);
+          const rect=canvasRef.current!.getBoundingClientRect();
+          const ti={cssX:e.clientX-rect.left,cssY:e.clientY-rect.top,svgX:a.x,svgY:a.y-(a.size||14),clientX:e.clientX,clientY:e.clientY};
+          textInputRef.current=ti;
+          setTextInput(ti);
+        }}
+      >{a.text}</text>
     );
     return null;
   };
@@ -516,7 +635,7 @@ export default function SignalFlowPage() {
       const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
       if(e.key === "Escape") {
         setSelected(null); setSelectedConn(null); setSelectedRoom(null); setConnecting(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
-        cancelTextRef.current = true; setTextInput(null); setTextValue("");
+        textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null;
         return;
       }
       if(e.key !== "Delete" && e.key !== "Backspace") return;
@@ -556,17 +675,29 @@ export default function SignalFlowPage() {
     );
   };
 
+  const exportAsPDF = () => {
+    const style = document.createElement('style');
+    style.id = '__sf_print_style__';
+    style.textContent = `
+      @media print {
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; visibility: hidden !important; }
+        #sf-canvas-export, #sf-canvas-export * { visibility: visible !important; }
+        #sf-canvas-export { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; background: #fff !important; overflow: visible !important; }
+      }
+    `;
+    document.head.appendChild(style);
+    const prev = document.title;
+    document.title = 'Signal Flow Diagram';
+    setTimeout(() => { window.print(); document.head.removeChild(style); document.title = prev; }, 80);
+  };
+
   return (
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px)",overflow:"hidden"}}>
 
       {/* === RIBBON === */}
       <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",flexShrink:0,userSelect:"none"}}>
-        {/* Tab strip */}
-        <div style={{display:"flex",alignItems:"flex-end",paddingLeft:8,height:22,background:"rgb(var(--forge-bg))",borderBottom:"1px solid rgb(var(--border))"}}>
-          <div style={{padding:"3px 16px",fontSize:10,fontWeight:700,letterSpacing:"0.06em",color:"rgb(var(--text-body))",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderBottom:"1px solid rgb(var(--forge-panel))",borderRadius:"3px 3px 0 0",cursor:"default",marginBottom:-1}}>HOME</div>
-        </div>
         {/* Tool groups */}
-        <div style={{display:"flex",alignItems:"stretch",height:58,paddingLeft:4,paddingRight:12}}>
+        <div style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
 
           {/* Drawing group */}
           <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
@@ -590,7 +721,7 @@ export default function SignalFlowPage() {
                 <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Location</span>
               </button>
             </div>
-            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Drawing</span>
+            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Create</span>
           </div>
 
           {/* Divider */}
@@ -628,6 +759,10 @@ export default function SignalFlowPage() {
                   {toolBtn("highlight","Highlight",
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="highlight"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><rect x="9" y="9" width="13" height="13" rx="2" fill={activeTool==="highlight"?"#fbbf2440":"none"}/></svg>,
                     "Highlight"
+                  )}
+                  {toolBtn("eraser","Erase Annotation",
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="eraser"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-1.5 1.5"/><path d="M6.5 17.5l5-5"/></svg>,
+                    "Eraser"
                   )}
                 </div>
                 <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
@@ -671,9 +806,20 @@ export default function SignalFlowPage() {
                     ))}
                   </div>
                 )}
-                {/* Highlight colors */}
+                {/* Highlight options */}
                 {activeTool==="highlight" && (
-                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    {/* Subtype toggle */}
+                    {[
+                      {id:"rect", label:"Rect", icon:<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="12" height="8" rx="1.5" fill={hlSubtype==="rect"?"#fbbf24":"none"} stroke={hlSubtype==="rect"?"#92400e":"rgb(var(--text-subtle))"} strokeWidth="1.5" opacity={hlSubtype==="rect"?0.8:1}/></svg>},
+                      {id:"freehand", label:"Pen", icon:<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 10 Q4 5 7 7 Q10 9 12 4" stroke={hlSubtype==="freehand"?"#fbbf24":"rgb(var(--text-subtle))"} strokeWidth={hlSubtype==="freehand"?3:2} strokeLinecap="round" fill="none" opacity={hlSubtype==="freehand"?0.9:1}/></svg>},
+                    ].map(({id,label,icon})=>(
+                      <button key={id} onClick={()=>setHlSubtype(id as "rect"|"freehand")} title={label}
+                        style={{display:"flex",alignItems:"center",justifyContent:"center",width:26,height:22,background:hlSubtype===id?"rgba(251,191,36,0.15)":"rgb(var(--forge-surface))",border:`1px solid ${hlSubtype===id?"#fbbf24":"rgb(var(--border))"}`,borderRadius:4,cursor:"pointer",padding:0}}>
+                        {icon}
+                      </button>
+                    ))}
+                    <div style={{width:1,height:16,background:"rgb(var(--border))"}}/>
                     <span style={{fontSize:9,color:"rgb(var(--text-subtle))"}}>Color</span>
                     {["#fbbf24","#fb923c","#4ade80","#60a5fa","#f472b6","#c084fc"].map(c=>(
                       <button key={c} onClick={()=>setHlColor(c)}
@@ -685,6 +831,20 @@ export default function SignalFlowPage() {
             </>
           )}
 
+          {/* Spacer pushes export button to far right */}
+          <div style={{flex:1}}/>
+          <div style={{display:"flex",alignItems:"center",paddingRight:4}}>
+            <button onClick={exportAsPDF} title="Export canvas as PDF"
+              style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",color:"rgb(var(--text-body))",fontSize:12,fontWeight:500,transition:"all 0.15s",whiteSpace:"nowrap"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(59,130,246,0.1)";e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-body))"}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                <line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/>
+              </svg>
+              Export PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -692,7 +852,7 @@ export default function SignalFlowPage() {
       <div style={{display:"flex",flex:1,overflow:"hidden"}}>
 
       {/* Canvas */}
-      <div style={{flex:1,position:"relative",overflow:"hidden",background:"rgb(var(--forge-bg))"}}>
+      <div id="sf-canvas-export" style={{flex:1,position:"relative",overflow:"hidden",background:"rgb(var(--forge-bg))"}}>
         {/* Connection status */}
         {connecting && (
           <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:5,color:"#3b82f6",fontSize:11,whiteSpace:"nowrap"}}>
@@ -797,23 +957,50 @@ export default function SignalFlowPage() {
           )}
 
           {/* Pencil / Shape / Text annotations (above devices) */}
-          {annotations.filter((a:any)=>a.type!=="highlight").map(a=>renderAnnotation(a))}
+          {annotations.filter((a:any)=>a.type!=="highlight"&&a.id!==editingAnnotId).map(a=>renderAnnotation(a))}
           {liveAnnot && liveAnnot.type!=="highlight" && renderAnnotation(liveAnnot, true)}
         </svg>
 
-        {/* Text tool input overlay */}
+        {/* Text tool overlay */}
         {textInput && (
-          <div style={{position:"absolute",left:textInput.cssX,top:textInput.cssY,zIndex:50,transform:"translate(2px,-6px)"}}>
-            <input
-              autoFocus
-              value={textValue}
-              onChange={e=>setTextValue(e.target.value)}
-              onKeyDown={e=>{e.stopPropagation();if(e.key==="Enter"){commitText();}if(e.key==="Escape"){cancelTextRef.current=true;setTextInput(null);setTextValue("");}}}
-              onBlur={commitText}
-              style={{background:"transparent",border:"none",borderBottom:"1.5px solid #3b82f6",outline:"none",fontSize:14,color:"rgb(var(--text-body))",fontFamily:"Inter, sans-serif",padding:"1px 2px",minWidth:60,caretColor:"#3b82f6"}}
-              placeholder="Type here…"
-            />
-          </div>
+          <>
+            {/* Formatting toolbar */}
+            <div data-texteditor="true" style={{position:"fixed",left:textInput.clientX,top:textInput.clientY-54,zIndex:10000,transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:2,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:10,padding:"5px 8px",boxShadow:"0 2px 12px rgba(0,0,0,0.12)",whiteSpace:"nowrap"}}>
+              <button onClick={()=>setTextFontSize(s=>Math.max(8,s-2))} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none",color:"rgb(var(--text-subtle))",fontSize:16,cursor:"pointer",borderRadius:4}}>−</button>
+              <span style={{fontSize:12,fontFamily:"monospace",color:"rgb(var(--text-body))",minWidth:24,textAlign:"center",userSelect:"none"}}>{textFontSize}</span>
+              <button onClick={()=>setTextFontSize(s=>Math.min(72,s+2))} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none",color:"rgb(var(--text-subtle))",fontSize:14,cursor:"pointer",borderRadius:4}}>+</button>
+              <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
+              <button onClick={()=>setTextBold(b=>!b)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textBold?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textBold?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"Georgia,serif",color:textBold?"#3b82f6":"rgb(var(--text-body))"}}>B</button>
+              <button onClick={()=>setTextItalic(i=>!i)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textItalic?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textItalic?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",fontStyle:"italic",fontSize:13,fontFamily:"Georgia,serif",color:textItalic?"#3b82f6":"rgb(var(--text-body))"}}>I</button>
+              <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
+              {(["left","center","right"] as const).map(al=>(
+                <button key={al} onClick={()=>setTextAlign(al)} title={`Align ${al}`} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textAlign===al?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textAlign===al?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",padding:0}}>
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                    {al==="left"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="6" x2="9" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="10" x2="11" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                    {al==="center"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="6" x2="11" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="2" y1="10" x2="12" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                    {al==="right"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="5" y1="6" x2="13" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="10" x2="13" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                  </svg>
+                </button>
+              ))}
+              <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
+              {["#1e293b","#3b82f6","#ef4444","#10b981","#f59e0b","#a855f7"].map(c=>(
+                <button key={c} onClick={()=>setToolColor(c)} style={{width:14,height:14,borderRadius:"50%",background:c,border:toolColor===c?"2px solid #3b82f6":"2px solid rgb(var(--border))",cursor:"pointer",padding:0,outline:"none",flexShrink:0}} />
+              ))}
+            </div>
+
+            {/* Text input */}
+            <div data-texteditor="true" style={{position:"fixed",left:textInput.clientX,top:textInput.clientY,zIndex:10000}}>
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={textValue}
+                onChange={e=>{textValueRef.current=e.target.value;setTextValue(e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
+                onKeyDown={e=>{e.stopPropagation();if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitText();}if(e.key==="Escape"){textInputRef.current=null;setTextInput(null);setTextValue("");setEditingAnnotId(null);editingAnnotIdRef.current=null;}}}
+                style={{background:"rgb(var(--forge-panel))",border:"2px solid #3b82f6",borderRadius:6,outline:"none",fontSize:textFontSize,fontWeight:textBold?"700":"400",fontStyle:textItalic?"italic":"normal",textAlign,color:"rgb(var(--text-body))",fontFamily:"Inter,sans-serif",padding:"6px 10px",minWidth:140,resize:"none",overflow:"hidden",caretColor:"#3b82f6",boxShadow:"0 2px 12px rgba(59,130,246,0.2)",lineHeight:1.4}}
+                placeholder="Type here…"
+              />
+            </div>
+          </>
         )}
 
         {/* Signal type legend */}
@@ -1164,7 +1351,7 @@ export default function SignalFlowPage() {
           {/* OR ADD MANUALLY divider */}
           <div style={{display:"flex",alignItems:"center",gap:12,padding:"4px 20px 14px",flexShrink:0}}>
             <div style={{flex:1,height:1,background:"rgb(var(--border))"}} />
-            <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.08em",color:"rgb(var(--text-subtle))",textTransform:"uppercase",whiteSpace:"nowrap"}}>Or Add Manually</span>
+            <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.08em",color:"rgb(var(--text-subtle))",textTransform:"uppercase",whiteSpace:"nowrap"}}>Or Create New</span>
             <div style={{flex:1,height:1,background:"rgb(var(--border))"}} />
           </div>
 

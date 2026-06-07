@@ -4,6 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 import { VoyageAIClient } from "voyageai";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+
+function sanitize(value: unknown, maxLen = 300): string {
+  const s = typeof value === 'string' ? value : String(value ?? '');
+  return s.replace(/[\r\n]/g, ' ').slice(0, maxLen);
+}
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -92,29 +97,29 @@ export async function POST(request: NextRequest) {
 
     if (projectContext) {
       const ctx = projectContext;
-      let contextBlock = `\n\n## Current Context\nThe user is on page: ${ctx.page}`;
+      let contextBlock = `\n\n## Current Context\nThe user is on page: ${sanitize(ctx.page)}`;
 
       if (ctx.project) {
-        contextBlock += `\n\n### Project: ${ctx.project.name}`;
-        if (ctx.project.client_name) contextBlock += `\nClient: ${ctx.project.client_name}`;
-        if (ctx.project.job_number) contextBlock += `\nJob Number: ${ctx.project.job_number}`;
-        if (ctx.project.phase) contextBlock += `\nCurrent Phase: ${ctx.project.phase}`;
+        contextBlock += `\n\n### Project: ${sanitize(ctx.project.name)}`;
+        if (ctx.project.client_name) contextBlock += `\nClient: ${sanitize(ctx.project.client_name)}`;
+        if (ctx.project.job_number) contextBlock += `\nJob Number: ${sanitize(ctx.project.job_number)}`;
+        if (ctx.project.phase) contextBlock += `\nCurrent Phase: ${sanitize(ctx.project.phase)}`;
       }
 
       if (ctx.survey) {
         contextBlock += `\n\n### Site Survey Data`;
         for (const building of ctx.survey.buildings || []) {
-          contextBlock += `\nBuilding: ${building.name}`;
+          contextBlock += `\nBuilding: ${sanitize(building.name)}`;
           if (building.data) {
             for (const [k, v] of Object.entries(building.data)) {
-              if (v) contextBlock += `\n  ${k}: ${v}`;
+              if (v) contextBlock += `\n  ${sanitize(k)}: ${sanitize(v)}`;
             }
           }
           for (const room of building.rooms || []) {
-            contextBlock += `\n  Room: ${room.name}`;
+            contextBlock += `\n  Room: ${sanitize(room.name)}`;
             if (room.data) {
               for (const [k, v] of Object.entries(room.data)) {
-                if (v) contextBlock += `\n    ${k}: ${v}`;
+                if (v) contextBlock += `\n    ${sanitize(k)}: ${sanitize(v)}`;
               }
             }
           }
@@ -123,34 +128,34 @@ export async function POST(request: NextRequest) {
 
       if (ctx.proposal) {
         contextBlock += `\n\n### Proposal Data`;
-        if (ctx.proposal.scopeOfWork) contextBlock += `\nScope: ${ctx.proposal.scopeOfWork}`;
-        if (ctx.proposal.taxRate) contextBlock += `\nTax Rate: ${ctx.proposal.taxRate}%`;
-        if (ctx.proposal.marginPercent) contextBlock += `\nMargin: ${ctx.proposal.marginPercent}%`;
+        if (ctx.proposal.scopeOfWork) contextBlock += `\nScope: ${sanitize(ctx.proposal.scopeOfWork, 1000)}`;
+        if (ctx.proposal.taxRate) contextBlock += `\nTax Rate: ${sanitize(ctx.proposal.taxRate)}%`;
+        if (ctx.proposal.marginPercent) contextBlock += `\nMargin: ${sanitize(ctx.proposal.marginPercent)}%`;
         for (const section of ctx.proposal.sections || []) {
-          contextBlock += `\nSection: ${section.name}`;
+          contextBlock += `\nSection: ${sanitize(section.name)}`;
           for (const item of section.items || []) {
-            contextBlock += `\n  - ${item.qty}x ${item.manufacturer} ${item.model} (${item.category}) @ $${item.unitCost}`;
+            contextBlock += `\n  - ${sanitize(item.qty)}x ${sanitize(item.manufacturer)} ${sanitize(item.model)} (${sanitize(item.category)}) @ $${sanitize(item.unitCost)}`;
           }
         }
       }
 
       if (ctx.procurement) {
         contextBlock += `\n\n### Procurement Summary`;
-        contextBlock += `\nLine items: ${ctx.procurement.lineCount}, POs: ${ctx.procurement.poCount}`;
-        contextBlock += `\nPending: ${ctx.procurement.pendingItems}, Ordered: ${ctx.procurement.orderedItems}, Received: ${ctx.procurement.receivedItems}`;
+        contextBlock += `\nLine items: ${sanitize(ctx.procurement.lineCount)}, POs: ${sanitize(ctx.procurement.poCount)}`;
+        contextBlock += `\nPending: ${sanitize(ctx.procurement.pendingItems)}, Ordered: ${sanitize(ctx.procurement.orderedItems)}, Received: ${sanitize(ctx.procurement.receivedItems)}`;
       }
 
       if (ctx.equipmentLibrary && ctx.equipmentLibrary.length > 0) {
         contextBlock += `\n\n### Equipment Library (prefer these when recommending)`;
         for (const e of ctx.equipmentLibrary) {
-          contextBlock += `\n  - ${e.manufacturer} ${e.model} (${e.category}) — $${e.unitCost}`;
+          contextBlock += `\n  - ${sanitize(e.manufacturer)} ${sanitize(e.model)} (${sanitize(e.category)}) — $${sanitize(e.unitCost)}`;
         }
       }
 
       if (ctx.laborRates) {
         contextBlock += `\n\n### Organization Labor Rates`;
         for (const [k, v] of Object.entries(ctx.laborRates)) {
-          if (v) contextBlock += `\n  ${k.replace(/_/g, " ")}: $${v}/hr`;
+          if (v) contextBlock += `\n  ${sanitize(k).replace(/_/g, " ")}: $${sanitize(v)}/hr`;
         }
       }
 
@@ -175,7 +180,7 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     console.error("Chat API error:", err);
     return NextResponse.json(
-      { error: err.message || "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

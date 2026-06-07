@@ -145,14 +145,14 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
     const target = orgs.find((o) => o.id === orgId);
     if (!target) return;
 
-    setActiveOrgId(orgId);
-
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      await supabase
+      const { error } = await supabase
         .from("user_preferences")
         .upsert({ user_id: user.id, active_org_id: orgId }, { onConflict: "user_id" });
+      if (error) console.error("Failed to persist active org:", error);
     }
+    setActiveOrgId(orgId);
   }
 
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null;

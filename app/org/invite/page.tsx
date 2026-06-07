@@ -85,10 +85,11 @@ function InviteAcceptPageInner() {
       return;
     }
 
-    await supabase
+    const { error: updateErr } = await supabase
       .from("organization_invites")
       .update({ status: "accepted" })
       .eq("id", invite.id);
+    if (updateErr) console.error("Failed to mark invite accepted:", updateErr);
 
     // Switch to the new org
     await supabase

@@ -113,6 +113,11 @@ export default function RoomDesignerPage() {
   const [roomH,         setRoomH]         = useState(8.86);
   const [placedDevices, setPlacedDevices] = useState<PlacedDevice[]>([]);
   const [activeCat,     setActiveCat]     = useState("Displays");
+  const [equipSearch,   setEquipSearch]   = useState("");
+  const [equipDesc,     setEquipDesc]     = useState("");
+  const [equipMake,     setEquipMake]     = useState("");
+  const [equipModel,    setEquipModel]    = useState("");
+  const [customDevices, setCustomDevices] = useState<(DeviceCatalogItem & {description:string,make:string,model:string})[]>([]);
   const [step,          setStep]          = useState(2);
   const [selectedWall,  setSelectedWall]  = useState("north");
   const [tableShape,    setTableShape]    = useState("rectangular");
@@ -1846,10 +1851,6 @@ export default function RoomDesignerPage() {
     <div style={{display:"flex",flex:1,overflow:"hidden"}}>
       {/* ── Left Sidebar ─────────────────────────────────── */}
       <div style={{width:420,background:cc.panel,borderRight:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,minHeight:0}}>
-        <div style={{padding:"14px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
-          <div style={{fontSize:20,fontWeight:600,color:"rgb(var(--text-body))"}}>Room Designer</div>
-        </div>
-
         <div style={{flex:1,overflowY:"auto",overflowX:"hidden",minHeight:0}}>
           {/* Room Configuration */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
@@ -2022,32 +2023,117 @@ export default function RoomDesignerPage() {
 
           {/* Devices */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Place Equipment</div>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Add Equipment</div>
+
+            {/* Search bar */}
+            <div style={{position:"relative",marginBottom:4}}>
+              <textarea
+                rows={2}
+                placeholder="Search displays, cameras, speakers, microphones, or control panels"
+                value={equipSearch}
+                onChange={e=>setEquipSearch(e.target.value.replace(/\n/g,""))}
+                style={{width:"100%",boxSizing:"border-box",padding:"9px 36px 9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none",resize:"none",lineHeight:"1.45",fontFamily:"inherit"}}
+              />
+              <svg style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",opacity:0.4}} width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+
+            {/* OR CREATE NEW */}
+            <div style={{display:"flex",alignItems:"center",gap:8,margin:"10px 0 8px"}}>
+              <div style={{flex:1,height:1,background:"rgb(var(--border))"}}/>
+              <span style={{fontSize:11,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em",whiteSpace:"nowrap"}}>OR CREATE NEW</span>
+              <div style={{flex:1,height:1,background:"rgb(var(--border))"}}/>
+            </div>
+
+            {/* Description / Make / Model */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:8}}>
+              {[
+                {label:"Description",val:equipDesc,set:setEquipDesc,ph:"Description"},
+                {label:"Make",val:equipMake,set:setEquipMake,ph:"Make"},
+                {label:"Model",val:equipModel,set:setEquipModel,ph:"Model"},
+              ].map(f=>(
+                <div key={f.label}>
+                  <div style={{fontSize:10,fontWeight:600,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>{f.label}</div>
+                  <input type="text" placeholder={f.ph} value={f.val} onChange={e=>f.set(e.target.value)}
+                    style={{width:"100%",boxSizing:"border-box",padding:"6px 7px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}/>
+                </div>
+              ))}
+            </div>
+
+            {/* Cancel / + Add */}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginBottom:14}}>
+              <button
+                onClick={()=>{setEquipDesc("");setEquipMake("");setEquipModel("");}}
+                style={{padding:"5px 14px",background:"none",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-muted))",fontSize:12,cursor:"pointer"}}
+              >Cancel</button>
+              <button
+                onClick={()=>{
+                  const name = equipDesc.trim() || [equipMake,equipModel].filter(Boolean).join(" ") || "Custom Device";
+                  const newDev = {id:`custom_${Date.now()}`,name,description:equipDesc,make:equipMake,model:equipModel,w:1.2,h:0.9,wall:"none",icon:"📦",type:"custom",color:"rgb(var(--text-subtle))"};
+                  setCustomDevices(prev=>[...prev,newDev]);
+                  setEquipDesc("");setEquipMake("");setEquipModel("");
+                }}
+                style={{padding:"5px 14px",background:"#2563eb",border:"none",borderRadius:5,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}
+              >+ Add</button>
+            </div>
+
+            {/* Custom devices (user-created) */}
+            {customDevices.length > 0 && (
+              <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:10}}>
+                {customDevices.map(item=>(
+                  <button key={item.id}
+                    onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
+                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                    onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                  >
+                    <span style={{fontSize:18}}>📦</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
+                      <div style={{fontSize:11,color:"#475569"}}>{[item.make,item.model].filter(Boolean).join(" · ") || "Custom"} · drag to place</div>
+                    </div>
+                    <button onClick={e=>{e.stopPropagation();setCustomDevices(prev=>prev.filter(d=>d.id!==item.id));}} style={{padding:2,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:14,lineHeight:1,flexShrink:0}}>×</button>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Device Categories */}
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:12,marginBottom:8}}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
               {deviceCatalog.map(c=>(
                 <button key={c.cat} onClick={()=>setActiveCat(c.cat)} style={{padding:"4px 10px",borderRadius:4,fontSize:12,fontWeight:activeCat===c.cat?600:400,background:activeCat===c.cat?"rgba(59,130,246,0.15)":"transparent",border:"1px solid "+(activeCat===c.cat?"rgba(59,130,246,0.3)":"transparent"),color:activeCat===c.cat?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer"}}>{c.cat}</button>
               ))}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-              {deviceCatalog.find(c=>c.cat===activeCat)?.items.map(item=>(
-                <button key={item.id}
-                  onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
-                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
-                  onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
-                >
-                  {item.icon==="confbar" ? <Video size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                   : item.icon==="soundbar" ? <SoundbarIcon size={20} color="rgb(var(--text-muted))"/>
-                   : item.icon==="monitor" ? <Monitor size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                   : item.icon==="presentation" ? <Presentation size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                   : item.icon==="tv" ? <LedWallIcon size={20} color="rgb(var(--text-muted))"/>
-                   : <span style={{fontSize:18}}>{item.icon}</span>}
-                  <div>
-                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>{item.name}</div>
-                    <div style={{fontSize:11,color:"#475569"}}>{item.wall} mount · {toDisplay(item.w)}×{toDisplay(item.h)} · drag to place</div>
-                  </div>
-                </button>
-              ))}
+              {(()=>{
+                const q = equipSearch.trim().toLowerCase();
+                const catItems = deviceCatalog.find(c=>c.cat===activeCat)?.items ?? [];
+                const filtered = q
+                  ? deviceCatalog.flatMap(c=>c.items.map(i=>({...i,_cat:c.cat}))).filter(i=>
+                      i.name.toLowerCase().includes(q) ||
+                      i._cat.toLowerCase().includes(q) ||
+                      i.type.toLowerCase().includes(q)
+                    )
+                  : catItems;
+                return filtered.map(item=>(
+                  <button key={item.id}
+                    onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
+                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
+                    onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                  >
+                    {item.icon==="confbar" ? <Video size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                     : item.icon==="soundbar" ? <SoundbarIcon size={20} color="rgb(var(--text-muted))"/>
+                     : item.icon==="monitor" ? <Monitor size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                     : item.icon==="presentation" ? <Presentation size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
+                     : item.icon==="tv" ? <LedWallIcon size={20} color="rgb(var(--text-muted))"/>
+                     : <span style={{fontSize:18}}>{item.icon}</span>}
+                    <div>
+                      <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>{item.name}</div>
+                      <div style={{fontSize:11,color:"#475569"}}>{item.wall} mount · {toDisplay(item.w)}×{toDisplay(item.h)} · drag to place</div>
+                    </div>
+                  </button>
+                ));
+              })()}
             </div>
           </div>
 

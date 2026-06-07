@@ -222,23 +222,25 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   const [assigningRole, setAssigningRole] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     supabase
       .from("projects")
       .select("*")
       .eq("id", params.id)
       .single()
       .then(({ data }) => {
+        if (cancelled) return;
         setLoading(false);
         if (data) {
           setProject(data);
           setCurrentPhase(data.phase || "opportunity");
-          // Fetch org members for this project's org
           supabase
             .from("organization_members")
             .select("id, user_id, role")
             .eq("org_id", data.org_id)
             .then(async ({ data: members }) => {
-              if (!members) return;
+              if (cancelled || !members) return;
               const enriched: OrgMember[] = await Promise.all(
                 members.map(async (m) => {
                   const { data: u } = await supabase.auth.admin.getUserById(m.user_id).catch(() => ({ data: null })) as any;
@@ -251,17 +253,16 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   };
                 })
               );
-              setOrgMembers(enriched);
+              if (!cancelled) setOrgMembers(enriched);
             });
         }
       });
 
-    // Fetch assigned project members
     supabase
       .from("project_members")
       .select("id, member_id, role, full_name, email")
       .eq("project_id", params.id)
-      .then(({ data }) => { if (data) setProjectMembers(data as ProjectMember[]); });
+      .then(({ data }) => { if (!cancelled && data) setProjectMembers(data as ProjectMember[]); });
 
     supabase
       .from("proposals")
@@ -269,7 +270,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
       .eq("project_id", params.id)
       .single()
       .then(({ data: row }) => {
-        if (row?.data) setProposalData(row.data as ProposalData);
+        if (!cancelled && row?.data) setProposalData(row.data as ProposalData);
       });
 
     supabase
@@ -278,10 +279,13 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
       .eq("project_id", params.id)
       .single()
       .then(({ data: surveyRow }) => {
+        if (cancelled) return;
         const survey = surveyRow?.data as { buildings?: { rooms?: { id: string; name: string }[] }[] } | null;
         const rooms = survey?.buildings?.flatMap((b) => b.rooms || []) || [];
         if (rooms.length > 0) setSurveyRooms(rooms);
       });
+
+    return () => { cancelled = true; };
   }, [params.id]);
 
   useEffect(() => {
