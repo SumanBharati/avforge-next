@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
+import { BOMProvider } from "@/lib/bom-context";
 
 interface Room {
   id: string;
@@ -71,7 +72,7 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
   return (
     <div>
       {/* Top header */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-8 py-4" style={{flexShrink:0,position:"sticky",top:0,zIndex:20}}>
         <div className="flex items-center justify-between">
           <div>
             {projectId && (
@@ -164,7 +165,9 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
 
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
-        {children}
+        <BOMProvider>
+          {children}
+        </BOMProvider>
       </div>
       </div>
     </div>

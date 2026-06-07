@@ -20,6 +20,12 @@ export interface AVProduct {
   width_in: number | null;
   height_in: number | null;
   depth_in: number | null;
+  // Room Designer placement properties
+  rd_type: string | null;       // display | camera | mic | speaker | control
+  rd_wall: string | null;       // front | ceiling | floor | table | side
+  rd_width_ft: number | null;   // physical width in feet for floor-plan canvas
+  rd_height_ft: number | null;  // physical height/depth in feet
+  rd_icon: string | null;       // icon identifier: monitor | confbar | soundbar | emoji
 }
 
 export async function searchProducts(query: string, limit = 30): Promise<AVProduct[]> {

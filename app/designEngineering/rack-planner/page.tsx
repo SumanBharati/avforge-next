@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
+import { useBOM } from "@/lib/bom-context";
+import BOMPanel from "@/components/BOMPanel";
 
 export default function RackPlannerPage() {
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
@@ -19,7 +21,9 @@ export default function RackPlannerPage() {
   const [items, setItems] = useState(defaultItems);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [bomCollapsed, setBomCollapsed] = useState(true);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
+  const { updateSlice } = useBOM();
 
   // Load
   useEffect(() => {
@@ -40,13 +44,34 @@ export default function RackPlannerPage() {
     saveTimer.current = setTimeout(() => doSave(items), 1000);
   }, [items, loaded, doSave]);
 
+  // Sync rack items to shared BOM
+  useEffect(() => {
+    updateSlice('rack-builder', items.map(item => ({ name: item.name, cat: 'Rack Equipment' })));
+  }, [items, updateSlice]);
+
+  // Auto-expand BOM when a device is added (not on initial load)
+  const bomBaseline = useRef(-1);
+  useEffect(() => {
+    if (!loaded) return;
+    if (bomBaseline.current === -1) {
+      bomBaseline.current = items.length;
+      return;
+    }
+    if (items.length > bomBaseline.current) {
+      setBomCollapsed(false);
+      bomBaseline.current = items.length;
+    }
+  }, [items.length, loaded]);
+
   const totalRU = items.reduce((s,i)=>s+i.ru,0);
   const maxRU = 42;
   const ruH = 18;
   const rackW = 340;
 
   return (
-    <div className="animate-fade-in p-6 max-w-[900px]">
+    <div className="animate-fade-in flex" style={{minHeight:"calc(100vh - 157px)"}}>
+      {/* Main content */}
+      <div style={{flex:1,padding:24,overflowY:"auto"}}>
       <Link href="/designEngineering" className="mb-1 flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
         ← Design Tools
       </Link>
@@ -196,6 +221,13 @@ export default function RackPlannerPage() {
           </div>
         </div>
       </div>
+      </div>{/* end main content */}
+
+      {/* Shared BOM Panel */}
+      <BOMPanel
+        collapsed={bomCollapsed}
+        onToggle={() => setBomCollapsed(!bomCollapsed)}
+      />
     </div>
   );
 }

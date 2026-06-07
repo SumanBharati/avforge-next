@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Video, Monitor, Presentation } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
+import { searchProducts } from "@/lib/av-products";
+import { useBOM } from "@/lib/bom-context";
+import BOMPanel from "@/components/BOMPanel";
 
 /* Theme-aware canvas colors */
 const canvasColors = {
@@ -112,12 +115,6 @@ export default function RoomDesignerPage() {
   const [roomL,         setRoomL]         = useState(19.7);
   const [roomH,         setRoomH]         = useState(8.86);
   const [placedDevices, setPlacedDevices] = useState<PlacedDevice[]>([]);
-  const [activeCat,     setActiveCat]     = useState("Displays");
-  const [equipSearch,   setEquipSearch]   = useState("");
-  const [equipDesc,     setEquipDesc]     = useState("");
-  const [equipMake,     setEquipMake]     = useState("");
-  const [equipModel,    setEquipModel]    = useState("");
-  const [customDevices, setCustomDevices] = useState<(DeviceCatalogItem & {description:string,make:string,model:string})[]>([]);
   const [step,          setStep]          = useState(2);
   const [selectedWall,  setSelectedWall]  = useState("north");
   const [tableShape,    setTableShape]    = useState("rectangular");
@@ -125,7 +122,16 @@ export default function RoomDesignerPage() {
   const [tableWidth,    setTableWidth]    = useState(2.0);
   const [tableLengthOverride, setTableLengthOverride] = useState<number|null>(2.0);
   const [tableWallDist, setTableWallDist] = useState(3.28);
-  const [bomOpen,       setBomOpen]       = useState(true);
+  const [bomCollapsed,  setBomCollapsed]  = useState(true);
+  const [rdLoaded,      setRdLoaded]      = useState(false);
+  const [showAddModal,  setShowAddModal]  = useState(false);
+  const [modalSearch,   setModalSearch]   = useState("");
+  const [modalResults,  setModalResults]  = useState<any[]>([]);
+  const [modalLoading,  setModalLoading]  = useState(false);
+  const [modalSelected, setModalSelected] = useState<any>(null);
+  const [modalDeviceName, setModalDeviceName] = useState("");
+  const [modalMake,     setModalMake]     = useState("");
+  const [modalModel,    setModalModel]    = useState("");
   const [showTable,     setShowTable]     = useState(false);
   const [showTableSizeEditor, setShowTableSizeEditor] = useState(false);
   const [tableEditW,    setTableEditW]    = useState("");
@@ -327,6 +333,104 @@ export default function RoomDesignerPage() {
     if (step === 2) triggerAutoSave();
   }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, step, triggerAutoSave]);
 
+  // Sync placed AV devices to shared BOM
+  const { updateSlice } = useBOM();
+  React.useEffect(() => {
+    updateSlice('room-designer', placedDevices
+      .filter(d => d.type !== 'furniture')
+      .map(d => ({ name: d.name, cat: d.type })));
+  }, [placedDevices, updateSlice]);
+
+  // Auto-expand BOM when a device is added (not on initial load)
+  const bomBaseline = React.useRef(-1);
+  const avDeviceCount = placedDevices.filter(d => d.type !== 'furniture').length;
+  React.useEffect(() => {
+    if (!rdLoaded) return;
+    if (bomBaseline.current === -1) {
+      bomBaseline.current = avDeviceCount;
+      return;
+    }
+    if (avDeviceCount > bomBaseline.current) {
+      setBomCollapsed(false);
+      bomBaseline.current = avDeviceCount;
+    }
+  }, [avDeviceCount, rdLoaded]);
+
+  // Modal: search products DB
+  useEffect(() => {
+    if (!modalSearch.trim()) { setModalResults([]); return; }
+    setModalLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const dbData = await searchProducts(modalSearch).catch(() => []);
+        setModalResults(dbData.map((p: any) => ({
+          type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
+          color: p.color || "#64748b", cat: p.category,
+          // Room Designer placement fields (null when product not yet enriched)
+          rd_type: p.rd_type, rd_wall: p.rd_wall,
+          rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
+          rd_icon: p.rd_icon,
+        })));
+      } finally { setModalLoading(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [modalSearch]);
+
+  const closeModal = () => {
+    setShowAddModal(false); setModalSearch(""); setModalSelected(null);
+    setModalDeviceName(""); setModalMake(""); setModalModel("");
+  };
+
+  const exportAsPDF = () => {
+    const style = document.createElement('style');
+    style.id = '__rd_print_style__';
+    style.textContent = `
+      @media print {
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; visibility: hidden !important; }
+        #rd-canvas-export, #rd-canvas-export * { visibility: visible !important; }
+        #rd-canvas-export { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; background: #fff !important; overflow: visible !important; }
+      }
+    `;
+    document.head.appendChild(style);
+    const prev = document.title;
+    document.title = 'Room Design';
+    setTimeout(() => { window.print(); document.head.removeChild(style); document.title = prev; }, 80);
+  };
+
+  const addFromModal = () => {
+    const sel = modalSelected;
+    const name = sel ? sel.type : modalDeviceName.trim();
+    let devType: string, wall: string, icon: string, color: string, w: number, h: number;
+
+    if (sel?.rd_type) {
+      // Product has been enriched with Room Designer properties in the database — use them directly
+      devType = sel.rd_type;
+      wall    = sel.rd_wall    || "floor";
+      icon    = sel.rd_icon    || "📦";
+      w       = sel.rd_width_ft  || 0.5;
+      h       = sel.rd_height_ft || 0.5;
+      color   = sel.color      || "#64748b";
+    } else {
+      // Fallback: infer placement from category / type name for products without RD fields
+      const cat      = (sel?.cat || "").toLowerCase();
+      const typeName = name.toLowerCase();
+      devType = "custom"; wall = "floor"; icon = "📦"; color = sel?.color || "#64748b"; w = 0.5; h = 0.5;
+      if (cat.includes("display") || typeName.includes("display") || typeName.includes("monitor") || typeName.includes(" tv") || typeName.includes("screen")) {
+        devType = "display"; wall = "front"; icon = "monitor"; color = "#3b82f6"; w = 4.0; h = 2.26;
+      } else if (cat.includes("projector") || typeName.includes("projector")) {
+        devType = "display"; wall = "ceiling"; icon = "📽️"; color = "#3b82f6"; w = 0.8; h = 0.5;
+      } else if (cat.includes("camera") || typeName.includes("camera") || typeName.includes(" cam")) {
+        devType = "camera"; wall = "front"; icon = "confbar"; color = "#22c55e"; w = 0.5; h = 0.3;
+      } else if (cat.includes("microphone") || cat.includes(" mic") || typeName.includes("mic") || typeName.includes("microphone")) {
+        devType = "mic"; wall = "ceiling"; icon = "🎙"; color = "#f59e0b"; w = 0.25; h = 0.25;
+      } else if (cat.includes("speaker") || typeName.includes("speaker")) {
+        devType = "speaker"; wall = "ceiling"; icon = "🔊"; color = "#ef4444"; w = 0.3; h = 0.3;
+      }
+    }
+    addDeviceToRoom({ id: `modal-${Date.now()}`, name, icon, w, h, wall, type: devType, color });
+    closeModal();
+  };
+
   // Listen for manual save from layout
   React.useEffect(() => {
     const handler = () => {
@@ -384,6 +488,7 @@ export default function RoomDesignerPage() {
     supabase.from("room_designs").select("data")
       .eq("project_id", projectId).eq("room_id", roomId || "default").single()
       .then(({ data: designRow }) => {
+        setRdLoaded(true);
         if (!designRow?.data) return;
         const saved = designRow.data as { devices?: PlacedDevice[]; config?: Record<string, unknown> };
         if (saved.devices?.length) setPlacedDevices(saved.devices);
@@ -1847,7 +1952,8 @@ export default function RoomDesignerPage() {
   };
 
   return (
-    <div className="animate-fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px)"}}>
+    <div className="animate-fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px - 85px)",overflow:"hidden"}}>
+
     <div style={{display:"flex",flex:1,overflow:"hidden"}}>
       {/* ── Left Sidebar ─────────────────────────────────── */}
       <div style={{width:420,background:cc.panel,borderRight:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,minHeight:0}}>
@@ -2021,136 +2127,83 @@ export default function RoomDesignerPage() {
             </div>
           </div>
 
-          {/* Devices */}
-          <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Add Equipment</div>
-
-            {/* Search bar */}
-            <div style={{position:"relative",marginBottom:4}}>
-              <textarea
-                rows={2}
-                placeholder="Search displays, cameras, speakers, microphones, or control panels"
-                value={equipSearch}
-                onChange={e=>setEquipSearch(e.target.value.replace(/\n/g,""))}
-                style={{width:"100%",boxSizing:"border-box",padding:"9px 36px 9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none",resize:"none",lineHeight:"1.45",fontFamily:"inherit"}}
-              />
-              <svg style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",opacity:0.4}} width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              </svg>
-            </div>
-
-            {/* OR CREATE NEW */}
-            <div style={{display:"flex",alignItems:"center",gap:8,margin:"10px 0 8px"}}>
-              <div style={{flex:1,height:1,background:"rgb(var(--border))"}}/>
-              <span style={{fontSize:11,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em",whiteSpace:"nowrap"}}>OR CREATE NEW</span>
-              <div style={{flex:1,height:1,background:"rgb(var(--border))"}}/>
-            </div>
-
-            {/* Description / Make / Model */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:8}}>
-              {[
-                {label:"Description",val:equipDesc,set:setEquipDesc,ph:"Description"},
-                {label:"Make",val:equipMake,set:setEquipMake,ph:"Make"},
-                {label:"Model",val:equipModel,set:setEquipModel,ph:"Model"},
-              ].map(f=>(
-                <div key={f.label}>
-                  <div style={{fontSize:10,fontWeight:600,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>{f.label}</div>
-                  <input type="text" placeholder={f.ph} value={f.val} onChange={e=>f.set(e.target.value)}
-                    style={{width:"100%",boxSizing:"border-box",padding:"6px 7px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}/>
-                </div>
-              ))}
-            </div>
-
-            {/* Cancel / + Add */}
-            <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginBottom:14}}>
-              <button
-                onClick={()=>{setEquipDesc("");setEquipMake("");setEquipModel("");}}
-                style={{padding:"5px 14px",background:"none",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-muted))",fontSize:12,cursor:"pointer"}}
-              >Cancel</button>
-              <button
-                onClick={()=>{
-                  const name = equipDesc.trim() || [equipMake,equipModel].filter(Boolean).join(" ") || "Custom Device";
-                  const newDev = {id:`custom_${Date.now()}`,name,description:equipDesc,make:equipMake,model:equipModel,w:1.2,h:0.9,wall:"none",icon:"📦",type:"custom",color:"rgb(var(--text-subtle))"};
-                  setCustomDevices(prev=>[...prev,newDev]);
-                  setEquipDesc("");setEquipMake("");setEquipModel("");
-                }}
-                style={{padding:"5px 14px",background:"#2563eb",border:"none",borderRadius:5,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              >+ Add</button>
-            </div>
-
-            {/* Custom devices (user-created) */}
-            {customDevices.length > 0 && (
-              <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:10}}>
-                {customDevices.map(item=>(
-                  <button key={item.id}
-                    onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
-                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
-                    onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
-                  >
-                    <span style={{fontSize:18}}>📦</span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</div>
-                      <div style={{fontSize:11,color:"#475569"}}>{[item.make,item.model].filter(Boolean).join(" · ") || "Custom"} · drag to place</div>
-                    </div>
-                    <button onClick={e=>{e.stopPropagation();setCustomDevices(prev=>prev.filter(d=>d.id!==item.id));}} style={{padding:2,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:14,lineHeight:1,flexShrink:0}}>×</button>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Device Categories */}
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
-              {deviceCatalog.map(c=>(
-                <button key={c.cat} onClick={()=>setActiveCat(c.cat)} style={{padding:"4px 10px",borderRadius:4,fontSize:12,fontWeight:activeCat===c.cat?600:400,background:activeCat===c.cat?"rgba(59,130,246,0.15)":"transparent",border:"1px solid "+(activeCat===c.cat?"rgba(59,130,246,0.3)":"transparent"),color:activeCat===c.cat?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer"}}>{c.cat}</button>
-              ))}
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:4}}>
-              {(()=>{
-                const q = equipSearch.trim().toLowerCase();
-                const catItems = deviceCatalog.find(c=>c.cat===activeCat)?.items ?? [];
-                const filtered = q
-                  ? deviceCatalog.flatMap(c=>c.items.map(i=>({...i,_cat:c.cat}))).filter(i=>
-                      i.name.toLowerCase().includes(q) ||
-                      i._cat.toLowerCase().includes(q) ||
-                      i.type.toLowerCase().includes(q)
-                    )
-                  : catItems;
-                return filtered.map(item=>(
-                  <button key={item.id}
-                    onMouseDown={()=>setDragNewDevice({active:true,item,worldX:roomW/2,worldY:roomL/2,wall:null})}
-                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(dragNewDevice?.item.id===item.id?"rgba(59,130,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"grab",textAlign:"left"}}
-                    onMouseEnter={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="#334155"}} onMouseLeave={e=>{if(!dragNewDevice)e.currentTarget.style.borderColor="rgb(var(--border))"}}
-                  >
-                    {item.icon==="confbar" ? <Video size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                     : item.icon==="soundbar" ? <SoundbarIcon size={20} color="rgb(var(--text-muted))"/>
-                     : item.icon==="monitor" ? <Monitor size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                     : item.icon==="presentation" ? <Presentation size={20} strokeWidth={1.5} color="rgb(var(--text-muted))"/>
-                     : item.icon==="tv" ? <LedWallIcon size={20} color="rgb(var(--text-muted))"/>
-                     : <span style={{fontSize:18}}>{item.icon}</span>}
-                    <div>
-                      <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>{item.name}</div>
-                      <div style={{fontSize:11,color:"#475569"}}>{item.wall} mount · {toDisplay(item.w)}×{toDisplay(item.h)} · drag to place</div>
-                    </div>
-                  </button>
-                ));
-              })()}
-            </div>
-          </div>
 
 
 
         </div>
       </div>
 
+      {/* ── Right column: toolbar + canvas + BOM ── */}
+      <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
+        {/* Toolbar — only above canvas+BOM, not sidebar */}
+        <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",flexShrink:0,userSelect:"none"}}>
+          <div style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
+            {/* Create group */}
+            <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+              <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+                <button onClick={()=>{setShowAddModal(true);setModalSearch("");setModalSelected(null);}} title="Add equipment to canvas"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:56}}
+                  onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="8" width="7" height="13" rx="1"/><line x1="10" y1="9" x2="14" y2="9"/><line x1="10" y1="13" x2="14" y2="13"/>
+                  </svg>
+                  <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Equipment</span>
+                </button>
+              </div>
+              <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Create</span>
+            </div>
+
+            {/* Divider */}
+            <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
+
+            {/* Navigate group */}
+            <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+              <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+                <button onClick={()=>{setMoveMode(v=>!v);setPanMode(false);}} title="Move selected objects"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:moveMode?"rgba(59,130,246,0.12)":"transparent",border:`1px solid ${moveMode?"#3b82f6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                  onMouseEnter={e=>{if(!moveMode){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
+                  onMouseLeave={e=>{if(!moveMode){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={moveMode?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>
+                  </svg>
+                  <span style={{fontSize:9,color:moveMode?"#3b82f6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Move</span>
+                </button>
+                <button onClick={()=>{setPanMode(v=>!v);setMoveMode(false);}} title="Pan canvas"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:panMode?"rgba(59,130,246,0.12)":"transparent",border:`1px solid ${panMode?"#3b82f6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                  onMouseEnter={e=>{if(!panMode){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
+                  onMouseLeave={e=>{if(!panMode){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={panMode?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8.5"/><path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+                  </svg>
+                  <span style={{fontSize:9,color:panMode?"#3b82f6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Pan</span>
+                </button>
+              </div>
+              <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Navigate</span>
+            </div>
+
+            {/* Spacer pushes export button to far right */}
+            <div style={{flex:1}}/>
+            <div style={{display:"flex",alignItems:"center",paddingRight:4}}>
+              <button onClick={exportAsPDF} title="Export canvas as PDF"
+                style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",color:"rgb(var(--text-body))",fontSize:12,fontWeight:500,transition:"all 0.15s",whiteSpace:"nowrap"}}
+                onMouseEnter={e=>{e.currentTarget.style.background="rgba(59,130,246,0.1)";e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}}
+                onMouseLeave={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-body))"}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                  <line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/>
+                </svg>
+                Export PDF
+              </button>
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",flex:1,overflow:"hidden"}}>
       {/* ── Canvas sections (scrollable) ───────────────── */}
-      <div style={{flex:1,overflowY:"auto"}}>
+      <div id="rd-canvas-export" style={{flex:1,overflowY:"auto"}}>
         <>
         {/* Row 1: Video Calculations */}
         <div style={{flexShrink:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:2,padding:"4px 10px",borderBottom:"1px solid rgb(var(--border))"}}>
-            <button onClick={()=>{setMoveMode(v=>!v);setPanMode(false);}} title="Move selected objects" style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"5px 8px",background:moveMode?"rgba(59,130,246,0.15)":"none",border:"1px solid",borderColor:moveMode?"rgb(59,130,246)":"transparent",borderRadius:5,color:moveMode?"rgb(59,130,246)":"rgb(var(--text-muted))",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=moveMode?"rgba(59,130,246,0.2)":"rgba(59,130,246,0.08)"} onMouseLeave={e=>e.currentTarget.style.background=moveMode?"rgba(59,130,246,0.15)":"none"}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg></button>
-            <button onClick={()=>{setPanMode(v=>!v);setMoveMode(false);}} title="Pan canvas" style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"5px 8px",background:panMode?"rgba(59,130,246,0.15)":"none",border:"1px solid",borderColor:panMode?"rgb(59,130,246)":"transparent",borderRadius:5,color:panMode?"rgb(59,130,246)":"rgb(var(--text-muted))",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=panMode?"rgba(59,130,246,0.2)":"rgba(59,130,246,0.08)"} onMouseLeave={e=>e.currentTarget.style.background=panMode?"rgba(59,130,246,0.15)":"none"}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8.5"/><path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
-          </div>
           <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations</div>
         </div>
         <div style={{display:"flex",height:"50vh",minHeight:400}}>
@@ -4117,147 +4170,115 @@ export default function RoomDesignerPage() {
       </>
       </div>{/* end scrollable canvas */}
 
-      {/* ── Right Panel: Placed Devices ──────────────────── */}
-      <div style={{width:bomOpen?220:44,background:cc.panel,borderLeft:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,transition:"width 0.2s"}}>
-        <div style={{padding:"14px 16px",borderBottom:"1px solid rgb(var(--border))",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",userSelect:"none"}} onClick={()=>setBomOpen(!bomOpen)}>
-          {bomOpen && <span style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))",whiteSpace:"nowrap"}}>Bill of Materials <span style={{color:"rgb(var(--text-subtle))",fontWeight:400}}>({placedDevices.filter(d=>d.type!=="furniture").length})</span></span>}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,transform:bomOpen?"none":"rotate(180deg)",transition:"transform 0.2s"}}>
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-        </div>
-        {bomOpen && <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
-          {placedDevices.filter(d=>d.type!=="furniture").length===0 ? (
-            <div style={{fontSize:13,color:"#334155",textAlign:"center",marginTop:24}}>No devices placed yet</div>
-          ) : (
-            placedDevices.filter(d=>d.type!=="furniture").map(d=>{
-              const isCam=d.type==="camera";
-              const isCeilMic=d.type==="mic"&&d.wall==="ceiling";
-              const isCeilSpk=d.type==="speaker"&&d.wall==="ceiling";
-              const isTableMic=d.id==="table-mic";
-              const hasPanel=selectedUid===d.uid&&showHfov&&(isCam||isCeilMic||isCeilSpk||isTableMic);
-              return (
-              <div key={d.uid}>
-                <div onClick={()=>{if(selectedUid===d.uid){setSelectedUid(null);setShowHfov(false);}else{setSelectedUid(d.uid);setShowHfov(true);}}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",fontSize:14,color:selectedUid===d.uid?"#60a5fa":"rgb(var(--text-muted))",marginBottom:hasPanel?0:4,background:selectedUid===d.uid?"rgba(59,130,246,0.1)":"rgb(var(--forge-surface) / 0.3)",border:"1px solid "+(selectedUid===d.uid?"rgba(59,130,246,0.3)":"transparent"),borderRadius:hasPanel?"6px 6px 0 0":6,cursor:"pointer"}}>
-                  <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4}}>{d.icon==="confbar"?<Video size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="soundbar"?<SoundbarIcon size={14} color="rgb(var(--text-muted))"/>:d.icon==="monitor"?<Monitor size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="presentation"?<Presentation size={14} strokeWidth={1.5} color="rgb(var(--text-muted))" style={{flexShrink:0}}/>:d.icon==="tv"?<LedWallIcon size={14} color="rgb(var(--text-muted))"/>:d.icon} {d.name}</span>
-                  <button onClick={e=>{e.stopPropagation();removeDevice(d.uid);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16,opacity:0.5,padding:0,marginLeft:6}}>×</button>
-                </div>
-                {selectedUid===d.uid&&isCam&&showHfov&&(
-                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>HFOV</span>
-                    <span style={{display:"flex",alignItems:"center",gap:4}}>
-                      <input type="number" className="no-spin" step={1} value={d.hfov||70}
-                        onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,hfov:v}:p))}}
-                        onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,hfov:Math.min(180,Math.max(10,p.hfov||70))}:p))}
-                        style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                      />
-                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>°</span>
-                    </span>
-                  </div>
-                )}
-                {selectedUid===d.uid&&isCeilMic&&showHfov&&(
-                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                      <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Shape</span>
-                      <div style={{display:"flex",gap:4}}>
-                        {(["round","square"] as const).map(s=>(
-                          <button key={s} onClick={e=>{e.stopPropagation();setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covShape:s}:p))}}
-                            style={{padding:"2px 8px",fontSize:12,borderRadius:3,cursor:"pointer",
-                              background:(d.covShape||"round")===s?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",
-                              border:"1px solid "+((d.covShape||"round")===s?"rgba(59,130,246,0.4)":"#334155"),
-                              color:(d.covShape||"round")===s?"#60a5fa":"rgb(var(--text-subtle))",textTransform:"capitalize"}}>{s}</button>
-                        ))}
-                      </div>
-                    </div>
-                    {(d.covShape||"round")==="round" ? (
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                        <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Diameter</span>
-                        <span style={{display:"flex",alignItems:"center",gap:4}}>
-                          <input type="number" className="no-spin" step={1} value={Math.round(d.covDiameter||20)}
-                            onClick={e=>e.stopPropagation()}
-                            onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:v}:p))}}
-                            onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:Math.min(100,Math.max(1,p.covDiameter||20))}:p))}
-                            style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                            onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                          />
-                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
-                        </span>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                          <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Width</span>
-                          <span style={{display:"flex",alignItems:"center",gap:4}}>
-                            <input type="number" className="no-spin" step={1} value={Math.round(d.covW||20)}
-                              onClick={e=>e.stopPropagation()}
-                              onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covW:v}:p))}}
-                              onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covW:Math.min(100,Math.max(1,p.covW||20))}:p))}
-                              style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                              onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                            />
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
-                          </span>
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                          <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Length</span>
-                          <span style={{display:"flex",alignItems:"center",gap:4}}>
-                            <input type="number" className="no-spin" step={1} value={Math.round(d.covL||20)}
-                              onClick={e=>e.stopPropagation()}
-                              onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covL:v}:p))}}
-                              onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covL:Math.min(100,Math.max(1,p.covL||20))}:p))}
-                              style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                              onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                            />
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-                {selectedUid===d.uid&&isCeilSpk&&showHfov&&(
-                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px"}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Dispersion</span>
-                      <span style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input type="number" className="no-spin" step={1} value={d.dispersion||90}
-                          onClick={e=>e.stopPropagation()}
-                          onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,dispersion:v}:p))}}
-                          onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,dispersion:Math.min(360,Math.max(10,p.dispersion||90))}:p))}
-                          style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                          onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                        />
-                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>°</span>
-                      </span>
-                    </div>
-                    <div style={{fontSize:11,color:"#475569",marginTop:6}}>
-                      EPR: {toDisplay(2*(roomH-4)*Math.tan(((d.dispersion||90)/2)*Math.PI/180))} dia
-                    </div>
-                  </div>
-                )}
-                {selectedUid===d.uid&&isTableMic&&showHfov&&(
-                  <div style={{padding:"8px 10px",marginBottom:4,background:"rgba(59,130,246,0.05)",border:"1px solid rgba(59,130,246,0.3)",borderTop:"none",borderRadius:"0 0 6px 6px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:13,color:"rgb(var(--text-subtle))"}}>Diameter</span>
-                    <span style={{display:"flex",alignItems:"center",gap:4}}>
-                      <input type="number" className="no-spin" step={1} value={d.covDiameter||6}
-                        onClick={e=>e.stopPropagation()}
-                        onChange={e=>{const v=parseFloat(e.target.value); if(!isNaN(v)) setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:v}:p))}}
-                        onBlur={()=>setPlacedDevices(prev=>prev.map(p=>p.uid===d.uid?{...p,covDiameter:Math.min(40,Math.max(1,p.covDiameter||6))}:p))}
-                        style={{width:48,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid #334155",borderRadius:4,padding:"2px 6px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:13,textAlign:"right",outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#3b82f6"}
-                      />
-                      <span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-subtle))",fontSize:12}}>ft</span>
-                    </span>
-                  </div>
-                )}
-              </div>
-            );})
-
-          )}
-        </div>}
-      </div>
+      {/* ── Right Panel: Shared BOM + Device Properties ──────── */}
+      <BOMPanel
+        collapsed={bomCollapsed}
+        onToggle={() => setBomCollapsed(!bomCollapsed)}
+        propertiesSlot={null}
+      />
+        </div>{/* end canvas+BOM row */}
+      </div>{/* end right column */}
 
     </div>
+
+    {/* Add Equipment Modal */}
+    {showAddModal && (
+      <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}}
+        onClick={closeModal}>
+        <div style={{width:560,background:"rgb(var(--forge-panel))",borderRadius:10,border:"1px solid rgb(var(--border))",boxShadow:"0 16px 48px rgba(0,0,0,0.5)",display:"flex",flexDirection:"column",maxHeight:"72vh",overflow:"hidden"}}
+          onClick={e=>e.stopPropagation()}>
+
+          {/* Header */}
+          <div style={{padding:"16px 20px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:9}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-body))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+              </svg>
+              <span style={{fontSize:15,fontWeight:700,color:"rgb(var(--text-body))"}}>Add Equipment</span>
+            </div>
+            <button onClick={closeModal}
+              style={{background:"none",border:"none",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:20,lineHeight:1,padding:"2px 4px"}}>×</button>
+          </div>
+
+          {/* Search bar */}
+          <div style={{padding:"0 20px 14px",flexShrink:0}}>
+            <div style={{display:"flex",gap:0}}>
+              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);}}
+                placeholder="Search displays, cameras, speakers, microphones, or control panels"
+                style={{flex:1,padding:"9px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRight:"none",borderRadius:"6px 0 0 6px",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}
+              />
+              <button style={{padding:"9px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:"0 6px 6px 0",cursor:"pointer",color:"rgb(var(--text-subtle))"}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Search results */}
+          {modalSearch.trim() && (
+            <div style={{maxHeight:220,overflowY:"auto",margin:"0 20px",marginBottom:8,border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
+              {modalLoading ? (
+                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Searching…</div>
+              ) : modalResults.length === 0 ? (
+                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>No results for &ldquo;{modalSearch}&rdquo;</div>
+              ) : modalResults.map((item:any,i:number)=>{
+                const isSel = modalSelected===item;
+                return (
+                  <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(59,130,246,0.1)":"transparent",transition:"background 0.1s"}}
+                    onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
+                    <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.type}</div>
+                      <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.mfr||"Generic"}{item.cat?" · "+item.cat:""}</div>
+                    </div>
+                    {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Or Create New divider */}
+          <div style={{display:"flex",alignItems:"center",gap:12,padding:"4px 20px 14px",flexShrink:0}}>
+            <div style={{flex:1,height:1,background:"rgb(var(--border))"}} />
+            <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.08em",color:"rgb(var(--text-subtle))",textTransform:"uppercase",whiteSpace:"nowrap"}}>Or Create New</span>
+            <div style={{flex:1,height:1,background:"rgb(var(--border))"}} />
+          </div>
+
+          {/* Manual fields */}
+          <div style={{display:"flex",gap:10,padding:"0 20px 18px",flexShrink:0,minWidth:0}}>
+            <input value={modalDeviceName} onChange={e=>setModalDeviceName(e.target.value)}
+              placeholder="Description"
+              style={{flex:2,minWidth:0,padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,outline:"none",boxSizing:"border-box"}}
+            />
+            <input value={modalMake} onChange={e=>setModalMake(e.target.value)}
+              placeholder="Make"
+              style={{flex:1,minWidth:0,padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,outline:"none",boxSizing:"border-box"}}
+            />
+            <input value={modalModel} onChange={e=>setModalModel(e.target.value)}
+              placeholder="Model"
+              style={{flex:1,minWidth:0,padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,outline:"none",boxSizing:"border-box"}}
+            />
+          </div>
+
+          {/* Footer */}
+          <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:10,flexShrink:0}}>
+            <button onClick={closeModal}
+              style={{padding:"8px 18px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer"}}>
+              Cancel
+            </button>
+            <button
+              disabled={!modalSelected && !modalDeviceName.trim()}
+              onClick={addFromModal}
+              style={{padding:"8px 18px",background:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--forge-surface))":"#3b82f6",border:"1px solid "+((!modalSelected&&!modalDeviceName.trim())?"rgb(var(--border))":"#3b82f6"),borderRadius:6,color:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--text-subtle))":"#fff",fontSize:12,cursor:(!modalSelected&&!modalDeviceName.trim())?"not-allowed":"pointer",fontWeight:600,transition:"all 0.15s"}}>
+              + Add
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Custom Room Confirmation Modal */}
     {showCustomConfirm && (

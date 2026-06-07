@@ -2,6 +2,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts } from "@/lib/av-products";
+import { useBOM } from "@/lib/bom-context";
+import BOMPanel from "@/components/BOMPanel";
 
 const SIGNAL_TYPES = [
   {id:"hdmi",name:"HDMI",color:"#3b82f6"},
@@ -100,9 +102,8 @@ export default function SignalFlowPage() {
   const [libSearch, setLibSearch] = useState("");
   const [libResults, setLibResults] = useState<any[]>([]);
   const [libLoading, setLibLoading] = useState(false);
-  const [showBOM, setShowBOM] = useState(false);
   const [bomCollapsed, setBomCollapsed] = useState(true);
-  const [bomPrices, setBomPrices] = useState<Record<string,number>>({});
+  const { updateSlice } = useBOM();
   const canvasRef = useRef<SVGSVGElement>(null);
   const nextId = useRef(1);
   const [loaded, setLoaded] = useState(false);
@@ -169,6 +170,30 @@ export default function SignalFlowPage() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => doSave(), 1500);
   }, [devices, connections, rooms, loaded, doSave]);
+
+  // Sync devices to shared BOM
+  useEffect(() => {
+    updateSlice('signal-flow', devices.map((d: any) => ({
+      name: d.type,
+      mfr: d.mfr || getMfr(d.type),
+      cat: d.cat || d.category || '',
+      listPrice: d.price || 0,
+    })));
+  }, [devices, updateSlice]);
+
+  // Auto-expand BOM when a device is added (not on initial load)
+  const bomBaseline = useRef(-1);
+  useEffect(() => {
+    if (!loaded) return;
+    if (bomBaseline.current === -1) {
+      bomBaseline.current = devices.length;
+      return;
+    }
+    if (devices.length > bomBaseline.current) {
+      setBomCollapsed(false);
+      bomBaseline.current = devices.length;
+    }
+  }, [devices.length, loaded]);
 
   const searchLocalLibrary = useCallback((query: string) => {
     if (!query.trim()) return [];
@@ -259,22 +284,6 @@ export default function SignalFlowPage() {
     if(type.startsWith("Logitech")) return "Logitech";
     if(type.startsWith("Barco")) return "Barco";
     return "Generic";
-  };
-
-  const generateBOM = () => {
-    const counts: Record<string,any> = {};
-    devices.forEach(d => {
-      if(!counts[d.type]) counts[d.type] = {
-        type: d.type,
-        mfr: d.mfr || getMfr(d.type),
-        qty: 0,
-        color: d.color,
-        cat: d.cat || d.category || "",
-        listPrice: d.price || 0,
-      };
-      counts[d.type].qty++;
-    });
-    return Object.values(counts).sort((a:any,b:any) => a.cat.localeCompare(b.cat) || a.type.localeCompare(b.type));
   };
 
   const generateCableSchedule = () => {
@@ -692,7 +701,7 @@ export default function SignalFlowPage() {
   };
 
   return (
-    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px)",overflow:"hidden"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px - 85px)",overflow:"hidden"}}>
 
       {/* === RIBBON === */}
       <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",flexShrink:0,userSelect:"none"}}>
@@ -1014,105 +1023,45 @@ export default function SignalFlowPage() {
       </div>
 
       {/* BOM Panel */}
-      <div style={{width:bomCollapsed?44:360,background:"rgb(var(--forge-panel))",borderLeft:"1px solid rgb(var(--border))",display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0,transition:"width 0.2s"}}>
-          <div style={{padding:"12px 14px",borderBottom:"1px solid rgb(var(--border))",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",userSelect:"none"}} onClick={()=>setBomCollapsed(!bomCollapsed)}>
-            {!bomCollapsed && <span style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))"}}>Bill of Materials <span style={{fontSize:11,fontWeight:400,color:"rgb(var(--text-subtle))"}}>({devices.length})</span></span>}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,transform:bomCollapsed?"rotate(180deg)":"none",transition:"transform 0.2s"}}>
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
+      <BOMPanel
+        collapsed={bomCollapsed}
+        onToggle={() => setBomCollapsed(!bomCollapsed)}
+        propertiesSlot={connections.length > 0 ? (
+          <div>
+            <div style={{padding:"14px 14px 6px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em"}}>Cable Schedule</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+              <thead>
+                <tr>
+                  <th style={{padding:"5px 10px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Cable</th>
+                  <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>From</th>
+                  <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>To</th>
+                  <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {generateCableSchedule().map((cable:any,i:number) => (
+                  <tr key={i} style={{background:i%2===0?"transparent":"rgb(var(--forge-surface) / 0.3)"}}>
+                    <td style={{padding:"5px 10px",color:"rgb(var(--text-muted))",borderBottom:"1px solid rgb(var(--border))",fontFamily:"'JetBrains Mono',monospace"}}>C{String(cable.id).padStart(2,"0")}</td>
+                    <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
+                      <div style={{color:"rgb(var(--text-body))",fontSize:10}}>{cable.from}</div>
+                      <div style={{color:"rgb(var(--text-subtle))",fontSize:9}}>{cable.fromPort}</div>
+                    </td>
+                    <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
+                      <div style={{color:"rgb(var(--text-body))",fontSize:10}}>{cable.to}</div>
+                      <div style={{color:"rgb(var(--text-subtle))",fontSize:9}}>{cable.toPort}</div>
+                    </td>
+                    <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:3,color:cable.color,fontSize:10,fontWeight:500}}>
+                        <span style={{width:8,height:2,background:cable.color,borderRadius:1,display:"inline-block"}}></span>{cable.signal}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {!bomCollapsed && <div style={{flex:1,overflowY:"auto",padding:0}}>
-            {devices.length === 0 ? (
-              <div style={{padding:20,textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Add devices to canvas to generate BOM</div>
-            ) : (
-              <div>
-                <div style={{padding:"10px 14px 6px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em"}}>Equipment Schedule</div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead>
-                    <tr>
-                      <th style={{padding:"6px 10px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>#</th>
-                      <th style={{padding:"6px 10px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Device</th>
-                      <th style={{padding:"6px 6px",textAlign:"center",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Mfr</th>
-                      <th style={{padding:"6px 6px",textAlign:"center",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Qty</th>
-                      <th style={{padding:"6px 6px",textAlign:"right",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Unit $</th>
-                      <th style={{padding:"6px 10px",textAlign:"right",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Ext $</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {generateBOM().map((item:any,i:number) => {
-                      const unitPrice = bomPrices[item.type] !== undefined ? bomPrices[item.type] : (item.listPrice || 0);
-                      const extPrice = unitPrice * item.qty;
-                      return (
-                        <tr key={i} style={{background:i%2===0?"transparent":"rgb(var(--forge-surface) / 0.3)"}}>
-                          <td style={{padding:"6px 10px",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))"}}>{i+1}</td>
-                          <td style={{padding:"6px 10px",borderBottom:"1px solid rgb(var(--border))"}}>
-                            <div style={{color:"rgb(var(--text-body))",fontWeight:500,fontSize:11}}>{item.type}</div>
-                          </td>
-                          <td style={{padding:"6px 6px",textAlign:"center",color:"rgb(var(--text-muted))",borderBottom:"1px solid rgb(var(--border))",fontSize:10}}>{item.mfr}</td>
-                          <td style={{padding:"6px 6px",textAlign:"center",borderBottom:"1px solid rgb(var(--border))"}}>
-                            <span style={{background:"rgba(59,130,246,0.12)",color:"#3b82f6",padding:"2px 8px",borderRadius:10,fontWeight:600,fontSize:11}}>{item.qty}</span>
-                          </td>
-                          <td style={{padding:"6px 6px",textAlign:"right",borderBottom:"1px solid rgb(var(--border))"}}>
-                            <input type="number" value={unitPrice} onChange={e=>{setBomPrices(prev=>({...prev,[item.type]:parseFloat(e.target.value)||0}));}} style={{width:60,padding:"3px 5px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:10,fontFamily:"'JetBrains Mono',monospace",textAlign:"right",outline:"none"}} />
-                          </td>
-                          <td style={{padding:"6px 10px",textAlign:"right",borderBottom:"1px solid rgb(var(--border))",color:extPrice>0?"#60a5fa":"#475569",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:500}}>
-                            {extPrice > 0 ? "$"+extPrice.toLocaleString() : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan={3} style={{padding:"8px 10px",fontWeight:700,color:"rgb(var(--text-body))",fontSize:11,borderTop:"2px solid rgb(var(--border))"}}>TOTAL</td>
-                      <td style={{padding:"8px 6px",textAlign:"center",fontWeight:700,color:"rgb(var(--text-body))",fontSize:11,borderTop:"2px solid rgb(var(--border))"}}>{devices.length}</td>
-                      <td style={{borderTop:"2px solid rgb(var(--border))"}}></td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#3b82f6",fontFamily:"'JetBrains Mono',monospace",fontSize:12,borderTop:"2px solid rgb(var(--border))"}}>
-                        {"$"+generateBOM().reduce((sum:number,item:any) => { const up = bomPrices[item.type] !== undefined ? bomPrices[item.type] : (item.listPrice||0); return sum + up * item.qty; }, 0).toLocaleString()}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-
-                {connections.length > 0 && (
-                  <div>
-                    <div style={{padding:"14px 14px 6px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",borderTop:"1px solid rgb(var(--border))",marginTop:8}}>Cable Schedule</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-                      <thead>
-                        <tr>
-                          <th style={{padding:"5px 10px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Cable</th>
-                          <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>From</th>
-                          <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>To</th>
-                          <th style={{padding:"5px 6px",textAlign:"left",color:"rgb(var(--text-subtle))",borderBottom:"1px solid rgb(var(--border))",fontWeight:600,fontSize:9,textTransform:"uppercase"}}>Signal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {generateCableSchedule().map((cable:any,i:number) => (
-                          <tr key={i} style={{background:i%2===0?"transparent":"rgb(var(--forge-surface) / 0.3)"}}>
-                            <td style={{padding:"5px 10px",color:"rgb(var(--text-muted))",borderBottom:"1px solid rgb(var(--border))",fontFamily:"'JetBrains Mono',monospace"}}>C{String(cable.id).padStart(2,"0")}</td>
-                            <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
-                              <div style={{color:"rgb(var(--text-body))",fontSize:10}}>{cable.from}</div>
-                              <div style={{color:"rgb(var(--text-subtle))",fontSize:9}}>{cable.fromPort}</div>
-                            </td>
-                            <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
-                              <div style={{color:"rgb(var(--text-body))",fontSize:10}}>{cable.to}</div>
-                              <div style={{color:"rgb(var(--text-subtle))",fontSize:9}}>{cable.toPort}</div>
-                            </td>
-                            <td style={{padding:"5px 6px",borderBottom:"1px solid rgb(var(--border))"}}>
-                              <span style={{display:"inline-flex",alignItems:"center",gap:3,color:cable.color,fontSize:10,fontWeight:500}}>
-                                <span style={{width:8,height:2,background:cable.color,borderRadius:1,display:"inline-block"}}></span>{cable.signal}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>}
-        </div>
+        ) : null}
+      />
     </div>
 
     {/* Device Context Menu */}
