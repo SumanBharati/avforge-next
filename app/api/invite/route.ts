@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import * as brevo from "@getbrevo/brevo";
+import { BrevoClient } from "@getbrevo/brevo";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const emailApi = new brevo.TransactionalEmailsApi();
-emailApi.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
+const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY! });
 
 export async function POST(req: NextRequest) {
   const { org_id, org_name, email, role, department, invited_by } = await req.json();
@@ -31,7 +30,7 @@ export async function POST(req: NextRequest) {
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/org/invite?token=${invite.token}`;
 
   try {
-    await emailApi.sendTransacEmail({
+    await brevoClient.transactionalEmails.sendTransacEmail({
       sender: { name: "AVForge", email: process.env.BREVO_SENDER_EMAIL! },
       to: [{ email }],
       subject: `You've been invited to join ${org_name} on AVForge`,

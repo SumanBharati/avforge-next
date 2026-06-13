@@ -76,6 +76,11 @@ function parseCSV(csvText: string): { products: Omit<AVProduct, "id">[]; errors:
       width_in:     num(widthIdx),
       height_in:    num(heightIdx),
       depth_in:     num(depthIdx),
+      rd_type:      null,
+      rd_wall:      null,
+      rd_width_ft:  null,
+      rd_height_ft: null,
+      rd_icon:      null,
     });
   }
   return { products, errors };
