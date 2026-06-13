@@ -89,6 +89,30 @@ function ArrowLeftIcon() {
   );
 }
 
+// ── Landing data ─────────────────────────────────────────────────────────────
+
+const NEWS_ITEMS: { type: string; name: string; date: string; description: string; tags: string[] }[] = [];
+
+const OLD_INVENTORY_ITEMS = [
+  { name: "Epson PowerLite X123",     category: "Projector",               age: "5.2 years", status: "Review",         action: "Check lamp hours and condition" },
+  { name: "Biamp TesiraFORTE AVB",    category: "DSP / Audio Processor",   age: "4.1 years", status: "Legacy",         action: "Confirm firmware and support" },
+  { name: "Crestron DMPS3-4K-150-C", category: "Presentation Switcher",    age: "6.3 years", status: "End of Support", action: "Consider replacement" },
+  { name: "Crown XTi 2002",           category: "Power Amplifier",          age: "5.7 years", status: "Review",         action: "Verify condition and usage" },
+  { name: "Extron DTP CrossPoint 84", category: "Matrix Switcher",          age: "7.8 years", status: "Discontinued",   action: "Plan phased replacement" },
+];
+
+const OLD_INVENTORY_STATUS: Record<string, string> = {
+  "Review":         "bg-amber-500/15 text-amber-600",
+  "Legacy":         "bg-violet-500/15 text-violet-500",
+  "End of Support": "bg-orange-500/15 text-orange-600",
+  "Discontinued":   "bg-red-500/15 text-red-500",
+};
+
+const NEWS_TYPE_STYLE: Record<string, string> = {
+  "NEW PRODUCT":    "text-emerald-500",
+  "SOFTWARE UPDATE":"text-blue-400",
+};
+
 // ── Landing — 3 cards ────────────────────────────────────────────────────────
 
 const CARDS: { key: Section; label: string; description: string; icon: React.ReactNode; iconBg: string; iconColor: string; stat?: string }[] = [
@@ -128,31 +152,121 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
       </div>
 
       <div className="grid grid-cols-3 gap-5">
-        {CARDS.map(({ key, label, description, icon, iconBg, iconColor, stat }) => (
+        {CARDS.map(({ key, label, description, icon, stat }) => (
           <button
             key={key}
             onClick={() => onSelect(key)}
-            className="group flex flex-col rounded-2xl border border-border bg-forge-surface/20 p-6 text-left transition-all duration-150 hover:border-border hover:bg-forge-surface/40 hover:shadow-lg"
+            className="group flex h-[190px] w-full flex-col items-center justify-start gap-2 rounded-xl border border-border bg-forge-surface/40 px-3 pb-3 pt-4 text-center transition-all hover:-translate-y-0.5 hover:border-border hover:shadow-lg"
           >
-            <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-forge-panel text-muted">
               {icon}
             </div>
-            <div className="flex-1">
-              <div className="text-[15px] font-semibold text-heading leading-snug">{label}</div>
-              <div className="mt-2 text-[13px] text-muted leading-relaxed">{description}</div>
-            </div>
-            <div className="mt-6 flex items-center justify-between">
-              {stat ? (
-                <span className="text-[12px] font-medium text-subtle">{stat}</span>
-              ) : (
-                <span className="text-[12px] text-subtle italic">Coming soon</span>
-              )}
-              <span className={`text-[12px] font-medium transition-colors ${iconColor} opacity-0 group-hover:opacity-100`}>
-                Open →
-              </span>
-            </div>
+            <h3 className="text-[13px] font-bold leading-tight text-body group-hover:text-heading">{label}</h3>
+            <p className="text-[11px] leading-relaxed text-subtle">{description}</p>
+            <span className="mt-auto flex min-h-[2.25rem] w-full items-center justify-center rounded-xl border border-border bg-border/30 px-2 py-1 text-[10px] font-semibold leading-tight text-muted">
+              {stat ?? "Coming soon"}
+            </span>
           </button>
         ))}
+      </div>
+
+      {/* ── News + Old Inventory ─────────────────────────────────────────────── */}
+      <div className="mt-6 grid grid-cols-2 gap-5">
+
+        {/* New Products on AVForge */}
+        <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/20">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+            <h3 className="text-[13px] font-bold text-heading">New Products on AVForge</h3>
+            <button className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
+          </div>
+          {NEWS_ITEMS.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-5 py-14 text-center">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" className="mb-3 text-faint" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+              <p className="text-[13px] font-medium text-subtle">No products yet</p>
+              <p className="mt-1 text-[12px] text-faint">Equipment added to the AV Forge Library will appear here.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {NEWS_ITEMS.map((item, i) => (
+                <div key={i} className="flex gap-4 px-5 py-4 transition-colors hover:bg-forge-surface/30">
+                  <div className="h-[72px] w-[72px] shrink-0 rounded-lg bg-slate-700/60" />
+                  <div className="min-w-0 flex-1">
+                    <div className={`mb-0.5 text-[10px] font-bold tracking-widest ${NEWS_TYPE_STYLE[item.type] ?? "text-muted"}`}>
+                      {item.type}
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[13px] font-semibold text-heading">{item.name}</span>
+                      <span className="shrink-0 text-[11px] text-subtle">{item.date}</span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted">{item.description}</p>
+                    <div className="mt-2 flex items-center justify-between">
+                      <div className="flex gap-1.5">
+                        {item.tags.map((tag) => (
+                          <span key={tag} className="rounded-full border border-border bg-forge-surface/60 px-2 py-0.5 text-[10px] font-medium text-subtle">{tag}</span>
+                        ))}
+                      </div>
+                      <button className="whitespace-nowrap text-[11px] font-medium text-blue-400 transition-colors hover:text-blue-300">View details →</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Old Inventory Review */}
+        <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/20">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+            <h3 className="text-[13px] font-bold text-heading">Old Inventory Review</h3>
+            <button className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-forge-surface/40">
+                <th className="px-5 py-2.5 text-left text-[11px] font-semibold text-muted">Item</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Age</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Status</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Recommended Action</th>
+                <th className="px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {OLD_INVENTORY_ITEMS.map((item, i) => (
+                <tr key={i} className="border-b border-border/50 transition-colors hover:bg-forge-surface/30">
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 shrink-0 rounded-md bg-slate-700/60" />
+                      <div>
+                        <div className="text-[12px] font-semibold text-heading">{item.name}</div>
+                        <div className="text-[11px] text-subtle">{item.category}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-[12px] text-body">{item.age}</td>
+                  <td className="px-3 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${OLD_INVENTORY_STATUS[item.status] ?? "bg-forge-surface text-muted"}`}>
+                      {item.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-[11px] text-subtle">{item.action}</td>
+                  <td className="px-3 py-3">
+                    <button className="rounded-md p-1 text-muted transition-colors hover:text-heading">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
       </div>
     </div>
   );
