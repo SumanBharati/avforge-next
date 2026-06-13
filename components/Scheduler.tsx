@@ -463,26 +463,18 @@ export function Scheduler({
     const dragS = isDraggingRow ? Math.min(drag!.startIdx, drag!.endIdx) : -1;
     const dragE = isDraggingRow ? Math.max(drag!.startIdx, drag!.endIdx) : -1;
 
-    // Assign lanes so overlapping allocations stack vertically
-    const laneForId = new Map<string, number>();
-    const sortedAllocs = [...personAllocs].sort((a, b) => a.startDate.localeCompare(b.startDate));
-    const laneEndDates: string[] = [];
+    // Compute cumulative hour offsets so overlapping allocations sit side-by-side horizontally
+    const sortedAllocs = [...personAllocs].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
+    const hoursOffsetForId = new Map<string, number>();
     for (const a of sortedAllocs) {
-      let placed = false;
-      for (let li = 0; li < laneEndDates.length; li++) {
-        if (laneEndDates[li] < a.startDate) {
-          laneEndDates[li] = a.endDate;
-          laneForId.set(a.id, li);
-          placed = true;
-          break;
-        }
+      const aEffStart = a.startDate < rangeStart ? rangeStart : a.startDate;
+      let cum = 0;
+      for (const b of sortedAllocs) {
+        if (b.id === a.id) break;
+        if (b.startDate <= aEffStart && b.endDate >= aEffStart) cum += b.hoursPerDay;
       }
-      if (!placed) {
-        laneForId.set(a.id, laneEndDates.length);
-        laneEndDates.push(a.endDate);
-      }
+      hoursOffsetForId.set(a.id, cum);
     }
-    const totalLanes = Math.max(1, laneEndDates.length);
 
     return (
       <div className="relative flex border-b border-border" style={{ height: ROW_HEIGHT }} onMouseLeave={() => {}}>
@@ -568,13 +560,12 @@ export function Scheduler({
           const phase = a.phaseId ? store.phases.find((ph) => ph.id === a.phaseId) : null;
           const color = a.color || phase?.color || proj?.color || "#94a3b8";
           const tentative = a.status === "tentative";
-          const laneIdx = laneForId.get(a.id) ?? 0;
-          const laneH = Math.floor((ROW_HEIGHT - 8) / totalLanes);
-          const barTop = 4 + laneIdx * laneH;
-          const barH = laneH - 2;
+          const cumHours = hoursOffsetForId.get(a.id) ?? 0;
           const pct = cap > 0 ? Math.min(a.hoursPerDay / cap, 1) : 1;
-          const fullSpanWidth = (endIdx - offset + 1) * DAY_WIDTH - 4;
-          const barWidth = Math.max(20, Math.round(fullSpanWidth * pct));
+          const barTop = 4;
+          const barH = ROW_HEIGHT - 8;
+          const barWidth = Math.max(20, Math.round((endIdx - offset + 1) * DAY_WIDTH * pct - 4));
+          const hourShift = cap > 0 ? (cumHours / cap) * DAY_WIDTH : 0;
           return (
             <button
               key={a.id}
@@ -587,7 +578,7 @@ export function Scheduler({
               style={{
                 top: barTop,
                 height: barH,
-                left: offset * DAY_WIDTH + 2,
+                left: offset * DAY_WIDTH + 2 + hourShift,
                 width: barWidth,
                 backgroundColor: tentative ? "transparent" : color,
                 border: tentative ? `2px dashed ${color}` : `1px solid ${color}`,
