@@ -99,6 +99,39 @@ export interface SchedTask {
   dueDate: string;
 }
 
+export interface BoardSubtask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+export interface BoardCard {
+  id: string;
+  title: string;
+  color?: string;
+  description?: string;
+  descriptionShown?: boolean;
+  subtasks?: BoardSubtask[];
+}
+
+export interface BoardColumn {
+  id: string;
+  title: string;
+  cards: BoardCard[];
+  color?: string;
+}
+
+export interface BoardMeta {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface BoardData {
+  columns: BoardColumn[];
+}
+
 export interface PMStore {
   people: Person[];
   projects: SchedProject[];
@@ -108,6 +141,8 @@ export interface PMStore {
   timeEntries: TimeEntry[];
   milestones: SchedMilestone[];
   tasks: SchedTask[];
+  boards: BoardMeta[];
+  boardData: Record<string, BoardData>;
 }
 
 export const emptyPMStore: PMStore = {
@@ -119,6 +154,8 @@ export const emptyPMStore: PMStore = {
   timeEntries: [],
   milestones: [],
   tasks: [],
+  boards: [],
+  boardData: {},
 };
 
 /* ── Constants ─────────────────────────────────────────────── */

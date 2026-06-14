@@ -20,17 +20,82 @@ import {
 } from "@/lib/pm-store";
 
 const ROW_HEIGHT = 60;
+const SEPARATOR_HEIGHT = 30;
+
+function MultiSelect({
+  placeholder,
+  options,
+  selected,
+  onChange,
+}: {
+  placeholder: string;
+  options: { value: string; label: string }[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const label = selected.size === 0 ? placeholder : `${placeholder} (${selected.size})`;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="forge-input flex h-8 items-center gap-1.5 text-sm"
+      >
+        <span className={selected.size > 0 ? "text-body" : "text-muted"}>{label}</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="ml-auto shrink-0 text-muted">
+          <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[190px] overflow-hidden rounded-lg border border-border bg-forge-panel shadow-lg">
+          {options.length === 0 && (
+            <div className="px-3 py-2 text-xs text-subtle">No options</div>
+          )}
+          {options.map((o) => (
+            <label key={o.value} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 text-[13px] text-body hover:bg-forge-surface/40">
+              <input
+                type="checkbox"
+                checked={selected.has(o.value)}
+                onChange={() => {
+                  const next = new Set(selected);
+                  next.has(o.value) ? next.delete(o.value) : next.add(o.value);
+                  onChange(next);
+                }}
+                className="accent-blue-500"
+              />
+              {o.label}
+            </label>
+          ))}
+          {selected.size > 0 && (
+            <button
+              onClick={() => onChange(new Set())}
+              className="w-full border-t border-border px-3 py-1.5 text-left text-[11px] text-subtle hover:text-body"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Scheduler({
   hideToolbar = false,
-  defaultDays = 14,
   compact = false,
-}: { hideToolbar?: boolean; defaultDays?: number; compact?: boolean } = {}) {
+}: { hideToolbar?: boolean; compact?: boolean } = {}) {
   const NAME_COL_WIDTH = compact ? 160 : 220;
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridWidth, setGridWidth] = useState(0);
   const [cursor, setCursor] = useState<Date>(() => startOfWeek(new Date()));
-  const [viewDays, setViewDays] = useState(defaultDays);
   useLayoutEffect(() => {
     const el = gridRef.current;
     if (!el) return;
@@ -40,18 +105,16 @@ export function Scheduler({
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
-  const DAY_WIDTH = compact
-    ? (gridWidth > 0 ? gridWidth / 7 : 60)
-    : (gridWidth > 0 ? Math.floor(gridWidth / 14) : 75);
+  const DAY_WIDTH = gridWidth > 0 ? Math.floor(gridWidth / 7) : (compact ? 60 : 120);
   const { store, update, currentUserId } = usePMStore();
   const [search, setSearch] = useState("");
-  const [filterProject, setFilterProject] = useState<string>("");
-  const [filterRole, setFilterRole] = useState<string>("");
+  const [filterRoles, setFilterRoles] = useState<Set<string>>(new Set());
+  const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Allocation | null>(null);
   const [creating, setCreating] = useState<{ personId: string; startDate: string; endDate: string; x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<{ personId: string; startIdx: number; endIdx: number } | null>(null);
 
-  const effectiveDays = compact ? 7 : viewDays;
+  const effectiveDays = 7;
   const days = useMemo(() => {
     const arr: Date[] = [];
     for (let i = 0; i < effectiveDays; i++) arr.push(addDays(cursor, i));
@@ -65,21 +128,26 @@ export function Scheduler({
     return store.people
       .filter((p) => !p.archived)
       .filter((p) => search === "" || p.name.toLowerCase().includes(search.toLowerCase()))
-      .filter((p) => !filterRole || p.role === filterRole)
+      .filter((p) => filterRoles.size === 0 || filterRoles.has(p.role))
       .filter((p) => {
-        if (!filterProject) return true;
+        if (filterProjects.size === 0) return true;
         return store.allocations.some(
-          (a) => a.personId === p.id && a.projectId === filterProject,
+          (a) => a.personId === p.id && filterProjects.has(a.projectId),
         );
       })
-      .sort((a, b) => {
-        if (currentUserId) {
-          if (a.memberUserId === currentUserId) return -1;
-          if (b.memberUserId === currentUserId) return 1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-  }, [store.people, store.allocations, search, filterRole, filterProject, currentUserId]);
+      .sort((a, b) => (a.role || "").localeCompare(b.role || "") || a.name.localeCompare(b.name));
+  }, [store.people, store.allocations, search, filterRoles, filterProjects]);
+
+  const groupedPeople = useMemo(() => {
+    const groups: { role: string; people: typeof visiblePeople }[] = [];
+    for (const p of visiblePeople) {
+      const role = p.role || "No Role";
+      const g = groups.find((g) => g.role === role);
+      if (g) g.people.push(p);
+      else groups.push({ role, people: [p] });
+    }
+    return groups;
+  }, [visiblePeople]);
 
   const projectsById = useMemo(
     () => Object.fromEntries(store.projects.map((p) => [p.id, p])),
@@ -179,33 +247,20 @@ export function Scheduler({
       {!hideToolbar && (
       <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex items-center">
-            <button onClick={() => shift(-7)} className="flex h-8 w-8 items-center justify-center rounded-l-lg border border-border bg-forge-surface/60 text-sm text-muted transition-colors hover:bg-forge-surface hover:text-heading">
+          <button onClick={goToday} className="flex h-8 items-center rounded-lg border border-border bg-forge-surface/60 px-3 text-xs font-semibold text-body transition-colors hover:bg-forge-surface hover:text-heading">
+            This Week
+          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => shift(-7)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-forge-surface/60 text-sm text-muted transition-colors hover:bg-forge-surface hover:text-heading">
               ‹
             </button>
-            <button onClick={goToday} className="flex h-8 items-center border-y border-border bg-forge-surface/60 px-3 text-xs font-semibold text-body transition-colors hover:bg-forge-surface hover:text-heading">
-              Today
-            </button>
-            <button onClick={() => shift(7)} className="flex h-8 w-8 items-center justify-center rounded-r-lg border border-border bg-forge-surface/60 text-sm text-muted transition-colors hover:bg-forge-surface hover:text-heading">
+            <div className="text-sm font-semibold text-heading">
+              {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
+              {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </div>
+            <button onClick={() => shift(7)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-forge-surface/60 text-sm text-muted transition-colors hover:bg-forge-surface hover:text-heading">
               ›
             </button>
-          </div>
-          <div className="text-sm font-semibold text-heading">
-            {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
-            {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-          </div>
-          <div className="ml-4 flex items-center gap-1 rounded-lg border border-border bg-forge-surface/60 p-0.5 text-xs">
-            {[14, 28, 56, 84].map((n) => (
-              <button
-                key={n}
-                onClick={() => setViewDays(n)}
-                className={`rounded px-2.5 py-1 font-semibold transition-colors ${
-                  viewDays === n ? "bg-blue-500 text-white" : "text-muted hover:text-body"
-                }`}
-              >
-                {n / 7}w
-              </button>
-            ))}
           </div>
         </div>
 
@@ -214,30 +269,20 @@ export function Scheduler({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search people..."
-            className="forge-input w-40 text-sm"
+            className="forge-input h-8 w-40 text-sm"
           />
-          <select
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value)}
-            className="forge-input text-sm"
-          >
-            <option value="">All roles</option>
-            {ROLE_OPTIONS.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
-          <select
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value)}
-            className="forge-input text-sm"
-          >
-            <option value="">All projects</option>
-            {store.projects.filter((p) => !p.archived).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            placeholder="All roles"
+            options={[...new Set(store.people.filter((p) => !p.archived && p.role).map((p) => p.role))].sort().map((r) => ({ value: r, label: r }))}
+            selected={filterRoles}
+            onChange={setFilterRoles}
+          />
+          <MultiSelect
+            placeholder="All projects"
+            options={store.projects.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.name }))}
+            selected={filterProjects}
+            onChange={setFilterProjects}
+          />
         </div>
       </div>
       )}
@@ -257,57 +302,67 @@ export function Scheduler({
               No people match filters
             </div>
           ) : (
-            visiblePeople.map((p) => {
-              const scheduled = days.reduce(
-                (s, d) => s + personScheduledHoursOnDate(p.id, toISODate(d), store.allocations),
+            groupedPeople.map(({ role, people }) => {
+              const groupScheduled = people.reduce(
+                (s, p) => s + days.reduce((ds, d) => ds + personScheduledHoursOnDate(p.id, toISODate(d), store.allocations), 0),
                 0,
               );
-              const weeks = days.length / 7;
-              const capacity = personWeeklyHours(p) * weeks;
-              const pct = capacity > 0 ? (scheduled / capacity) * 100 : 0;
-              const over = pct > 100;
               return (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-3 border-b border-border px-4"
-                  style={{ height: ROW_HEIGHT }}
-                >
-                  {p.avatar_url ? (
-                    <img
-                      src={p.avatar_url}
-                      alt={p.name}
-                      className="h-8 w-8 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: p.color }}
-                    >
-                      {p.name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase() || "·"}
-                    </div>
-                  )}
-                  <div className="flex-1 overflow-hidden">
-                    <div className="truncate text-sm font-semibold text-body">{p.name}</div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <div className="h-1 flex-1 overflow-hidden rounded-full bg-forge-bg">
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${Math.min(pct, 100)}%`,
-                            backgroundColor: over ? "#ef4444" : pct > 80 ? "#f59e0b" : "#22c55e",
-                          }}
-                        />
-                      </div>
-                      <span className={`font-mono text-[10px] ${over ? "text-red-400" : "text-faint"}`}>
-                        {pct.toFixed(0)}%
-                      </span>
-                    </div>
+                <div key={role}>
+                  {/* Role separator */}
+                  <div
+                    className="flex items-center justify-between border-b border-border bg-forge-bg/60 px-4 text-[11px] font-bold uppercase tracking-wider text-subtle"
+                    style={{ height: SEPARATOR_HEIGHT }}
+                  >
+                    <span>{role}</span>
+                    <span className="font-mono text-faint">{groupScheduled}h</span>
                   </div>
+                  {/* People in this group */}
+                  {people.map((p) => {
+                    const scheduled = days.reduce(
+                      (s, d) => s + personScheduledHoursOnDate(p.id, toISODate(d), store.allocations),
+                      0,
+                    );
+                    const weeks = days.length / 7;
+                    const capacity = personWeeklyHours(p) * weeks;
+                    const pct = capacity > 0 ? (scheduled / capacity) * 100 : 0;
+                    const over = pct > 100;
+                    return (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-3 border-b border-border px-4"
+                        style={{ height: ROW_HEIGHT }}
+                      >
+                        {p.avatar_url ? (
+                          <img src={p.avatar_url} alt={p.name} className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                        ) : (
+                          <div
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                            style={{ backgroundColor: p.color }}
+                          >
+                            {p.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "·"}
+                          </div>
+                        )}
+                        <div className="flex-1 overflow-hidden">
+                          <div className="truncate text-sm font-semibold text-body">{p.name}</div>
+                          <div className="mt-0.5 flex items-center gap-1.5">
+                            <div className="h-1 flex-1 overflow-hidden rounded-full bg-forge-bg">
+                              <div
+                                className="h-full transition-all"
+                                style={{
+                                  width: `${Math.min(pct, 100)}%`,
+                                  backgroundColor: over ? "#ef4444" : pct > 80 ? "#f59e0b" : "#22c55e",
+                                }}
+                              />
+                            </div>
+                            <span className={`font-mono text-[10px] ${over ? "text-red-400" : "text-faint"}`}>
+                              {pct.toFixed(0)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })
@@ -362,19 +417,28 @@ export function Scheduler({
               />
             )}
 
-            {/* Rows */}
-            {visiblePeople.map((p) => (
-              <PersonRow
-                key={p.id}
-                personId={p.id}
-                days={days}
-                rangeStart={rangeStart}
-                rangeEnd={rangeEnd}
-                drag={drag}
-                onCellMouseDown={handleCellMouseDown}
-                onCellMouseEnter={handleCellMouseEnter}
-                onAllocationClick={openEdit}
-              />
+            {/* Rows grouped by role */}
+            {groupedPeople.map(({ role, people }) => (
+              <div key={role}>
+                {/* Separator spacer — matches left column header height */}
+                <div
+                  className="border-b border-border bg-forge-bg/60"
+                  style={{ height: SEPARATOR_HEIGHT }}
+                />
+                {people.map((p) => (
+                  <PersonRow
+                    key={p.id}
+                    personId={p.id}
+                    days={days}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    drag={drag}
+                    onCellMouseDown={handleCellMouseDown}
+                    onCellMouseEnter={handleCellMouseEnter}
+                    onAllocationClick={openEdit}
+                  />
+                ))}
+              </div>
             ))}
 
           </div>

@@ -5,7 +5,6 @@ import { usePMStore } from "@/components/PMStoreProvider";
 import PMPageSkeleton from "@/components/skeletons/PMPageSkeleton";
 import {
   PERSON_COLORS,
-  ROLE_OPTIONS,
   personScheduledHoursInRange,
   personWeeklyHours,
   toISODate,
@@ -18,7 +17,6 @@ import {
 export default function PeoplePage() {
   const { store, update, loading } = usePMStore();
   const [search, setSearch] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
 
   const weekStart = useMemo(() => toISODate(startOfWeek(new Date())), []);
@@ -27,7 +25,7 @@ export default function PeoplePage() {
   if (loading) return <PMPageSkeleton />;
 
   const filtered = store.people
-    .filter((p) => showArchived || !p.archived)
+    .filter((p) => !p.archived)
     .filter((p) =>
       search === "" ||
       p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -41,7 +39,7 @@ export default function PeoplePage() {
     const p: Person = {
       id: uid(),
       name: "New person",
-      role: ROLE_OPTIONS[0],
+      role: "",
       email: "",
       color,
       weeklyHours: 40,
@@ -84,24 +82,16 @@ export default function PeoplePage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search..."
-            className="forge-input w-48 text-sm"
+            className="forge-input h-9 w-48 text-sm"
           />
-          <label className="flex items-center gap-1.5 text-xs text-subtle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-            Archived
-          </label>
           <button
             onClick={addPerson}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-blue-600"
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-[12px] font-semibold text-white hover:bg-blue-600"
           >
             <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
               <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            Add person
+            Add Person Outside Organization
           </button>
         </div>
       </div>
@@ -125,7 +115,6 @@ export default function PeoplePage() {
                 <th className="px-3 py-3">Role</th>
                 <th className="px-3 py-3">Email</th>
                 <th className="px-3 py-3 text-right">Weekly hrs</th>
-                <th className="px-3 py-3 text-right">Rate</th>
                 <th className="px-3 py-3 text-right">This week</th>
                 <th className="px-3 py-3"></th>
               </tr>
@@ -142,97 +131,87 @@ export default function PeoplePage() {
                 const pct = capacity > 0 ? Math.round((scheduled / capacity) * 100) : 0;
                 const over = pct > 100;
 
+                const isEditing = editing === p.id;
                 return (
                   <tr
                     key={p.id}
-                    className={`group border-b border-border transition-colors hover:bg-forge-surface/30 ${
-                      p.archived ? "opacity-50" : ""
-                    }`}
+                    className="group border-b border-border transition-colors hover:bg-forge-surface/30"
                   >
+                    {/* Name */}
                     <td className="px-8 py-3">
                       <div className="flex items-center gap-3">
                         <div
                           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
                           style={{ backgroundColor: p.color }}
                         >
-                          {p.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)
-                            .toUpperCase() || "·"}
+                          {p.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "·"}
                         </div>
-                        {editing === p.id ? (
+                        {isEditing && !p.memberUserId ? (
                           <input
                             value={p.name}
                             onChange={(e) => updatePerson(p.id, { name: e.target.value })}
-                            onBlur={() => setEditing(null)}
-                            onKeyDown={(e) => e.key === "Enter" && setEditing(null)}
                             autoFocus
                             className="forge-input w-48 text-sm"
                           />
                         ) : (
-                          <button
-                            onClick={() => setEditing(p.id)}
-                            className="text-left font-semibold text-heading hover:text-blue-400"
-                          >
-                            {p.name}
-                          </button>
+                          <span className="font-semibold text-heading">{p.name}</span>
                         )}
                         {p.memberUserId && (
-                          <span
-                            title="Linked to an organization member"
-                            className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400"
-                          >
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
                             Member
                           </span>
                         )}
                         {!p.memberUserId && p.inviteId && (
-                          <span
-                            title="Linked to a pending invite"
-                            className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400"
-                          >
+                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
                             Invited
                           </span>
                         )}
                       </div>
                     </td>
+
+                    {/* Role */}
                     <td className="px-3 py-3">
-                      <select
-                        value={p.role}
-                        onChange={(e) => updatePerson(p.id, { role: e.target.value })}
-                        className="forge-input text-sm"
-                      >
-                        {ROLE_OPTIONS.map((r) => (
-                          <option key={r}>{r}</option>
-                        ))}
-                      </select>
+                      {isEditing && !p.memberUserId ? (
+                        <input
+                          value={p.role}
+                          onChange={(e) => updatePerson(p.id, { role: e.target.value })}
+                          placeholder="Role…"
+                          className="forge-input w-full text-sm"
+                        />
+                      ) : (
+                        <span className="text-sm text-body">{p.role || "—"}</span>
+                      )}
                     </td>
+
+                    {/* Email */}
                     <td className="px-3 py-3">
-                      <input
-                        value={p.email}
-                        onChange={(e) => updatePerson(p.id, { email: e.target.value })}
-                        placeholder="email@…"
-                        className="forge-input w-full text-sm"
-                      />
+                      {isEditing && !p.memberUserId ? (
+                        <input
+                          value={p.email}
+                          onChange={(e) => updatePerson(p.id, { email: e.target.value })}
+                          placeholder="email@…"
+                          className="forge-input w-full text-sm"
+                        />
+                      ) : (
+                        <span className="text-sm text-body">{p.email || "—"}</span>
+                      )}
                     </td>
+
+                    {/* Weekly hrs — editable for everyone */}
                     <td className="px-3 py-3 text-right">
-                      <input
-                        type="number"
-                        value={p.weeklyHours}
-                        onChange={(e) => updatePerson(p.id, { weeklyHours: Number(e.target.value) || 0 })}
-                        className="forge-input w-20 text-right text-sm"
-                      />
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={p.weeklyHours}
+                          onChange={(e) => updatePerson(p.id, { weeklyHours: Number(e.target.value) || 0 })}
+                          className="forge-input w-20 text-right text-sm"
+                        />
+                      ) : (
+                        <span className="text-sm text-body">{p.weeklyHours}h</span>
+                      )}
                     </td>
-                    <td className="px-3 py-3 text-right">
-                      <input
-                        type="number"
-                        value={p.hourlyRate}
-                        onChange={(e) => updatePerson(p.id, { hourlyRate: Number(e.target.value) || 0 })}
-                        className="forge-input w-24 text-right text-sm"
-                        placeholder="$/hr"
-                      />
-                    </td>
+
+                    {/* This week utilisation */}
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
                         <span className={`font-mono text-xs ${over ? "text-red-400" : "text-muted"}`}>
@@ -249,24 +228,38 @@ export default function PeoplePage() {
                         </div>
                       </div>
                     </td>
+
+                    {/* Actions: Edit | Archive | Delete */}
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {/* Edit / Done */}
                         <button
-                          onClick={() => updatePerson(p.id, { archived: !p.archived })}
-                          className="rounded p-1.5 text-subtle transition-colors hover:bg-forge-surface hover:text-body"
-                          title={p.archived ? "Unarchive" : "Archive"}
+                          onClick={() => setEditing(isEditing ? null : p.id)}
+                          className={`rounded p-1.5 transition-colors ${isEditing ? "text-blue-400 hover:bg-blue-500/10" : "text-subtle hover:bg-forge-surface hover:text-body"}`}
+                          title={isEditing ? "Done" : "Edit"}
                         >
-                          {p.archived ? (
+                          {isEditing ? (
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                              <path d="M8 3v8M4 7l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           ) : (
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                              <rect x="2" y="3" width="12" height="3" rx="1" stroke="currentColor" strokeWidth="1.2" />
-                              <path d="M3 6v6a1 1 0 001 1h8a1 1 0 001-1V6M6.5 8.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                              <path d="M11 2.5a1.5 1.5 0 012.121 2.121L5.5 12.243 2 13.5l1.257-3.5L11 2.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           )}
                         </button>
+                        {/* Archive */}
+                        <button
+                          onClick={() => updatePerson(p.id, { archived: !p.archived })}
+                          className="rounded p-1.5 text-subtle transition-colors hover:bg-forge-surface hover:text-body"
+                          title="Archive"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="3" width="12" height="3" rx="1" stroke="currentColor" strokeWidth="1.2" />
+                            <path d="M3 6v6a1 1 0 001 1h8a1 1 0 001-1V6M6.5 8.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                        {/* Delete */}
                         <button
                           onClick={() => {
                             if (confirm(`Delete ${p.name}? This removes all their allocations and time.`)) {

@@ -524,7 +524,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex-1 overflow-hidden rounded-lg border border-border">
             <PMStoreProvider>
-              <Scheduler hideToolbar defaultDays={7} compact />
+              <Scheduler hideToolbar compact />
             </PMStoreProvider>
           </div>
         </div>
