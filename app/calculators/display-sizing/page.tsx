@@ -3,12 +3,12 @@
 import { useState } from 'react';
 import { CalcSection, CalcPageWrapper } from '@/components/calc';
 
-const cellInput: React.CSSProperties = { padding: '5px 6px', background: '#0f172a', border: '1px solid rgb(var(--border))', borderRadius: 5, color: '#e2e8f0', fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%', boxSizing: 'border-box', textAlign: 'center' };
-const cellOutput: React.CSSProperties = { padding: '5px 6px', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 5, color: '#60a5fa', fontSize: 13, fontFamily: "'JetBrains Mono', monospace", textAlign: 'center', minHeight: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const cellKeyOutput: React.CSSProperties = { ...cellOutput, background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.35)', fontWeight: 600 };
-const headerCol: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: '#e2e8f0', textAlign: 'center', padding: '6px 4px' };
+const cellInput: React.CSSProperties = { padding: '5px 6px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%', boxSizing: 'border-box', textAlign: 'center' };
+const cellOutput: React.CSSProperties = { padding: '5px 6px', background: 'transparent', border: 'none', color: 'rgb(var(--text-subtle))', fontSize: 13, fontFamily: "'JetBrains Mono', monospace", textAlign: 'center', minHeight: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const cellKeyOutput: React.CSSProperties = { ...cellOutput, color: 'rgb(var(--text-body))', fontWeight: 600 };
+const headerCol: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: 'rgb(var(--text-muted))', textAlign: 'center', padding: '6px 4px' };
 const rowLabel: React.CSSProperties = { fontSize: 12, color: 'rgb(var(--text-muted))', fontWeight: 500, padding: '5px 4px', whiteSpace: 'nowrap' };
-const calcBtn: React.CSSProperties = { padding: '7px 12px', background: '#2563eb', border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', width: '100%', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', letterSpacing: '0.03em' };
+const calcBtn: React.CSSProperties = { padding: '7px 14px', background: '#2563eb', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', width: '100%', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap' };
 const fmt = (v: number | undefined | null) => v !== undefined && v !== null && !isNaN(v) ? v.toFixed(2) : '0.00';
 
 interface CalcResult {
@@ -142,9 +142,9 @@ export default function DisplaySizingPage() {
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr 1fr 1fr', gap: 1, minWidth: 520 }}>
                 <div style={{ padding: '8px 4px' }}></div>
-                <div style={headerCol}>To Find:<br /><span style={{ color: '#60a5fa' }}>Farthest Viewer</span></div>
-                <div style={headerCol}>To Find:<br /><span style={{ color: '#f59e0b' }}>Min Image Height</span></div>
-                <div style={headerCol}>To Find:<br /><span style={{ color: '#a78bfa' }}>Min %Element Height</span></div>
+                <div style={headerCol}>To Find:<br /><span style={{ color: 'rgb(var(--text-body))', fontWeight: 700 }}>Farthest Viewer</span></div>
+                <div style={headerCol}>To Find:<br /><span style={{ color: 'rgb(var(--text-body))', fontWeight: 700 }}>Min Image Height</span></div>
+                <div style={headerCol}>To Find:<br /><span style={{ color: 'rgb(var(--text-body))', fontWeight: 700 }}>Min %Element Height</span></div>
 
                 <div style={rowLabel}>Image Height</div>
                 <div style={{ padding: 2 }}><input type="number" value={c1ImageH} onChange={e => setC1ImageH(e.target.value)} placeholder="enter" style={cellInput} /></div>
@@ -162,9 +162,9 @@ export default function DisplaySizingPage() {
                 <div style={{ padding: 2 }}><input type="number" value={c3Farthest} onChange={e => setC3Farthest(e.target.value)} placeholder="enter" style={cellInput} /></div>
 
                 <div style={rowLabel}>Floor to Bottom of Image*</div>
-                <div style={{ padding: 2 }}><input type="number" value={colFloors[0]} onChange={e => updateFloor(0, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
-                <div style={{ padding: 2 }}><input type="number" value={colFloors[1]} onChange={e => updateFloor(1, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
-                <div style={{ padding: 2 }}><input type="number" value={colFloors[2]} onChange={e => updateFloor(2, e.target.value)} placeholder="optional" style={{ ...cellInput, opacity: 0.7 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[0]} onChange={e => updateFloor(0, e.target.value)} placeholder="optional" style={{ ...cellInput, borderStyle: 'dashed', opacity: 0.6 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[1]} onChange={e => updateFloor(1, e.target.value)} placeholder="optional" style={{ ...cellInput, borderStyle: 'dashed', opacity: 0.6 }} /></div>
+                <div style={{ padding: 2 }}><input type="number" value={colFloors[2]} onChange={e => updateFloor(2, e.target.value)} placeholder="optional" style={{ ...cellInput, borderStyle: 'dashed', opacity: 0.6 }} /></div>
 
                 <div style={rowLabel}>Closest Viewer</div>
                 <div style={{ padding: 2 }}><div style={cellOutput}>{colResults[0] ? fmt(colResults[0].closestViewer) : '0.00'}</div></div>
@@ -193,8 +193,8 @@ export default function DisplaySizingPage() {
 
                 <div style={{ padding: '8px 4px', fontSize: 10, color: '#475569' }}>*Optional input</div>
                 <div style={{ padding: '6px 2px' }}><button onClick={calcCol1} style={calcBtn}>Calculate</button></div>
-                <div style={{ padding: '6px 2px' }}><button onClick={calcCol2} style={{ ...calcBtn, background: '#d97706' }}>Calculate</button></div>
-                <div style={{ padding: '6px 2px' }}><button onClick={calcCol3} style={{ ...calcBtn, background: '#7c3aed' }}>Calculate</button></div>
+                <div style={{ padding: '6px 2px' }}><button onClick={calcCol2} style={calcBtn}>Calculate</button></div>
+                <div style={{ padding: '6px 2px' }}><button onClick={calcCol3} style={calcBtn}>Calculate</button></div>
               </div>
             </div>
             <div className="mt-3.5 flex gap-2">

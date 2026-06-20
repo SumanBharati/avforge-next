@@ -702,11 +702,18 @@ export default function RoomDesignerPage() {
     if (viewMode === "plan") {
       const dxW = dxPx / planScale, dyW = dyPx / planScale;
       if (dev.mountWall === "north" || dev.mountWall === "south") {
-        const newX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
-        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:newX} : d));
+        // Slide freely along the wall; crossing the room's midline flips it to the opposite wall
+        const rawX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
+        const rawY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
+        const newMountWall = rawY > roomL / 2 ? "south" : "north";
+        const sy = newMountWall === "north" ? 0.02 : roomL - 0.02;
+        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:rawX,y:sy,mountWall:newMountWall} : d));
       } else if (dev.mountWall === "west" || dev.mountWall === "east") {
-        const newY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
-        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,y:newY} : d));
+        const rawX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
+        const rawY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
+        const newMountWall = rawX > roomW / 2 ? "east" : "west";
+        const sx = newMountWall === "west" ? 0.02 : roomW - 0.02;
+        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:sx,y:rawY,mountWall:newMountWall} : d));
       } else {
         const newX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
         const newY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
@@ -2714,7 +2721,10 @@ export default function RoomDesignerPage() {
                   else if(mw==="south") {rx2=devPx-dw/2;ry2=pY(roomL)-8;rw2=dw;rh2=6;}
                   else if(mw==="west")  {rx2=pX(0)+2;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
                   else                  {rx2=pX(roomW)-8;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {/* Invisible hit-area padding so thin wall bars are easy to click */}
+                    {(mw==="north"||mw==="south") && <rect x={rx2-4} y={ry2-10} width={rw2+8} height={rh2+20} fill="transparent" pointerEvents="all"/>}
+                    {(mw==="west"||mw==="east")   && <rect x={rx2-10} y={ry2-4} width={rw2+20} height={rh2+8} fill="transparent" pointerEvents="all"/>}
                     {isSelected&&<rect x={rx2-4} y={ry2-4} width={rw2+8} height={rh2+8} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
                     {/* Blue boundary */}
                     <rect x={rx2-1} y={ry2-1} width={rw2+2} height={rh2+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -3114,7 +3124,7 @@ export default function RoomDesignerPage() {
               {placedDevices.map(dev=>{
                 const isSelected=selectedUid===dev.uid||selectedUids.has(dev.uid), isDragging=dragUid===dev.uid;
                 const wrapDevice=(inner:React.ReactNode)=>(
-                  <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.8:1}>
+                  <g key={dev.uid} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.8:1}>
                     {isSelected&&<circle cx={sX(dev.x,dev.y,dev.z)} cy={sY(dev.x,dev.y,dev.z)} r={16} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" opacity={0.6}/>}
                     {inner}
                   </g>

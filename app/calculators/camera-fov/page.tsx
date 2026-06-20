@@ -38,25 +38,31 @@ function FovPlanDiagram({ hfovWide, hfovZoom, widthWide, widthZoom, distance, un
   const zoomFill = accent === 'violet' ? 'rgba(139,92,246,0.20)' : 'rgba(59,130,246,0.20)';
   const dimCol = 'rgba(148,163,184,0.45)';
 
+  const midX = (camX + endX) / 2;
+  const dimY = camY + wideHalfPx + 12;
+  const wMidY = camY;
+  const labelGap = 26; // half-width of text gap in dimension line
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '50%', height: 'auto', display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '60%', height: 'auto', display: 'block' }}>
+      <defs>
+        {/* Right-pointing arrowhead; auto-start-reverse flips it at markerStart */}
+        <marker id={`arr-${accent}`} markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto-start-reverse">
+          <path d="M0,0 L8,3 L0,6 Z" fill={dimCol} />
+        </marker>
+      </defs>
 
       {/* Wide FOV cone */}
       <polygon
         points={`${camX},${camY} ${endX},${camY - wideHalfPx} ${endX},${camY + wideHalfPx}`}
-        fill={wideFill}
-        stroke={col}
-        strokeWidth="1.5"
-        strokeOpacity="0.4"
+        fill={wideFill} stroke={col} strokeWidth="1.5" strokeOpacity="0.4"
       />
 
-      {/* Zoom FOV cone (on top, stronger) */}
+      {/* Zoom FOV cone */}
       {zoomHalfPx !== null && (
         <polygon
           points={`${camX},${camY} ${endX},${camY - zoomHalfPx} ${endX},${camY + zoomHalfPx}`}
-          fill={zoomFill}
-          stroke={col}
-          strokeWidth="1.5"
+          fill={zoomFill} stroke={col} strokeWidth="1.5"
         />
       )}
 
@@ -64,51 +70,49 @@ function FovPlanDiagram({ hfovWide, hfovZoom, widthWide, widthZoom, distance, un
       <line x1={camX} y1={camY} x2={endX} y2={camY}
         stroke={col} strokeWidth="1" strokeDasharray="6,4" strokeOpacity="0.3" />
 
-      {/* Distance arrow line */}
-      <line x1={camX} y1={camY + wideHalfPx + 10} x2={endX} y2={camY + wideHalfPx + 10}
-        stroke={dimCol} strokeWidth="1" markerEnd="url(#arr)" />
-      <line x1={camX} y1={camY + wideHalfPx + 7} x2={camX} y2={camY + wideHalfPx + 13}
-        stroke={dimCol} strokeWidth="1" />
-      <line x1={endX} y1={camY + wideHalfPx + 7} x2={endX} y2={camY + wideHalfPx + 13}
-        stroke={dimCol} strokeWidth="1" />
-      <text x={(camX + endX) / 2} y={camY + wideHalfPx + 22}
-        textAnchor="middle" fontSize="9" fill={dimCol} fontFamily="monospace">
+      {/* ── Distance dimension ── */}
+      {/* Extension ticks */}
+      <line x1={camX} y1={dimY - 5} x2={camX} y2={dimY + 5} stroke={dimCol} strokeWidth="1" />
+      <line x1={endX} y1={dimY - 5} x2={endX} y2={dimY + 5} stroke={dimCol} strokeWidth="1" />
+      {/* Left half with ← arrow */}
+      <line x1={camX} y1={dimY} x2={midX - labelGap} y2={dimY}
+        stroke={dimCol} strokeWidth="1" markerStart={`url(#arr-${accent})`} />
+      {/* Right half with → arrow */}
+      <line x1={midX + labelGap} y1={dimY} x2={endX} y2={dimY}
+        stroke={dimCol} strokeWidth="1" markerEnd={`url(#arr-${accent})`} />
+      {/* Label */}
+      <text x={midX} y={dimY + 4} textAnchor="middle" fontSize="9" fill={dimCol} fontFamily="monospace">
         {distance} {unit}
       </text>
 
-      {/* Wide FOV width bracket at far end */}
-      <line x1={endX + 3} y1={camY - wideHalfPx} x2={endX + 3} y2={camY + wideHalfPx}
-        stroke={dimCol} strokeWidth="1" />
-      <line x1={endX} y1={camY - wideHalfPx} x2={endX + 7} y2={camY - wideHalfPx}
-        stroke={dimCol} strokeWidth="1" />
-      <line x1={endX} y1={camY + wideHalfPx} x2={endX + 7} y2={camY + wideHalfPx}
-        stroke={dimCol} strokeWidth="1" />
-      <text x={endX + 11} y={camY + 3}
-        fontSize="11" fill={col} fontFamily="monospace" fontWeight="600" opacity="0.75">
-        {widthWide.toFixed(1)}
-      </text>
-      <text x={endX + 11} y={camY + 14}
-        fontSize="9" fill={dimCol} fontFamily="monospace">
-        {unit} wide
+      {/* ── Width dimension (vertical, right of cone) ── */}
+      {/* Extension ticks */}
+      <line x1={endX + 4} y1={camY - wideHalfPx} x2={endX + 14} y2={camY - wideHalfPx} stroke={dimCol} strokeWidth="1" />
+      <line x1={endX + 4} y1={camY + wideHalfPx} x2={endX + 14} y2={camY + wideHalfPx} stroke={dimCol} strokeWidth="1" />
+      {/* Full vertical line with ↑↓ arrows */}
+      <line x1={endX + 9} y1={camY - wideHalfPx} x2={endX + 9} y2={camY + wideHalfPx}
+        stroke={dimCol} strokeWidth="1"
+        markerStart={`url(#arr-${accent})`} markerEnd={`url(#arr-${accent})`} />
+      {/* Label to the right of the line, vertically centered */}
+      <text x={endX + 16} y={wMidY + 4} textAnchor="start" fontSize="9" fill={dimCol} fontFamily="monospace">
+        {parseFloat(widthWide.toFixed(1))} {unit}
       </text>
 
-      {/* Zoom FOV width bracket (inside, inset) */}
+      {/* ── Zoom width dimension (inset, if zoom active) ── */}
       {zoomHalfPx !== null && widthZoom !== undefined && (
         <>
+          <line x1={endX - 8} y1={camY - zoomHalfPx} x2={endX - 2} y2={camY - zoomHalfPx} stroke={col} strokeWidth="1" strokeOpacity="0.6" />
+          <line x1={endX - 8} y1={camY + zoomHalfPx} x2={endX - 2} y2={camY + zoomHalfPx} stroke={col} strokeWidth="1" strokeOpacity="0.6" />
           <line x1={endX - 5} y1={camY - zoomHalfPx} x2={endX - 5} y2={camY + zoomHalfPx}
-            stroke={col} strokeWidth="1" strokeOpacity="0.7" />
-          <line x1={endX - 9} y1={camY - zoomHalfPx} x2={endX - 1} y2={camY - zoomHalfPx}
-            stroke={col} strokeWidth="1" strokeOpacity="0.7" />
-          <line x1={endX - 9} y1={camY + zoomHalfPx} x2={endX - 1} y2={camY + zoomHalfPx}
-            stroke={col} strokeWidth="1" strokeOpacity="0.7" />
-          <text x={endX - 12} y={camY - zoomHalfPx - 4}
-            textAnchor="end" fontSize="9" fill={col} fontFamily="monospace" opacity="0.85">
-            {widthZoom.toFixed(1)} {unit} zoom
+            stroke={col} strokeWidth="1" strokeOpacity="0.6"
+            markerStart={`url(#arr-${accent})`} markerEnd={`url(#arr-${accent})`} />
+          <text x={endX - 12} y={wMidY + 4} textAnchor="end" fontSize="9" fill={dimCol} fontFamily="monospace">
+            {parseFloat(widthZoom.toFixed(1))} {unit}
           </text>
         </>
       )}
 
-      {/* Wide HFOV angle label */}
+      {/* HFOV angle label */}
       <text x={camX + 18} y={camY - wideHalfPx * 0.48}
         fontSize="11" fill={col} fontFamily="monospace" fontWeight="700" opacity="0.9">
         {hfovWide}°
@@ -118,30 +122,13 @@ function FovPlanDiagram({ hfovWide, hfovZoom, widthWide, widthZoom, distance, un
         wide
       </text>
 
-      {/* Zoom HFOV angle label */}
-      {zoomHalfPx !== null && hfovZoom !== undefined && (
-        <>
-          <text x={camX + 18} y={camY - zoomHalfPx * 0.55}
-            fontSize="10" fill={col} fontFamily="monospace" fontWeight="600" opacity="0.75">
-            {hfovZoom.toFixed(1)}°
-          </text>
-          <text x={camX + 18} y={camY - zoomHalfPx * 0.55 + 12}
-            fontSize="9" fill={dimCol} fontFamily="monospace" opacity="0.7">
-            zoom
-          </text>
-        </>
-      )}
-
-      {/* Camera body */}
-      <rect x={camX - 16} y={camY - 9} width={16} height={18} rx="2"
-        fill="rgba(15,23,42,0.85)" stroke="rgba(148,163,184,0.55)" strokeWidth="1.5" />
-      {/* Viewfinder bump */}
-      <rect x={camX - 12} y={camY - 14} width={8} height={5} rx="1"
-        fill="rgba(15,23,42,0.85)" stroke="rgba(148,163,184,0.55)" strokeWidth="1.2" />
-      {/* Lens circle */}
-      <circle cx={camX - 8} cy={camY} r="4"
-        fill="rgba(30,41,59,0.9)" stroke="rgba(148,163,184,0.5)" strokeWidth="1" />
-      <circle cx={camX - 8} cy={camY} r="2" fill="rgba(96,165,250,0.3)" />
+      {/* Camera body — rotated 90° clockwise around its center */}
+      <g transform={`rotate(90, ${camX - 8}, ${camY})`}>
+        <rect x={camX - 16} y={camY - 9} width={16} height={18} rx="2"
+          fill="rgba(15,23,42,0.85)" stroke="rgba(148,163,184,0.55)" strokeWidth="1.5" />
+        <rect x={camX - 12} y={camY - 14} width={8} height={5} rx="1"
+          fill="rgba(15,23,42,0.85)" stroke="rgba(148,163,184,0.55)" strokeWidth="1.2" />
+      </g>
 
     </svg>
   );
@@ -150,16 +137,14 @@ function FovPlanDiagram({ hfovWide, hfovZoom, widthWide, widthZoom, distance, un
 export default function CameraFOVPage() {
   const [distance, setDistance] = useState(20);
   const [unit, setUnit] = useState<'ft' | 'm'>('ft');
-  const [selectedCams, setSelectedCams] = useState(['nc-12x80', 'nc-20x60']);
+  const [selectedCam, setSelectedCam] = useState<string>('custom');
+  const [presetZoom, setPresetZoom] = useState(1);
 
-  // Custom camera state
-  const [customActive, setCustomActive] = useState(false);
+  const customActive = selectedCam === 'custom';
   const [customHfovWide, setCustomHfovWide] = useState(70);
   const [customVfovWide, setCustomVfovWide] = useState(40);
   const [customVfovAuto, setCustomVfovAuto] = useState(true);
   const [customHfovZoom, setCustomHfovZoom] = useState(0);
-  const [customVfovZoom, setCustomVfovZoom] = useState(0);
-  const [customVfovZoomAuto, setCustomVfovZoomAuto] = useState(true);
 
   const calcFOV = (hfovDeg: number, dist: number, vfovDeg?: number) => {
     const hRad = (hfovDeg / 2) * Math.PI / 180;
@@ -175,231 +160,228 @@ export default function CameraFOVPage() {
     return { w: Math.round(w * 10) / 10, h: Math.round(h * 10) / 10 };
   };
 
-  const toggleCam = (id: string) => {
-    setSelectedCams(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-  };
-
-  const activeCams = CAMERAS.filter(c => selectedCams.includes(c.id));
+  const activeCam = CAMERAS.find(c => c.id === selectedCam) ?? null;
   const hasZoom = customHfovZoom > 0;
-  const totalResults = activeCams.length + (customActive ? 1 : 0);
+  const zoomHfovDeg = hasZoom
+    ? 2 * Math.atan(Math.tan((customHfovWide / 2) * Math.PI / 180) / customHfovZoom) * 180 / Math.PI
+    : 0;
+  const presetMaxZoom = activeCam ? parseFloat(activeCam.zoom) : 1;
+  const presetZoomHfovDeg = activeCam && presetZoom > 1
+    ? 2 * Math.atan(Math.tan((activeCam.hfovWide / 2) * Math.PI / 180) / presetZoom) * 180 / Math.PI
+    : null;
+  const totalResults = selectedCam ? 1 : 0;
 
   return (
     <CalcPageWrapper title="Camera FOV Calculator" desc="Field of view at distance — Q-SYS NC series and custom cameras">
-      <CalcSection title="Camera Selection">
-        <div className="flex flex-wrap gap-1.5">
-          {CAMERAS.map(cam => {
-            const active = selectedCams.includes(cam.id);
-            return (
-              <button key={cam.id} onClick={() => toggleCam(cam.id)}
-                className="rounded-lg px-3.5 py-2 text-left text-xs transition-all"
-                style={{ background: active ? 'rgba(59,130,246,0.12)' : 'rgb(var(--forge-surface) / 0.5)', border: '1px solid ' + (active ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'), color: active ? '#60a5fa' : 'rgb(var(--text-muted))' }}>
-                <div className="mb-0.5 font-semibold">{cam.name}</div>
-                <div className="opacity-70">{cam.zoom} · {cam.hfovWide}° HFOV · {cam.sensor}</div>
-              </button>
-            );
-          })}
-          <button onClick={() => setCustomActive(v => !v)}
-            className="rounded-lg px-3.5 py-2 text-left text-xs transition-all"
-            style={{ background: customActive ? 'rgba(139,92,246,0.12)' : 'rgb(var(--forge-surface) / 0.5)', border: '1px solid ' + (customActive ? 'rgba(139,92,246,0.4)' : 'rgb(var(--border))'), color: customActive ? '#a78bfa' : 'rgb(var(--text-muted))' }}>
-            <div className="mb-0.5 font-semibold">Custom Camera</div>
-            <div className="opacity-70">Enter HFOV · VFOV · any lens</div>
-          </button>
-        </div>
+      <div className="flex gap-6">
 
-        {customActive && (
-          <div className="mt-3 rounded-xl border border-violet-500/20 bg-violet-500/[0.06] px-4 py-4">
-            <div className="mb-3 text-[11px] uppercase tracking-[0.06em] text-violet-400/80">Custom Camera Parameters</div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-0">
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Wide / Full</div>
-                <InputField label="HFOV Wide" value={customHfovWide} onChange={setCustomHfovWide} unit="°" min={1} max={180} />
-                <div className="mb-3">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="text-[12px] text-muted">VFOV Wide</span>
-                    <button
-                      onClick={() => setCustomVfovAuto(v => !v)}
-                      className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${customVfovAuto ? 'bg-blue-500/20 text-blue-400' : 'bg-forge-surface text-subtle'}`}
-                    >
-                      Auto 16:9
-                    </button>
-                  </div>
-                  {!customVfovAuto ? (
-                    <InputField label="" value={customVfovWide} onChange={setCustomVfovWide} unit="°" min={1} max={180} />
+        {/* ── Left: inputs ── */}
+        <div className="min-w-0 flex-1">
+          <CalcSection title="Camera Selection">
+            <select
+              value={selectedCam}
+              onChange={e => { setSelectedCam(e.target.value); setPresetZoom(1); }}
+              className="w-full rounded-md border border-border bg-forge-surface px-3 py-2 text-[13px] text-body outline-none focus:border-blue-500/40"
+            >
+              <option value="custom">Custom Camera — enter HFOV · VFOV · any lens</option>
+              {CAMERAS.map(cam => (
+                <option key={cam.id} value={cam.id}>
+                  {cam.name} — {cam.zoom} · {cam.hfovWide}° HFOV · {cam.sensor}
+                </option>
+              ))}
+            </select>
+
+            <div className="mt-3 rounded-xl border border-border bg-forge-surface/50 px-4 py-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+                {customActive ? 'Custom Camera Parameters' : 'Camera Parameters'}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {/* HFOV */}
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">HFOV</div>
+                  {customActive ? (
+                    <InputField label="" value={customHfovWide} onChange={setCustomHfovWide} unit="°" min={1} max={180} />
                   ) : (
-                    <div className="rounded-md border border-border bg-forge-surface/50 px-3 py-2 font-mono text-[13px] text-subtle">
-                      {(Math.atan(Math.tan((customHfovWide / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1)}° (derived)
+                    <div className="rounded-lg border border-border bg-forge-surface/30 px-3 py-2.5 font-mono text-[15px] text-subtle">
+                      {activeCam?.hfovWide}°
                     </div>
                   )}
                 </div>
-              </div>
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Zoom (optional)</div>
-                <InputField label="HFOV Zoom" value={customHfovZoom} onChange={setCustomHfovZoom} unit="°" min={0} max={180} />
-                <div className="mb-1 text-[10px] text-subtle">Set to 0 to disable zoom row</div>
-                {hasZoom && (
-                  <div className="mt-2">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-[12px] text-muted">VFOV Zoom</span>
+                {/* VFOV */}
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">VFOV</span>
+                    {customActive && (
                       <button
-                        onClick={() => setCustomVfovZoomAuto(v => !v)}
-                        className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${customVfovZoomAuto ? 'bg-blue-500/20 text-blue-400' : 'bg-forge-surface text-subtle'}`}
+                        onClick={() => setCustomVfovAuto(v => !v)}
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-semibold transition-colors ${customVfovAuto ? 'bg-blue-500/20 text-blue-400' : 'bg-forge-surface text-subtle'}`}
                       >
-                        Auto 16:9
+                        Auto
                       </button>
-                    </div>
-                    {!customVfovZoomAuto ? (
-                      <InputField label="" value={customVfovZoom} onChange={setCustomVfovZoom} unit="°" min={1} max={180} />
-                    ) : (
-                      <div className="rounded-md border border-border bg-forge-surface/50 px-3 py-2 font-mono text-[13px] text-subtle">
-                        {(Math.atan(Math.tan((customHfovZoom / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1)}° (derived)
-                      </div>
                     )}
                   </div>
-                )}
+                  {customActive ? (
+                    !customVfovAuto ? (
+                      <InputField label="" value={customVfovWide} onChange={setCustomVfovWide} unit="°" min={1} max={180} />
+                    ) : (
+                      <div className="rounded-lg border border-border bg-forge-surface px-3 py-2.5 font-mono text-[15px] text-subtle">
+                        {(Math.atan(Math.tan((customHfovWide / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1)}°
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-lg border border-border bg-forge-surface/30 px-3 py-2.5 font-mono text-[15px] text-subtle">
+                      {activeCam ? (Math.atan(Math.tan((activeCam.hfovWide / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1) : '—'}°
+                    </div>
+                  )}
+                </div>
+                {/* ZOOM */}
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Zoom</div>
+                  {customActive ? (
+                    <InputField label="" value={customHfovZoom} onChange={setCustomHfovZoom} unit="×" min={0} max={200} />
+                  ) : (
+                    <InputField label="" value={presetZoom} onChange={v => setPresetZoom(Math.min(Math.max(1, v), presetMaxZoom))} unit="×" min={1} max={presetMaxZoom} step={0.5} />
+                  )}
+                  {!customActive && (
+                    <div className="mt-1 text-[10px] text-subtle">1× = wide · max {presetMaxZoom}×</div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </CalcSection>
+          </CalcSection>
 
-      <CalcSection title="Distance from Camera to Subject">
-        <div className="mb-2 flex items-center gap-3">
-          <span className="min-w-[60px] text-center font-mono text-2xl font-semibold text-blue-400">{distance}</span>
-          <div className="flex-1">
-            <input type="range" min={1} max={80} step={0.5} value={distance} onChange={e => setDistance(parseFloat(e.target.value))}
-              className="w-full cursor-pointer accent-blue-500" />
-            <div className="mt-0.5 flex justify-between text-[10px] text-faint">
-              <span>1</span><span>20</span><span>40</span><span>60</span><span>80</span>
-            </div>
-          </div>
-          <select value={unit} onChange={e => setUnit(e.target.value as 'ft' | 'm')}
-            className="rounded-md border border-border bg-forge-surface px-2.5 py-1.5 text-[13px] text-body outline-none">
-            <option value="ft">feet</option>
-            <option value="m">meters</option>
-          </select>
-        </div>
-        <div className="text-center text-xs text-subtle">All distances in {unit === 'ft' ? 'feet' : 'meters'}</div>
-      </CalcSection>
-
-      {totalResults > 0 && (
-        <CalcSection title="Field of View Results">
-          <div className={`grid gap-4 ${totalResults > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-
-            {activeCams.map(cam => {
-              const wide = calcFOV(cam.hfovWide, distance);
-              const zoom = calcFOV(cam.hfovZoom, distance);
-              return (
-                <div key={cam.id} className="overflow-hidden rounded-xl border border-border bg-forge-surface/50">
-                  <div className="border-b border-border bg-blue-500/[0.06] px-4 py-3">
-                    <div className="font-mono text-base font-bold text-body">{cam.name.split(' ').pop()}</div>
-                    <div className="mt-0.5 text-[10px] text-subtle">{cam.mfr} · {cam.zoom} · {cam.sensor} sensor</div>
-                  </div>
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="border-b border-border px-3.5 py-2 text-left text-[10px] font-semibold uppercase text-subtle"></th>
-                        <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Width</th>
-                        <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Height</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="border-b border-border px-3.5 py-2 text-xs font-medium text-muted">Full Wide</td>
-                        <td className="border-b border-border px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{wide.w.toFixed(1)}</td>
-                        <td className="border-b border-border px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{wide.h.toFixed(1)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-3.5 py-2 text-xs font-medium text-muted">Full Zoom</td>
-                        <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-blue-400">{zoom.w.toFixed(1)}</td>
-                        <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-blue-400">{zoom.h.toFixed(1)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  {/* Plan view diagram */}
-                  <div className="border-t border-border bg-forge-surface/30 px-2 pb-1 pt-2">
-                    <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-subtle">Plan View (top-down)</div>
-                    <FovPlanDiagram
-                      hfovWide={cam.hfovWide}
-                      hfovZoom={cam.hfovZoom}
-                      widthWide={wide.w}
-                      widthZoom={zoom.w}
-                      distance={distance}
-                      unit={unit}
-                      accent="blue"
-                    />
-                  </div>
-
-                  <div className="border-t border-border px-3.5 py-2 text-[10px] text-faint">
-                    {cam.hfovWide}° wide → {cam.hfovZoom.toFixed(1)}° zoom · {cam.output}
-                  </div>
+          <CalcSection title="Distance from Camera to Subject">
+            <div className="mb-2 flex items-center gap-3">
+              <span className="min-w-[48px] text-center font-mono text-2xl font-semibold text-body">{distance}</span>
+              <div className="flex-1">
+                <input type="range" min={1} max={80} step={0.5} value={distance} onChange={e => setDistance(parseFloat(e.target.value))}
+                  className="w-full cursor-pointer accent-blue-500" />
+                <div className="mt-0.5 flex justify-between text-[10px] text-faint">
+                  <span>1</span><span>20</span><span>40</span><span>60</span><span>80</span>
                 </div>
-              );
-            })}
+              </div>
+              <select value={unit} onChange={e => setUnit(e.target.value as 'ft' | 'm')}
+                className="rounded-md border border-border bg-forge-surface px-2.5 py-1.5 text-[13px] text-body outline-none">
+                <option value="ft">feet</option>
+                <option value="m">meters</option>
+              </select>
+            </div>
+          </CalcSection>
+        </div>
 
-            {customActive && (() => {
-              const vfovWideResolved = customVfovAuto ? undefined : customVfovWide;
-              const vfovZoomResolved = customVfovZoomAuto ? undefined : customVfovZoom;
-              const wide = calcFOV(customHfovWide, distance, vfovWideResolved);
-              const zoom = hasZoom ? calcFOV(customHfovZoom, distance, vfovZoomResolved) : null;
-              const derivedVfovWide = (Math.atan(Math.tan((customHfovWide / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1);
-              return (
-                <div className="overflow-hidden rounded-xl border border-violet-500/30 bg-forge-surface/50">
-                  <div className="border-b border-violet-500/20 bg-violet-500/[0.06] px-4 py-3">
-                    <div className="font-mono text-base font-bold text-body">Custom Camera</div>
-                    <div className="mt-0.5 text-[10px] text-subtle">
-                      HFOV {customHfovWide}° · VFOV {customVfovAuto ? `${derivedVfovWide}° (16:9)` : `${customVfovWide}°`}
-                      {hasZoom ? ` · Zoom ${customHfovZoom}°` : ''}
+        {/* ── Vertical divider ── */}
+        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+
+        {/* ── Right: results ── */}
+        <div className="min-w-0 flex-1">
+          {totalResults > 0 && (
+            <CalcSection title="Field of View Results">
+
+              {activeCam && (() => {
+                const cam = activeCam;
+                const wide = calcFOV(cam.hfovWide, distance);
+                const zoomed = presetZoomHfovDeg ? calcFOV(presetZoomHfovDeg, distance) : null;
+                return (
+                  <div key={cam.id} className="overflow-hidden rounded-xl border border-border bg-forge-surface/50">
+                    <div className="border-b border-border bg-forge-surface/80 px-4 py-3">
+                      <div className="font-mono text-base font-bold text-body">{cam.name}</div>
+                      <div className="mt-0.5 text-[10px] text-subtle">{cam.mfr} · {cam.zoom} · {cam.sensor} sensor</div>
+                    </div>
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="border-b border-border px-3.5 py-2 text-left text-[10px] font-semibold uppercase text-subtle"></th>
+                          <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Width</th>
+                          <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Height</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className={zoomed ? 'border-b border-border' : ''}>
+                          <td className={`px-3.5 py-2 text-xs font-medium text-muted ${zoomed ? 'border-b border-border' : ''}`}>Wide</td>
+                          <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoomed ? 'border-b border-border' : ''}`}>{wide.w.toFixed(1)}</td>
+                          <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoomed ? 'border-b border-border' : ''}`}>{wide.h.toFixed(1)}</td>
+                        </tr>
+                        {zoomed && (
+                          <tr>
+                            <td className="px-3.5 py-2 text-xs font-medium text-muted">{presetZoom}× Zoom</td>
+                            <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{zoomed.w.toFixed(1)}</td>
+                            <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{zoomed.h.toFixed(1)}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                    <div className="border-t border-border bg-forge-surface/30 px-2 pb-1 pt-2">
+                      <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-subtle">Plan View (top-down)</div>
+                      <FovPlanDiagram
+                        hfovWide={cam.hfovWide} hfovZoom={presetZoomHfovDeg ?? undefined}
+                        widthWide={wide.w} widthZoom={zoomed?.w}
+                        distance={distance} unit={unit} accent="blue"
+                      />
+                    </div>
+                    <div className="border-t border-border px-3.5 py-2 text-[10px] text-faint">
+                      {cam.hfovWide}° wide · {cam.zoom} · {cam.output}
                     </div>
                   </div>
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="border-b border-border px-3.5 py-2 text-left text-[10px] font-semibold uppercase text-subtle"></th>
-                        <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Width</th>
-                        <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Height</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className={zoom ? 'border-b border-border' : ''}>
-                        <td className={`px-3.5 py-2 text-xs font-medium text-muted ${zoom ? 'border-b border-border' : ''}`}>Wide</td>
-                        <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoom ? 'border-b border-border' : ''}`}>{wide.w.toFixed(1)}</td>
-                        <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoom ? 'border-b border-border' : ''}`}>{wide.h.toFixed(1)}</td>
-                      </tr>
-                      {zoom && (
+                );
+              })()}
+
+              {customActive && (() => {
+                const vfovWideResolved = customVfovAuto ? undefined : customVfovWide;
+                const wide = calcFOV(customHfovWide, distance, vfovWideResolved);
+                const zoom = hasZoom ? calcFOV(zoomHfovDeg, distance) : null;
+                const derivedVfovWide = (Math.atan(Math.tan((customHfovWide / 2) * Math.PI / 180) * 9 / 16) * 2 * 180 / Math.PI).toFixed(1);
+                return (
+                  <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/50">
+                    <div className="border-b border-border bg-forge-surface/80 px-4 py-3">
+                      <div className="font-mono text-base font-bold text-body">Custom Camera</div>
+                      <div className="mt-0.5 text-[10px] text-subtle">
+                        HFOV {customHfovWide}° · VFOV {customVfovAuto ? `${derivedVfovWide}° (16:9)` : `${customVfovWide}°`}
+                        {hasZoom ? ` · Zoom ${customHfovZoom}× (${zoomHfovDeg.toFixed(1)}° HFOV)` : ''}
+                      </div>
+                    </div>
+                    <table className="w-full border-collapse">
+                      <thead>
                         <tr>
-                          <td className="px-3.5 py-2 text-xs font-medium text-muted">Zoom</td>
-                          <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-violet-400">{zoom.w.toFixed(1)}</td>
-                          <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-violet-400">{zoom.h.toFixed(1)}</td>
+                          <th className="border-b border-border px-3.5 py-2 text-left text-[10px] font-semibold uppercase text-subtle"></th>
+                          <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Width</th>
+                          <th className="border-b border-border px-2.5 py-2 text-center text-[10px] font-semibold uppercase text-subtle">Height</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
-
-                  {/* Plan view diagram */}
-                  <div className="border-t border-violet-500/15 bg-violet-500/[0.03] px-2 pb-1 pt-2">
-                    <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-subtle">Plan View (top-down)</div>
-                    <FovPlanDiagram
-                      hfovWide={customHfovWide}
-                      hfovZoom={hasZoom ? customHfovZoom : undefined}
-                      widthWide={wide.w}
-                      widthZoom={zoom?.w}
-                      distance={distance}
-                      unit={unit}
-                      accent="violet"
-                    />
+                      </thead>
+                      <tbody>
+                        <tr className={zoom ? 'border-b border-border' : ''}>
+                          <td className={`px-3.5 py-2 text-xs font-medium text-muted ${zoom ? 'border-b border-border' : ''}`}>Wide</td>
+                          <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoom ? 'border-b border-border' : ''}`}>{wide.w.toFixed(1)}</td>
+                          <td className={`px-2.5 py-2 text-center font-mono text-lg font-semibold text-body ${zoom ? 'border-b border-border' : ''}`}>{wide.h.toFixed(1)}</td>
+                        </tr>
+                        {zoom && (
+                          <tr>
+                            <td className="px-3.5 py-2 text-xs font-medium text-muted">Zoom</td>
+                            <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{zoom.w.toFixed(1)}</td>
+                            <td className="px-2.5 py-2 text-center font-mono text-lg font-semibold text-body">{zoom.h.toFixed(1)}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                    <div className="border-t border-border bg-forge-surface/30 px-2 pb-1 pt-2">
+                      <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-subtle">Plan View (top-down)</div>
+                      <FovPlanDiagram
+                        hfovWide={customHfovWide} hfovZoom={hasZoom ? zoomHfovDeg : undefined}
+                        widthWide={wide.w} widthZoom={zoom?.w}
+                        distance={distance} unit={unit} accent="violet"
+                      />
+                    </div>
+                    <div className="border-t border-border px-3.5 py-2 text-[10px] text-faint">
+                      HFOV {customHfovWide}° wide{hasZoom ? ` → ${customHfovZoom}× zoom (${zoomHfovDeg.toFixed(1)}°)` : ''} · custom lens
+                    </div>
                   </div>
+                );
+              })()}
 
-                  <div className="border-t border-border px-3.5 py-2 text-[10px] text-faint">
-                    HFOV {customHfovWide}° wide{hasZoom ? ` → ${customHfovZoom}° zoom` : ''} · custom lens
-                  </div>
-                </div>
-              );
-            })()}
+            </CalcSection>
+          )}
+        </div>
 
-          </div>
-        </CalcSection>
-      )}
+      </div>
     </CalcPageWrapper>
   );
 }

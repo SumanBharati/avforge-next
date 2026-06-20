@@ -22,6 +22,15 @@ function ScheduleIcon() {
   );
 }
 
+function TimeTrackingIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 15" />
+    </svg>
+  );
+}
+
 function BoardIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -35,6 +44,7 @@ function BoardIcon() {
 const navItems = [
   { href: "/projects", label: "Projects", icon: ToolsIcon },
   { href: "/project-management", label: "Schedule", icon: ScheduleIcon },
+  { href: "/time-tracking", label: "Time Tracking", icon: TimeTrackingIcon },
   { href: "/board", label: "Board", icon: BoardIcon },
   { href: "/inventory", label: "Library", icon: InventoryIcon },
   { href: "/calculators", label: "Calculators", icon: CalculatorIcon },

@@ -88,7 +88,7 @@ export default function ScreenSizePage() {
   const perim = hasAll ? ((parseFloat(width.in) + parseFloat(height.in)) * 2).toFixed(1) : '—';
 
   return (
-    <CalcPageWrapper title="Screen Size Calculator" desc="Diagonal / width / height in cm, inches & feet from aspect ratio">
+    <CalcPageWrapper title="Aspect Ratio to Display Size Converter" desc="Diagonal / width / height in cm, inches & feet from aspect ratio">
       <CalcSection title="1. Choose Aspect Ratio">
         <div className="mb-3.5 flex items-center gap-2">
           <span className="text-[13px] font-medium text-muted">Aspect ratio</span>
@@ -126,15 +126,23 @@ export default function ScreenSizePage() {
                 if (row.dim.in) return row.calc(row.dim.in, 'in');
                 if (row.dim.cm) return row.calc(row.dim.cm, 'cm');
               };
+              const unitInputSt: React.CSSProperties = { ...inputSt, paddingRight: 34 };
+              const unitLabel: React.CSSProperties = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'rgb(var(--text-faint))', pointerEvents: 'none', userSelect: 'none', fontFamily: "'JetBrains Mono', monospace" };
               return (
-                <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 30px 1fr 30px 1fr 30px 90px', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+                <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 1fr 90px', gap: 6, alignItems: 'center', marginBottom: 10 }}>
                   <span className="text-[13px] font-medium text-body">{row.label}</span>
-                  <input type="number" value={row.dim.cm} onChange={e => row.setDim(prev => ({ ...prev, cm: e.target.value, last: 'cm' }))} placeholder="—" style={inputSt} />
-                  <span className="text-center text-xs text-muted">cm</span>
-                  <input type="number" value={row.dim.in} onChange={e => row.setDim(prev => ({ ...prev, in: e.target.value, last: 'in' }))} placeholder="—" style={inputSt} />
-                  <span className="text-center text-xs text-muted">in</span>
-                  <input type="number" value={row.dim.ft} onChange={e => row.setDim(prev => ({ ...prev, ft: e.target.value, last: 'ft' }))} placeholder="—" style={inputSt} />
-                  <span className="text-center text-xs text-muted">ft</span>
+                  <div style={{ position: 'relative' }}>
+                    <input type="number" value={row.dim.cm} onChange={e => row.setDim(prev => ({ ...prev, cm: e.target.value, last: 'cm' }))} placeholder="—" style={unitInputSt} />
+                    <span style={unitLabel}>cm</span>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <input type="number" value={row.dim.in} onChange={e => row.setDim(prev => ({ ...prev, in: e.target.value, last: 'in' }))} placeholder="—" style={unitInputSt} />
+                    <span style={unitLabel}>in</span>
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <input type="number" value={row.dim.ft} onChange={e => row.setDim(prev => ({ ...prev, ft: e.target.value, last: 'ft' }))} placeholder="—" style={unitInputSt} />
+                    <span style={unitLabel}>ft</span>
+                  </div>
                   <button onClick={onCalc} style={calcBtnSt}>Calculate</button>
                 </div>
               );

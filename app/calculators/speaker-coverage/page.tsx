@@ -24,12 +24,18 @@ export default function SpeakerCoveragePage() {
         {/* ── Left half: Inputs ── */}
         <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
           <CalcSection title="Inputs">
-            <InputField label="Ceiling Height" value={ceilingH} onChange={setCeilingH} unit="ft" min={7} max={40} />
-            <InputField label="Ear Height" value={earH} onChange={setEarH} unit="ft" min={3} max={6} />
-            <InputField label="Speaker Dispersion" value={dispersion} onChange={setDispersion} unit="°" min={30} max={180} />
-            <InputField label="Room Width" value={roomW} onChange={setRoomW} unit="ft" min={5} max={200} />
-            <InputField label="Room Length" value={roomL} onChange={setRoomL} unit="ft" min={5} max={200} />
-            <InputField label="Overlap %" value={overlap} onChange={setOverlap} unit="%" min={0} max={40} />
+            <div className="grid grid-cols-2 gap-3">
+              <InputField label="Ceiling Height" value={ceilingH} onChange={setCeilingH} unit="ft" min={7} max={40} />
+              <InputField label="Ear Height" value={earH} onChange={setEarH} unit="ft" min={3} max={6} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <InputField label="Room Width" value={roomW} onChange={setRoomW} unit="ft" min={5} max={200} />
+              <InputField label="Room Length" value={roomL} onChange={setRoomL} unit="ft" min={5} max={200} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <InputField label="Speaker Dispersion" value={dispersion} onChange={setDispersion} unit="°" min={30} max={180} />
+              <InputField label="Overlap %" value={overlap} onChange={setOverlap} unit="%" min={0} max={40} />
+            </div>
           </CalcSection>
         </div>
 

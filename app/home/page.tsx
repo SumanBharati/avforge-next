@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
@@ -11,12 +12,26 @@ import { getRecentTools } from "@/lib/recentTools";
 import HomePageSkeleton from "@/components/HomePageSkeleton";
 
 /* ── Pinned tools (calculators only) ───────────────────────── */
-const allTools = [
+const VideoWallIconSmall = () => (
+  <svg width="16" height="16" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+    <rect x="0"    y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="10.5" y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="21"   y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="0"    y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="10.5" y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="21"   y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="0"    y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="10.5" y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="21"   y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
+  </svg>
+);
+
+const allTools: { name: string; icon: React.ReactNode; href: string }[] = [
   { name: "Display Sizing",   icon: "📺", href: "/calculators/display-sizing" },
-  { name: "Screen Size",      icon: "📐", href: "/calculators/screen-size" },
+  { name: "Aspect Ratio to Display Size Converter", icon: "📐", href: "/calculators/screen-size" },
   { name: "Camera FOV",       icon: "📷", href: "/calculators/camera-fov" },
-  { name: "Throw Ratio",      icon: "🎯", href: "/calculators/throw-ratio" },
-  { name: "LED Pixel Pitch",  icon: "💡", href: "/calculators/led-pitch" },
+  { name: "Throw & Lumens",   icon: "📽️", href: "/calculators/throw-ratio" },
+  { name: "LED Pixel Pitch",  icon: <VideoWallIconSmall />, href: "/calculators/led-pitch" },
   { name: "Speaker Coverage", icon: "🔊", href: "/calculators/speaker-coverage" },
   { name: "PAG / NAG",        icon: "🎤", href: "/calculators/pag-nag" },
   { name: "70V Tap",          icon: "⚡", href: "/calculators/70v-tap" },

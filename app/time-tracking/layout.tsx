@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 import PMStoreProvider, { usePMStore } from "@/components/PMStoreProvider";
 
 const TABS = [
-  { href: "/project-management", label: "Calendar", exact: true },
-  { href: "/project-management/people", label: "Resources" },
-  { href: "/project-management/reports", label: "Reports" },
+  { href: "/time-tracking", label: "Time Tracking", exact: true },
+  { href: "/time-tracking/time-off", label: "Time Off" },
 ];
 
 function SaveIndicator() {
@@ -44,7 +43,7 @@ function TabBar() {
   );
 }
 
-export default function ProjectManagementLayout({ children }: { children: React.ReactNode }) {
+export default function TimeTrackingLayout({ children }: { children: React.ReactNode }) {
   return (
     <PMStoreProvider>
       <div className="flex flex-col" style={{ height: "calc(100vh - 72px)" }}>
