@@ -64,7 +64,16 @@ function LoginPageInner() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      setError(error.message);
+      if (error.message === 'Invalid login credentials') {
+        const { data: userExists } = await supabase.rpc('check_user_exists', { user_email: email });
+        if (!userExists) {
+          setError("No account found with this email address. Please sign up to get started.");
+        } else {
+          setError("Incorrect password. Please try again or use Forgot password.");
+        }
+      } else {
+        setError(error.message);
+      }
       setLoading(false);
       return;
     }
