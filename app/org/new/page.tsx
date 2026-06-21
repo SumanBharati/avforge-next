@@ -11,9 +11,28 @@ export default function NewOrgPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const [userEmail, setUserEmail] = useState("");
+  const [emailVerified, setEmailVerified] = useState(true);
   const nameRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { nameRef.current?.focus(); }, []);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUserEmail(user.email ?? "");
+        setEmailVerified(!!user.email_confirmed_at);
+      }
+    });
+    if (emailVerified) nameRef.current?.focus();
+  }, []);
+
+  async function handleResend() {
+    setResendLoading(true);
+    await supabase.auth.resend({ type: "signup", email: userEmail });
+    setResendLoading(false);
+    setResendSent(true);
+  }
 
   function generateSlug(n: string) {
     return n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -67,6 +86,35 @@ export default function NewOrgPage() {
           Organizations let your team collaborate on projects together.
         </p>
 
+        {!emailVerified && (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <svg className="mt-0.5 shrink-0 text-amber-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <div className="flex-1">
+                <p className="text-[13px] font-semibold text-amber-400">Email verification required</p>
+                <p className="mt-0.5 text-[12px] text-amber-400/80">
+                  Please verify your email address before creating an organization. Check your inbox at <span className="font-medium">{userEmail}</span>.
+                </p>
+                {resendSent ? (
+                  <p className="mt-2 text-[12px] font-medium text-emerald-400">Verification email sent — check your inbox.</p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleResend}
+                    disabled={resendLoading}
+                    className="mt-2 text-[12px] font-medium text-amber-400 underline underline-offset-2 hover:text-amber-300 transition-colors disabled:opacity-50"
+                  >
+                    {resendLoading ? "Sending…" : "Resend verification email"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-[13px] text-red-400">
@@ -102,7 +150,7 @@ export default function NewOrgPage() {
             >
               Cancel
             </button>
-            <button type="submit" disabled={loading || !name.trim()} className="forge-btn-primary text-[13px]">
+            <button type="submit" disabled={loading || !name.trim() || !emailVerified} className="forge-btn-primary text-[13px]">
               {loading ? "Creating..." : "Create Organization"}
             </button>
           </div>
