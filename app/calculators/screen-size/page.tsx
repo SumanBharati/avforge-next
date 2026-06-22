@@ -89,7 +89,7 @@ export default function ScreenSizePage() {
 
   return (
     <CalcPageWrapper title="Aspect Ratio to Display Size Converter" desc="Diagonal / width / height in cm, inches & feet from aspect ratio">
-      <CalcSection title="1. Choose Aspect Ratio">
+      <CalcSection title="Choose or Enter Aspect Ratio">
         <div className="mb-3.5 flex items-center gap-2">
           <span className="text-[13px] font-medium text-muted">Aspect ratio</span>
           <input type="number" value={arW} onChange={e => { setArW(parseFloat(e.target.value) || 0); clearAll(); }} min={1} max={100} step={0.01}
@@ -113,9 +113,8 @@ export default function ScreenSizePage() {
         </div>
       </CalcSection>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-        <div className="min-w-0 flex-1">
-          <CalcSection title="2. Calculate">
+      <div>
+          <CalcSection title="Enter One Value to Calculate Other Two">
             <p className="mb-4 text-[13px] text-muted">Enter a known measurement and click Calculate — the other two compute automatically.</p>
 
             {rows.map(row => {
@@ -152,37 +151,6 @@ export default function ScreenSizePage() {
               Clear All
             </button>
           </CalcSection>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <CalcSection title="Summary">
-            <div className="rounded-lg border border-blue-500/20 bg-blue-500/[0.06] p-4">
-              <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 1fr 1fr', gap: 8, fontSize: 13 }}>
-                <div></div>
-                <div className="text-center text-[11px] font-semibold uppercase text-subtle">Inches</div>
-                <div className="text-center text-[11px] font-semibold uppercase text-subtle">Centimeters</div>
-                <div className="text-center text-[11px] font-semibold uppercase text-subtle">Feet</div>
-                <div className="font-medium text-body">Diagonal</div>
-                <div className="text-center font-mono text-blue-400">{fmt(diag.in, 2, '"')}</div>
-                <div className="text-center font-mono text-blue-400">{fmt(diag.cm, 2, ' cm')}</div>
-                <div className="text-center font-mono text-blue-400">{fmt(diag.ft, 4, ' ft')}</div>
-                <div className="font-medium text-body">Width</div>
-                <div className="text-center font-mono text-body">{fmt(width.in, 2, '"')}</div>
-                <div className="text-center font-mono text-body">{fmt(width.cm, 2, ' cm')}</div>
-                <div className="text-center font-mono text-body">{fmt(width.ft, 4, ' ft')}</div>
-                <div className="font-medium text-body">Height</div>
-                <div className="text-center font-mono text-body">{fmt(height.in, 2, '"')}</div>
-                <div className="text-center font-mono text-body">{fmt(height.cm, 2, ' cm')}</div>
-                <div className="text-center font-mono text-body">{fmt(height.ft, 4, ' ft')}</div>
-              </div>
-              <div className="mt-3 border-t border-blue-500/15 pt-2.5 text-xs text-muted">
-                Aspect ratio: <span className="font-medium text-body">{arW}:{arH}</span> &nbsp;|&nbsp;
-                Area: <span className="font-medium text-body">{area}{hasAll ? ' ft²' : ''}</span> &nbsp;|&nbsp;
-                Perimeter: <span className="font-medium text-body">{perim}{hasAll ? '"' : ''}</span>
-              </div>
-            </div>
-          </CalcSection>
-        </div>
       </div>
     </CalcPageWrapper>
   );
