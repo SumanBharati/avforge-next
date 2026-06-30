@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { CalcSection, CalcPageWrapper } from '@/components/calc';
+import { Calculator, Trash2 } from 'lucide-react';
+import { CalcPageWrapper } from '@/components/calc';
 
 type Unit = 'cm' | 'in' | 'ft';
 interface DimState { cm: string; in: string; ft: string; last: Unit | null; }
@@ -17,12 +18,12 @@ export default function ScreenSizePage() {
   const ar = arW / arH;
 
   const presets = [
-    { label: '4K Ultra HD (3840×2160)', w: 16, h: 9 },
-    { label: 'Full HD (1920×1080)', w: 16, h: 9 },
-    { label: 'WUXGA (1920×1200)', w: 16, h: 10 },
-    { label: 'UWQHD (3440×1440)', w: 21, h: 9 },
-    { label: 'Anamorphic', w: 2.39, h: 1 },
-    { label: 'NTSC/PAL', w: 4, h: 3 },
+    { name: '4K Ultra HD', res: '3840×2160', ratio: '16:9',  w: 16,   h: 9  },
+    { name: 'Full HD',     res: '1920×1080', ratio: '16:9',  w: 16,   h: 9  },
+    { name: 'WUXGA',       res: '1920×1200', ratio: '16:10', w: 16,   h: 10 },
+    { name: 'UWQHD',       res: '3440×1440', ratio: '21:9',  w: 21,   h: 9  },
+    { name: 'Anamorphic',  res: '',          ratio: '2.39:1',w: 2.39, h: 1  },
+    { name: 'NTSC/PAL',    res: '',          ratio: '4:3',   w: 4,    h: 3  },
   ];
 
   const toInches = (val: string, unit: Unit): number => {
@@ -72,86 +73,148 @@ export default function ScreenSizePage() {
     setDiag(emptyDim()); setWidth(emptyDim()); setHeight(emptyDim());
   };
 
-  const inputSt: React.CSSProperties = { padding: '8px 10px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 6, color: 'rgb(var(--text-body))', fontSize: 14, fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%', boxSizing: 'border-box' };
-  const calcBtnSt: React.CSSProperties = { padding: '7px 14px', background: '#2563eb', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
+  const inputSt: React.CSSProperties = {
+    padding: '8px 34px 8px 10px',
+    background: 'rgb(var(--forge-surface))',
+    border: '1px solid rgb(var(--border))',
+    borderRadius: 6,
+    color: 'rgb(var(--text-body))',
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', monospace",
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box',
+  };
 
   const rows = [
-    { label: 'Diagonal', dim: diag, setDim: setDiag, calc: calcFromDiag },
-    { label: 'Width',    dim: width, setDim: setWidth, calc: calcFromWidth },
-    { label: 'Height',   dim: height, setDim: setHeight, calc: calcFromHeight },
+    {
+      label: 'Diagonal',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="3" y1="15" x2="15" y2="3" />
+          <polyline points="8,3 15,3 15,10" />
+          <polyline points="3,8 3,15 10,15" />
+        </svg>
+      ),
+      dim: diag, setDim: setDiag, calc: calcFromDiag,
+    },
+    {
+      label: 'Width',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="2" y1="9" x2="16" y2="9" />
+          <polyline points="6,5 2,9 6,13" />
+          <polyline points="12,5 16,9 12,13" />
+        </svg>
+      ),
+      dim: width, setDim: setWidth, calc: calcFromWidth,
+    },
+    {
+      label: 'Height',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="9" y1="2" x2="9" y2="16" />
+          <polyline points="5,6 9,2 13,6" />
+          <polyline points="5,12 9,16 13,12" />
+        </svg>
+      ),
+      dim: height, setDim: setHeight, calc: calcFromHeight,
+    },
   ];
 
-  const hasAll = !!(diag.in && width.in && height.in);
-  const fmt = (v: string, digits: number, suffix: string) =>
-    v ? `${parseFloat(v).toFixed(digits)}${suffix}` : '—';
-  const area  = hasAll ? (parseFloat(width.in) * parseFloat(height.in) / 144).toFixed(2) : '—';
-  const perim = hasAll ? ((parseFloat(width.in) + parseFloat(height.in)) * 2).toFixed(1) : '—';
+  const unitLabel: React.CSSProperties = {
+    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+    fontSize: 11, color: 'rgb(var(--text-faint))', pointerEvents: 'none',
+    userSelect: 'none', fontFamily: "'JetBrains Mono', monospace",
+  };
 
   return (
     <CalcPageWrapper title="Aspect Ratio to Display Size Converter" desc="Diagonal / width / height in cm, inches & feet from aspect ratio">
-      <CalcSection title="Choose or Enter Aspect Ratio">
-        <div className="mb-3.5 flex items-center gap-2">
+
+      {/* ── Section 1: Choose or Enter Aspect Ratio ── */}
+      <div className="mb-4 rounded-xl border border-border bg-forge-surface/50 p-4">
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+          Choose or Enter Aspect Ratio
+        </div>
+        <div className="mb-4 flex items-center gap-2">
           <span className="text-[13px] font-medium text-muted">Aspect ratio</span>
           <input type="number" value={arW} onChange={e => { setArW(parseFloat(e.target.value) || 0); clearAll(); }} min={1} max={100} step={0.01}
-            style={{ width: 60, padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 6, color: 'rgb(var(--text-body))', fontSize: 14, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center' }} />
+            style={{ width: 64, padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 6, color: 'rgb(var(--text-body))', fontSize: 14, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center' }} />
           <span className="text-base font-semibold text-subtle">:</span>
           <input type="number" value={arH} onChange={e => { setArH(parseFloat(e.target.value) || 0); clearAll(); }} min={1} max={100} step={0.01}
-            style={{ width: 60, padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 6, color: 'rgb(var(--text-body))', fontSize: 14, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center' }} />
+            style={{ width: 64, padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 6, color: 'rgb(var(--text-body))', fontSize: 14, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center' }} />
         </div>
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-faint">Select predefined format:</div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {presets.map((p, i) => {
             const active = arW === p.w && arH === p.h;
             return (
               <button key={i} onClick={() => { setArW(p.w); setArH(p.h); clearAll(); }}
-                className="rounded-md px-3 py-1 text-xs transition-colors"
-                style={{ background: active ? 'rgba(59,130,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)', border: '1px solid ' + (active ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'), color: active ? '#60a5fa' : 'rgb(var(--text-muted))' }}>
-                {p.label} <span style={{ opacity: 0.5, fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>[{p.w}:{p.h}]</span>
+                className="rounded-md px-3 py-2 text-left transition-colors"
+                style={{
+                  background: active ? 'rgba(59,130,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)',
+                  border: '1px solid ' + (active ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'),
+                  minWidth: 120,
+                }}>
+                <div className="text-[12px] font-semibold" style={{ color: active ? '#60a5fa' : 'rgb(var(--text-body))' }}>{p.name}</div>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  {p.res && <span className="text-[10px]" style={{ color: 'rgb(var(--text-subtle))' }}>{p.res}</span>}
+                  <span className="text-[10px] font-mono" style={{ color: active ? '#60a5fa' : 'rgb(var(--text-faint))' }}>[{p.ratio}]</span>
+                </div>
               </button>
             );
           })}
         </div>
-      </CalcSection>
-
-      <div>
-          <CalcSection title="Enter One Value to Calculate Other Two">
-            <p className="mb-4 text-[13px] text-muted">Enter a known measurement and click Calculate — the other two compute automatically.</p>
-
-            {rows.map(row => {
-              const onCalc = () => {
-                const u = row.dim.last;
-                if (u && row.dim[u]) return row.calc(row.dim[u], u);
-                if (row.dim.ft) return row.calc(row.dim.ft, 'ft');
-                if (row.dim.in) return row.calc(row.dim.in, 'in');
-                if (row.dim.cm) return row.calc(row.dim.cm, 'cm');
-              };
-              const unitInputSt: React.CSSProperties = { ...inputSt, paddingRight: 34 };
-              const unitLabel: React.CSSProperties = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'rgb(var(--text-faint))', pointerEvents: 'none', userSelect: 'none', fontFamily: "'JetBrains Mono', monospace" };
-              return (
-                <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 1fr 90px', gap: 6, alignItems: 'center', marginBottom: 10 }}>
-                  <span className="text-[13px] font-medium text-body">{row.label}</span>
-                  <div style={{ position: 'relative' }}>
-                    <input type="number" value={row.dim.cm} onChange={e => row.setDim(prev => ({ ...prev, cm: e.target.value, last: 'cm' }))} placeholder="—" style={unitInputSt} />
-                    <span style={unitLabel}>cm</span>
-                  </div>
-                  <div style={{ position: 'relative' }}>
-                    <input type="number" value={row.dim.in} onChange={e => row.setDim(prev => ({ ...prev, in: e.target.value, last: 'in' }))} placeholder="—" style={unitInputSt} />
-                    <span style={unitLabel}>in</span>
-                  </div>
-                  <div style={{ position: 'relative' }}>
-                    <input type="number" value={row.dim.ft} onChange={e => row.setDim(prev => ({ ...prev, ft: e.target.value, last: 'ft' }))} placeholder="—" style={unitInputSt} />
-                    <span style={unitLabel}>ft</span>
-                  </div>
-                  <button onClick={onCalc} style={calcBtnSt}>Calculate</button>
-                </div>
-              );
-            })}
-
-            <button onClick={clearAll} className="mt-2 rounded-md border border-red-500/25 bg-red-500/10 px-3.5 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/20">
-              Clear All
-            </button>
-          </CalcSection>
       </div>
+
+      {/* ── Section 2: Enter One Value ── */}
+      <div className="mb-4 rounded-xl border border-border bg-forge-surface/50 p-4">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+          Enter One Value to Calculate Other Two
+        </div>
+        <p className="mb-4 text-[13px] text-muted">Enter a known measurement and click Calculate — the other two compute automatically.</p>
+
+        {rows.map(row => {
+          const onCalc = () => {
+            const u = row.dim.last;
+            if (u && row.dim[u]) return row.calc(row.dim[u], u);
+            if (row.dim.ft) return row.calc(row.dim.ft, 'ft');
+            if (row.dim.in) return row.calc(row.dim.in, 'in');
+            if (row.dim.cm) return row.calc(row.dim.cm, 'cm');
+          };
+          return (
+            <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '24px 76px 1fr 1fr 1fr 100px', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+              <span className="text-subtle" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{row.icon}</span>
+              <span className="text-[13px] font-medium text-body">{row.label}</span>
+              {(['cm', 'in', 'ft'] as Unit[]).map(unit => (
+                <div key={unit} style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    value={row.dim[unit]}
+                    onChange={e => row.setDim(prev => ({ ...prev, [unit]: e.target.value, last: unit }))}
+                    placeholder="—"
+                    style={inputSt}
+                  />
+                  <span style={unitLabel}>{unit}</span>
+                </div>
+              ))}
+              <button onClick={onCalc}
+                className="flex items-center justify-center gap-1.5 rounded-md text-[12px] font-semibold text-white transition-colors hover:bg-blue-600"
+                style={{ padding: '8px 10px', background: '#2563eb', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <Calculator size={12} />
+                Calculate
+              </button>
+            </div>
+          );
+        })}
+
+        <button onClick={clearAll}
+          className="mt-2 flex items-center gap-1.5 rounded-md border border-red-500/25 bg-red-500/10 px-3.5 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/20">
+          <Trash2 size={12} />
+          Clear All
+        </button>
+      </div>
+
     </CalcPageWrapper>
   );
 }

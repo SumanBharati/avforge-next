@@ -86,7 +86,7 @@ export default function StandardsPage() {
 
   return (
     <div className="animate-fade-in p-6 max-w-[860px]">
-      <a href="/reference" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Back to Reference</a>
+      <a href="/calculators" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Calculators</a>
       <h2 className="mb-1 text-lg font-semibold text-heading">📐 Formula Sheet</h2>
       <p className="mb-5 text-[13px] text-subtle">AVIXA / CTS-D engineering formulas with examples</p>
 
@@ -107,7 +107,7 @@ export default function StandardsPage() {
         {filtered.map((f, i) => (
           <div key={i} className="rounded-xl border border-border bg-forge-surface/40 p-4">
             <div className="mb-2 text-[14px] font-semibold text-heading">{f.name}</div>
-            <div className="mb-3 rounded-lg bg-[#0f172a] px-3.5 py-2.5 font-mono text-[13px] text-blue-400">{f.formula}</div>
+            <div className="mb-3 rounded-lg border border-border bg-forge-surface px-3.5 py-2.5 font-mono text-[13px] text-blue-400">{f.formula}</div>
             <div className="mb-1.5 text-[12px] text-muted">{f.notes}</div>
             <div className="text-[12px] italic text-subtle">Example: {f.example}</div>
           </div>

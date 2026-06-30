@@ -6,7 +6,7 @@ import { CONDUIT_SIZES, CABLE_TYPES } from '@/lib/calc-data';
 
 interface CableEntry { type: string; qty: number; }
 
-const selectSt: React.CSSProperties = { padding: '6px 8px', background: '#0f172a', border: '1px solid rgb(var(--border))', borderRadius: 5, color: '#e2e8f0', fontSize: 12, width: '100%' };
+const selectSt: React.CSSProperties = { padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 12, width: '100%' };
 const numSt: React.CSSProperties = { ...selectSt, textAlign: 'center', width: '100%' };
 
 export default function ConduitFillPage() {

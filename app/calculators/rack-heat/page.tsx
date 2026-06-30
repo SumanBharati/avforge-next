@@ -5,7 +5,7 @@ import { CalcSection, ResultCard, CalcPageWrapper } from '@/components/calc';
 
 interface EquipmentItem { name: string; watts: number; }
 
-const inputSt: React.CSSProperties = { padding: '6px 8px', background: '#0f172a', border: '1px solid rgb(var(--border))', borderRadius: 5, color: '#e2e8f0', fontSize: 12, width: '100%' };
+const inputSt: React.CSSProperties = { padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 12, width: '100%' };
 
 export default function RackHeatPage() {
   const [equipment, setEquipment] = useState<EquipmentItem[]>([

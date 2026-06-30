@@ -121,10 +121,11 @@ export function StatusBanner({ ok, okText, failText }: StatusBannerProps) {
 interface CalcPageWrapperProps {
   title: string;
   desc: string;
+  subtitle?: string;
   children: React.ReactNode;
 }
 
-export function CalcPageWrapper({ title, desc, children }: CalcPageWrapperProps) {
+export function CalcPageWrapper({ title, desc, subtitle, children }: CalcPageWrapperProps) {
   return (
     <div className="animate-fade-in px-6 py-3">
       <div className="mb-2 flex items-center gap-2 text-[12px]">
@@ -133,7 +134,8 @@ export function CalcPageWrapper({ title, desc, children }: CalcPageWrapperProps)
         </a>
       </div>
       <h2 className="mb-0.5 text-xl font-semibold text-heading">{title}</h2>
-      <p className="mb-3 text-[13px] text-subtle">{desc}</p>
+      <p className={subtitle ? 'mb-0.5 text-[13px] text-subtle' : 'mb-3 text-[13px] text-subtle'}>{desc}</p>
+      {subtitle && <p className="mb-3 text-[13px] text-subtle">{subtitle}</p>}
       <div className="w-full">{children}</div>
     </div>
   );
