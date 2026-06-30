@@ -19,12 +19,9 @@ interface CalcResult {
   viewingRatio: number;
 }
 
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+function SectionHeader({ title }: { icon?: React.ReactNode; title: string }) {
   return (
-    <div className="mb-4 flex items-center gap-2 border-b border-border pb-2.5">
-      <div className="flex h-6 w-6 items-center justify-center rounded bg-blue-500/15">
-        {icon}
-      </div>
+    <div className="mb-4 border-b border-border pb-2.5">
       <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{title}</h3>
     </div>
   );
@@ -119,7 +116,7 @@ export default function DisplaySizingPage() {
   ];
 
   return (
-    <CalcPageWrapper title="Display Sizing" desc="DISCAS-based image height and viewer distance calculator">
+    <CalcPageWrapper title="Display Sizing" desc="Image height and viewer distance calculator" subtitle="Note: Use Consistent Units Throughout">
       <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
 
         {/* ── Left column ── */}
@@ -131,7 +128,7 @@ export default function DisplaySizingPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">
-                  Standard Eye Level <span className="font-normal normal-case opacity-60">(use consistent units)</span>
+                  Standard Eye Level
                 </label>
                 <div className="flex items-center gap-1.5">
                   <input
@@ -139,7 +136,6 @@ export default function DisplaySizingPage() {
                     onChange={e => setEyeLevel(parseFloat(e.target.value) || 0)}
                     className={inputCls}
                   />
-                  <span className="text-xs text-subtle">in</span>
                 </div>
                 <div className="mt-1 text-[10px] text-faint">48" seated / 60" standing</div>
               </div>
@@ -331,7 +327,7 @@ export default function DisplaySizingPage() {
         {/* ── Right column: AVIXA Reference ── */}
         <div style={{ width: 675, flexShrink: 0, paddingLeft: 32 }}>
           <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
-          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="AVIXA DISCAS Reference" />
+          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="Reference" />
 
           <div className="mb-4 space-y-2 text-[12px] leading-relaxed text-subtle">
             <div>

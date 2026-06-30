@@ -15,24 +15,47 @@ const VideoWallIcon = () => (
   </svg>
 );
 
+const DisplaySizingIcon = () => (
+  <svg width="30" height="30" viewBox="0 0 100 80" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+    {/* Monitor body */}
+    <rect x="2" y="2" width="96" height="62" rx="4" fill="#1a2035" stroke="#1a2035" strokeWidth="3" />
+    {/* Screen */}
+    <rect x="7" y="7" width="86" height="52" rx="2" fill="#22d3ee" />
+    {/* Screen shine */}
+    <polygon points="15,10 40,10 20,37" fill="#67e8f9" opacity="0.45" />
+    <polygon points="22,10 35,10 18,28" fill="white" opacity="0.18" />
+    {/* Stand neck */}
+    <rect x="44" y="64" width="12" height="8" rx="1" fill="#1a2035" />
+    {/* Stand base */}
+    <rect x="30" y="72" width="40" height="6" rx="3" fill="#1a2035" />
+    {/* Diagonal arrow line */}
+    <line x1="22" y1="52" x2="72" y2="14" stroke="#0f172a" strokeWidth="4" strokeLinecap="round" />
+    {/* Arrow head top-right */}
+    <polygon points="72,14 60,16 68,24" fill="#0f172a" />
+    {/* Arrow head bottom-left */}
+    <polygon points="22,52 34,50 26,42" fill="#0f172a" />
+  </svg>
+);
+
 export default function CalculatorsPage() {
   const calculators: { id: string; name: string; icon: React.ReactNode; desc: string }[] = [
-    { id: 'display-sizing',   name: 'Display Sizing',     icon: '📺', desc: 'DISCAS-based image height and viewer distance' },
+    { id: 'display-sizing',   name: 'Display Sizing',     icon: <DisplaySizingIcon />, desc: 'Image height and viewer distance' },
     { id: 'screen-size',      name: 'Aspect Ratio to Display Size Converter', icon: '📐', desc: 'Aspect ratio and diagonal computation' },
     { id: 'camera-fov',       name: 'Camera FOV',         icon: '📷', desc: 'Camera Field of View Calculator' },
-    { id: 'throw-ratio',      name: 'Throw & Lumens',     icon: '📽️', desc: 'Projector Throw and Lumens calculator' },
+    { id: 'projector-throw',   name: 'Projector Throw',    icon: '📽️', desc: 'Throw ratio, lens type, and image dimensions' },
+    { id: 'projector-lumens', name: 'Projector Lumens',   icon: '💡', desc: 'Required lumens based on screen size and room' },
     { id: 'led-pitch',        name: 'LED Pixel Pitch',    icon: <VideoWallIcon />, desc: 'Optimal viewing distance for LED walls' },
     { id: 'speaker-coverage', name: 'Speaker Coverage',   icon: '🔊', desc: 'EPR-based speaker aiming calculator' },
     { id: 'speaker-wire',     name: 'Speaker Wire Gauge', icon: '🔧', desc: 'NEC/AVIXA minimum AWG for any speaker run' },
     { id: 'pag-nag',          name: 'PAG / NAG',          icon: '🎤', desc: 'Potential acoustic gain stability' },
     { id: '70v-tap',          name: '70V Tap',            icon: '⚡', desc: 'Transformer tap and wattage calculator' },
     { id: 'conduit-fill',     name: 'Conduit Fill',       icon: '🔌', desc: 'NEC conduit fill with jam ratio check' },
-    { id: 'poe-budget',       name: 'PoE Budget',         icon: '🔋', desc: 'IEEE af/at/bt power budgeting' },
-    { id: 'dante-bandwidth',  name: 'Dante Bandwidth',    icon: '📶', desc: 'Per-flow Dante/AES67 bandwidth' },
     { id: 'rack-heat',        name: 'Rack Heat Load',     icon: '🌡️', desc: 'BTU/hr thermal calculation' },
     { id: 'unit-converter',   name: 'Unit Converter',     icon: '🔄', desc: 'AV-specific unit conversions' },
     { id: 'standards',        name: 'Formula Sheet',      icon: '📐', desc: 'AVIXA / CTS-D engineering formulas with examples' },
     { id: 'poe-database',     name: 'PoE Device Database', icon: '📦', desc: 'Per-device PoE class and draw reference' },
+    { id: 'poe-budget',       name: 'PoE Budget',         icon: '🔋', desc: 'IEEE af/at/bt power budgeting' },
+    { id: 'dante-bandwidth',  name: 'Dante Bandwidth',    icon: '📶', desc: 'Per-flow Dante/AES67 bandwidth' },
   ];
 
   return (
