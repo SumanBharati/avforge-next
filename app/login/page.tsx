@@ -40,6 +40,8 @@ function LoginPageInner() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showResendConfirm, setShowResendConfirm] = useState(false);
+  const [resendDone, setResendDone] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -59,6 +61,8 @@ function LoginPageInner() {
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setShowResendConfirm(false);
+    setResendDone(false);
     setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -71,6 +75,9 @@ function LoginPageInner() {
         } else {
           setError("Incorrect password. Please try again or use Forgot password.");
         }
+      } else if (error.message === 'Email not confirmed') {
+        setError("Your email address hasn't been confirmed yet. Check your inbox (and spam folder) for the confirmation link.");
+        setShowResendConfirm(true);
       } else {
         setError(error.message);
       }
@@ -206,6 +213,21 @@ function LoginPageInner() {
                     <form onSubmit={handleSignIn} className="flex flex-col gap-4">
                       {error && (
                         <div className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-[13px] text-red-400">{error}</div>
+                      )}
+                      {showResendConfirm && (
+                        <button
+                          type="button"
+                          disabled={resendDone}
+                          onClick={async () => {
+                            const { error: resendErr } = await supabase.auth.resend({ type: "signup", email });
+                            if (resendErr) { setError(resendErr.message); return; }
+                            setResendDone(true);
+                            setError("");
+                          }}
+                          className="rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-[13px] text-blue-400 hover:bg-blue-500/20 disabled:opacity-60 transition-colors"
+                        >
+                          {resendDone ? "Confirmation email sent — check your inbox and spam folder" : "Resend confirmation email"}
+                        </button>
                       )}
 
                       <div>

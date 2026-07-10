@@ -98,6 +98,13 @@ export default function SignalFlowPage() {
   const [rooms, setRooms] = useState<any[]>([]);
   const [editingRoom, setEditingRoom] = useState<any>(null);
   const [panOffset] = useState({x:0,y:0});
+  const [canvasLocked, setCanvasLocked] = useState(false);
+  const [connectCursor, setConnectCursor] = useState<{x:number,y:number}|null>(null);
+  const [view, setView] = useState({x:0,y:0,zoom:1});
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const canvasLockedRef = useRef(canvasLocked);
+  canvasLockedRef.current = canvasLocked;
   const [libOpen, setLibOpen] = useState(true);
   const [libSearch, setLibSearch] = useState("");
   const [libResults, setLibResults] = useState<any[]>([]);
@@ -151,7 +158,7 @@ export default function SignalFlowPage() {
   useEffect(() => {
     loadToolData("signal-flow").then((data) => {
       if (data) {
-        if (data.devices) { setDevices(data.devices as any[]); nextId.current = (data.nextId as number) || 1; }
+        if (data.devices) { setDevices((data.devices as any[]).map(d=>sizeDevice(d))); nextId.current = (data.nextId as number) || 1; }
         if (data.connections) setConnections(data.connections as any[]);
         if (data.rooms) setRooms(data.rooms as any[]);
         if (data.annotations) { setAnnotations(data.annotations as any[]); annotIdRef.current = (data.annotNextId as number) || 1; }
@@ -298,27 +305,86 @@ export default function SignalFlowPage() {
     }).filter(Boolean);
   };
 
+  // Size a device box so all port rows fit and left/right labels can't collide.
+  // Port labels are 8px monospace (~4.9px/char); each port row needs ~13px.
+  const sizeDevice = (d: any) => {
+    const left = (d.ports||[]).filter((p:any)=>p.side==="left");
+    const right = (d.ports||[]).filter((p:any)=>p.side==="right");
+    const rows = Math.max(left.length, right.length, 1);
+    const maxL = left.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
+    const maxR = right.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
+    const title = [d.mfr&&d.mfr!=="Generic"?d.mfr:null, d.model&&d.model!=="—"?d.model:null].filter(Boolean).join(" · ");
+    const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, title.length*7 + 24, (d.type||"").length*4.5 + 20);
+    const h = Math.max(56, d.h||0, 26 + 13*(rows+1));
+    return {...d, w, h};
+  };
+
+  // Expand grouped port labels into individual ports:
+  //   "Port 1-12" → Port 1 … Port 12
+  //   "SFP+ 10G (x4)" → SFP+ 10G 1 … SFP+ 10G 4
+  //   "8 LINE OUTPUTS (EUROBLOCK)" → LINE OUTPUTS (EUROBLOCK) 1 … 8
+  const expandPortGroups = (ports: any[]) => {
+    const out: any[] = [];
+    for (const p of ports) {
+      const label = String(p.label||"").trim();
+      let m = label.match(/^(\D*?)(\d+)\s*[-–]\s*(\d+)$/);
+      if (m) {
+        const a = parseInt(m[2],10), b = parseInt(m[3],10);
+        if (b > a && b - a + 1 <= 64) {
+          for (let i = a; i <= b; i++) out.push({...p, label: `${m[1]}${i}`.trim()});
+          continue;
+        }
+      }
+      m = label.match(/^(.*?)\s*\((?:x|×)\s*(\d+)\)$/i);
+      if (m) {
+        const n = parseInt(m[2],10);
+        if (n >= 2 && n <= 64) {
+          for (let i = 1; i <= n; i++) out.push({...p, label: `${m[1]} ${i}`});
+          continue;
+        }
+      }
+      m = label.match(/^(\d+)\s+(?:[×x]\s+)?(\D.*)$/);
+      if (m) {
+        const n = parseInt(m[1],10);
+        if (n >= 2 && n <= 32) {
+          for (let i = 1; i <= n; i++) out.push({...p, label: `${m[2]} ${i}`});
+          continue;
+        }
+      }
+      out.push(p);
+    }
+    return out;
+  };
+
   const addDevice = (template: any) => {
     const id = nextId.current++;
-    const ports = template.ports.map((p:any,i:number)=>({...p,id:`${id}-p${i}`}));
-    setDevices(prev=>[...prev,{...template,id,x:200+Math.random()*300,y:100+Math.random()*200,ports}]);
+    const ports = expandPortGroups(template.ports).map((p:any,i:number)=>({...p,id:`${id}-p${i}`}));
+    // Spawn within the currently visible portion of the canvas
+    const v = viewRef.current;
+    const wx = (200 + Math.random()*300 - v.x) / v.zoom;
+    const wy = (100 + Math.random()*200 - v.y) / v.zoom;
+    setDevices(prev=>[...prev,sizeDevice({...template,id,x:wx,y:wy,ports})]);
   };
 
   const roomColors = ["#4b5563","#6b7280","#3b82f6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
   const addRoom = () => {
     const id = "room-"+(Date.now());
-    setRooms(prev=>[...prev,{id,label:"Location "+(prev.length+1),x:80+Math.random()*100,y:80+Math.random()*100,w:400,h:300,color:"#4b5563"}]);
+    const v = viewRef.current;
+    setRooms(prev=>[...prev,{id,label:"Location "+(prev.length+1),x:(80+Math.random()*100-v.x)/v.zoom,y:(80+Math.random()*100-v.y)/v.zoom,w:400,h:300,color:"#4b5563"}]);
     setSelectedRoom(id);
   };
 
   const handleRoomMouseDown = (e: React.MouseEvent, room: any) => {
     e.stopPropagation();
+    // While routing a connection, clicks over a location drop a bend instead of dragging it
+    if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     setSelectedRoom(room.id); setSelected(null); setSelectedConn(null);
-    const startX = e.clientX - room.x - panOffset.x;
-    const startY = e.clientY - room.y - panOffset.y;
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z - room.x - panOffset.x;
+    const startY = e.clientY/z - room.y - panOffset.y;
     const onMove = (me: MouseEvent) => {
-      const nx = me.clientX - startX - panOffset.x;
-      const ny = me.clientY - startY - panOffset.y;
+      const nx = me.clientX/z - startX - panOffset.x;
+      const ny = me.clientY/z - startY - panOffset.y;
       setRooms(prev=>prev.map(r=>r.id===room.id?{...r,x:nx,y:ny}:r));
     };
     const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
@@ -328,11 +394,13 @@ export default function SignalFlowPage() {
 
   const handleRoomResize = (e: React.MouseEvent, room: any, handle: string) => {
     e.stopPropagation();
+    if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     setSelectedRoom(room.id);
     const startX = e.clientX, startY = e.clientY;
     const origX = room.x, origY = room.y, origW = room.w, origH = room.h;
+    const z = viewRef.current.zoom;
     const onMove = (me: MouseEvent) => {
-      const dx = me.clientX - startX, dy = me.clientY - startY;
+      const dx = (me.clientX - startX)/z, dy = (me.clientY - startY)/z;
       setRooms(prev=>prev.map(r=>{
         if(r.id!==room.id) return r;
         let {x,y,w,h} = {x:origX,y:origY,w:origW,h:origH};
@@ -393,22 +461,69 @@ export default function SignalFlowPage() {
     };
   },[panOffset]);
 
+  const startPan = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startMX = e.clientX, startMY = e.clientY;
+    const startVX = viewRef.current.x, startVY = viewRef.current.y;
+    const onMove = (me: MouseEvent) => {
+      setView(v=>({...v, x: startVX + (me.clientX - startMX), y: startVY + (me.clientY - startMY)}));
+    };
+    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+  };
+
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (!canvasLocked && e.button === 1) { startPan(e); return; }
     if (activeTool) { handleToolDown(e); return; }
     const target = e.target as Element;
-    if(target===canvasRef.current || target.tagName==="svg"){
+    const isEmpty = target===canvasRef.current || target.tagName==="svg" || (target.tagName==="rect" && target.getAttribute("fill")==="url(#grid)");
+    // While routing a connection, any canvas click drops a perpendicular bend point
+    if (connecting && e.button === 0) {
+      addConnectionWaypoint(e);
+      return;
+    }
+    if(isEmpty){
       setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null);
+      if (!canvasLocked && e.button === 0) startPan(e);
     }
   };
+
+  // Wheel: scroll pans, ctrl/cmd+wheel zooms at the cursor — all disabled while locked.
+  // Attached non-passively at document level (capture) so preventDefault reliably
+  // stops browser zoom/scroll; only handles events inside the canvas area.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const wrap = document.getElementById("sf-canvas-export");
+      if (!wrap || !wrap.contains(e.target as Node)) return;
+      e.preventDefault();
+      if (canvasLockedRef.current) return;
+      const v = viewRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        const rect = wrap.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const zoom = Math.min(4, Math.max(0.25, v.zoom * Math.exp(-e.deltaY * 0.0015)));
+        const scale = zoom / v.zoom;
+        setView({ zoom, x: mx - (mx - v.x) * scale, y: my - (my - v.y) * scale });
+      } else if (e.shiftKey) {
+        setView({ ...v, x: v.x - (e.deltaY || e.deltaX), y: v.y });
+      } else {
+        setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
+      }
+    };
+    document.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => document.removeEventListener("wheel", onWheel, { capture: true } as any);
+  }, []);
 
   const handleDeviceMouseDown = (e: React.MouseEvent, dev: any) => {
     e.stopPropagation();
     setSelected(dev.id); setSelectedConn(null); setSelectedRoom(null);
-    const startX = e.clientX - dev.x - panOffset.x;
-    const startY = e.clientY - dev.y - panOffset.y;
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z - dev.x - panOffset.x;
+    const startY = e.clientY/z - dev.y - panOffset.y;
     const onMove = (me: MouseEvent) => {
-      const nx = me.clientX - startX - panOffset.x;
-      const ny = me.clientY - startY - panOffset.y;
+      const nx = me.clientX/z - startX - panOffset.x;
+      const ny = me.clientY/z - startY - panOffset.y;
       setDevices(prev=>prev.map((d:any)=>d.id===dev.id?{...d,x:nx,y:ny}:d));
     };
     const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
@@ -419,14 +534,42 @@ export default function SignalFlowPage() {
   const handlePortClick = (e: React.MouseEvent, device: any, port: any) => {
     e.stopPropagation();
     if(!connecting){
-      setConnecting({deviceId:device.id,portId:port.id,signal:port.signal});
+      setConnecting({deviceId:device.id,portId:port.id,signal:port.signal,waypoints:[]});
+      setConnectCursor(null);
     } else {
       if(connecting.deviceId!==device.id){
         const sig = SIGNAL_TYPES.find(s=>s.id===connecting.signal) || SIGNAL_TYPES.find(s=>s.id===port.signal) || SIGNAL_TYPES[0];
-        setConnections(prev=>[...prev,{id:Date.now(),from:{deviceId:connecting.deviceId,portId:connecting.portId},to:{deviceId:device.id,portId:port.id},signal:sig.id}]);
+        setConnections(prev=>[...prev,{id:Date.now(),from:{deviceId:connecting.deviceId,portId:connecting.portId},to:{deviceId:device.id,portId:port.id},signal:sig.id,waypoints:connecting.waypoints?.length?connecting.waypoints:undefined}]);
       }
       setConnecting(null);
+      setConnectCursor(null);
     }
+  };
+
+  // Snap a point so the segment from prev is horizontal or vertical
+  const snapOrtho = (prev:{x:number,y:number}, pt:{x:number,y:number}) =>
+    Math.abs(pt.x-prev.x) > Math.abs(pt.y-prev.y) ? {x:pt.x, y:prev.y} : {x:prev.x, y:pt.y};
+
+  const getConnectingSource = () => {
+    if (!connecting) return null;
+    const dev = devices.find((d:any)=>d.id===connecting.deviceId);
+    const port = dev?.ports.find((p:any)=>p.id===connecting.portId);
+    return dev && port ? getPortPos(dev, port) : null;
+  };
+
+  const handleConnectMove = (e: React.MouseEvent) => {
+    const src = getConnectingSource();
+    if (!src) return;
+    const prev = connecting.waypoints?.length ? connecting.waypoints[connecting.waypoints.length-1] : src;
+    setConnectCursor(snapOrtho(prev, getSVGCoords(e)));
+  };
+
+  const addConnectionWaypoint = (e: React.MouseEvent) => {
+    const src = getConnectingSource();
+    if (!src) return;
+    const prev = connecting.waypoints?.length ? connecting.waypoints[connecting.waypoints.length-1] : src;
+    const wp = snapOrtho(prev, getSVGCoords(e));
+    setConnecting({...connecting, waypoints:[...(connecting.waypoints||[]), wp]});
   };
 
   const deleteSelected = useCallback(() => {
@@ -447,7 +590,8 @@ export default function SignalFlowPage() {
 
   const getSVGCoords = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const v = viewRef.current;
+    return { x: (e.clientX - rect.left - v.x) / v.zoom, y: (e.clientY - rect.top - v.y) / v.zoom };
   };
 
   const eraseAtPoint = (x: number, y: number) => {
@@ -643,7 +787,7 @@ export default function SignalFlowPage() {
       const tag = (e.target as HTMLElement).tagName;
       const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
       if(e.key === "Escape") {
-        setSelected(null); setSelectedConn(null); setSelectedRoom(null); setConnecting(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
+        setSelected(null); setSelectedConn(null); setSelectedRoom(null); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
         textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null;
         return;
       }
@@ -658,6 +802,106 @@ export default function SignalFlowPage() {
 
   const clearAll = () => { setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); nextId.current=1; annotIdRef.current=1; };
 
+  // Expand endpoint + waypoints into an axis-aligned point list, inserting
+  // elbows where consecutive points aren't aligned (e.g. after a device moves)
+  const buildOrthoPoints = (p1:{x:number,y:number}, waypoints:{x:number,y:number}[], p2:{x:number,y:number}) => {
+    const pts: {x:number,y:number}[] = [p1];
+    for (const w of waypoints) {
+      const last = pts[pts.length-1];
+      if (Math.abs(w.x-last.x) > 0.5 && Math.abs(w.y-last.y) > 0.5) pts.push({x:w.x, y:last.y});
+      pts.push(w);
+    }
+    const last = pts[pts.length-1];
+    if (Math.abs(p2.x-last.x) > 0.5 && Math.abs(p2.y-last.y) > 0.5) pts.push({x:last.x, y:p2.y});
+    pts.push(p2);
+    // Drop collinear middle points — removes redundant joints and the
+    // double-back "spike" left when a bend slightly overshoots the port line
+    for (let i = pts.length-2; i > 0; i--) {
+      const a = pts[i-1], b = pts[i], c = pts[i+1];
+      if ((Math.abs(a.x-b.x) < 0.5 && Math.abs(b.x-c.x) < 0.5) ||
+          (Math.abs(a.y-b.y) < 0.5 && Math.abs(b.y-c.y) < 0.5)) pts.splice(i, 1);
+    }
+    return pts;
+  };
+
+  // Flatten the auto-routed bezier into a polyline (for crossing detection only)
+  const flattenBezier = (p1:{x:number,y:number}, p2:{x:number,y:number}) => {
+    const dx = Math.abs(p2.x-p1.x)*0.5;
+    const pts: {x:number,y:number}[] = [];
+    for (let i = 0; i <= 16; i++) {
+      const t = i/16, mt = 1-t;
+      pts.push({
+        x: mt*mt*mt*p1.x + 3*mt*mt*t*(p1.x+dx) + 3*mt*t*t*(p2.x-dx) + t*t*t*p2.x,
+        y: mt*mt*mt*p1.y + 3*mt*mt*t*p1.y + 3*mt*t*t*p2.y + t*t*t*p2.y,
+      });
+    }
+    return pts;
+  };
+
+  const getConnPolyline = (conn: any) => {
+    const fromDev = devices.find((d:any)=>d.id===conn.from.deviceId);
+    const toDev = devices.find((d:any)=>d.id===conn.to.deviceId);
+    if(!fromDev||!toDev) return null;
+    const fromPort = fromDev.ports.find((p:any)=>p.id===conn.from.portId);
+    const toPort = toDev.ports.find((p:any)=>p.id===conn.to.portId);
+    if(!fromPort||!toPort) return null;
+    const p1 = getPortPos(fromDev,fromPort), p2 = getPortPos(toDev,toPort);
+    return conn.waypoints?.length ? buildOrthoPoints(p1, conn.waypoints, p2) : flattenBezier(p1, p2);
+  };
+
+  // Build a path for an orthogonal polyline, inserting semicircular "hops"
+  // where its segments cross other connections' segments
+  const HOP_R = 6;
+  const buildHoppedPath = (pts:{x:number,y:number}[], obstacleSegs:Array<[{x:number,y:number},{x:number,y:number}]>) => {
+    let d = `M${pts[0].x},${pts[0].y}`;
+    for (let i = 0; i < pts.length-1; i++) {
+      const a = pts[i], b = pts[i+1];
+      const horiz = Math.abs(a.y-b.y) < 0.5, vert = Math.abs(a.x-b.x) < 0.5;
+      const crossings: number[] = [];
+      if (horiz || vert) {
+        const F = horiz ? a.y : a.x;                       // my fixed coordinate
+        const s0 = horiz ? a.x : a.y, s1 = horiz ? b.x : b.y;
+        const lo = Math.min(s0,s1)+HOP_R+2, hi = Math.max(s0,s1)-HOP_R-2;
+        for (const [q1,q2] of obstacleSegs) {
+          const f1 = horiz ? q1.y : q1.x, f2 = horiz ? q2.y : q2.x;
+          if ((f1-F)*(f2-F) >= 0) continue;                // no strict crossing of my line
+          const t = (F-f1)/(f2-f1);
+          const c = horiz ? q1.x + t*(q2.x-q1.x) : q1.y + t*(q2.y-q1.y);
+          if (c > lo && c < hi) crossings.push(c);
+        }
+      }
+      if (!crossings.length) { d += ` L${b.x},${b.y}`; continue; }
+      const dir = (horiz ? b.x-a.x : b.y-a.y) > 0 ? 1 : -1;
+      // Merge crossings that are close together into one wider hop
+      const iv = crossings.map(c=>[c-HOP_R, c+HOP_R] as [number,number]).sort((u,v)=>u[0]-v[0]);
+      const merged: [number,number][] = [];
+      for (const seg of iv) {
+        const m = merged[merged.length-1];
+        if (m && seg[0] <= m[1]+4) m[1] = Math.max(m[1], seg[1]); else merged.push([...seg] as [number,number]);
+      }
+      if (dir < 0) merged.reverse();
+      for (const [L,H] of merged) {
+        const start = dir > 0 ? L : H, end = dir > 0 ? H : L;
+        const r = (H-L)/2;
+        const sweep = horiz ? (dir > 0 ? 1 : 0) : (dir > 0 ? 0 : 1);   // H: bulge up, V: bulge left
+        if (horiz) d += ` L${start},${a.y} A${r} ${r} 0 0 ${sweep} ${end},${a.y}`;
+        else d += ` L${a.x},${start} A${r} ${r} 0 0 ${sweep} ${a.x},${end}`;
+      }
+      d += ` L${b.x},${b.y}`;
+    }
+    return d;
+  };
+
+  // Midpoint of the longest segment — where the signal label reads best
+  const polylineLabelPos = (pts:{x:number,y:number}[]) => {
+    let best = 0, bi = 0;
+    for (let i = 0; i < pts.length-1; i++) {
+      const len = Math.abs(pts[i+1].x-pts[i].x) + Math.abs(pts[i+1].y-pts[i].y);
+      if (len > best) { best = len; bi = i; }
+    }
+    return { x:(pts[bi].x+pts[bi+1].x)/2, y:(pts[bi].y+pts[bi+1].y)/2 };
+  };
+
   const renderConnection = (conn: any) => {
     const fromDev = devices.find((d:any)=>d.id===conn.from.deviceId);
     const toDev = devices.find((d:any)=>d.id===conn.to.deviceId);
@@ -668,10 +912,27 @@ export default function SignalFlowPage() {
     const p1 = getPortPos(fromDev,fromPort);
     const p2 = getPortPos(toDev,toPort);
     const sig = SIGNAL_TYPES.find(s=>s.id===conn.signal)||SIGNAL_TYPES[0];
-    const dx = Math.abs(p2.x-p1.x)*0.5;
-    const path = `M${p1.x},${p1.y} C${p1.x+dx},${p1.y} ${p2.x-dx},${p2.y} ${p2.x},${p2.y}`;
     const isSelected = selectedConn===conn.id;
-    const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    let path: string, mx: number, my: number;
+    if (conn.waypoints?.length) {
+      const pts = buildOrthoPoints(p1, conn.waypoints, p2);
+      // Hop over other connections' lines; between two manual lines, the newer hops
+      const myIdx = connections.findIndex((c:any)=>c.id===conn.id);
+      const obstacleSegs: Array<[{x:number,y:number},{x:number,y:number}]> = [];
+      connections.forEach((o:any, oi:number)=>{
+        if (o.id === conn.id) return;
+        if (o.waypoints?.length && oi > myIdx) return;
+        const op = getConnPolyline(o);
+        if (!op) return;
+        for (let i = 0; i < op.length-1; i++) obstacleSegs.push([op[i], op[i+1]]);
+      });
+      path = buildHoppedPath(pts, obstacleSegs);
+      ({x:mx, y:my} = polylineLabelPos(pts));
+    } else {
+      const dx = Math.abs(p2.x-p1.x)*0.5;
+      path = `M${p1.x},${p1.y} C${p1.x+dx},${p1.y} ${p2.x-dx},${p2.y} ${p2.x},${p2.y}`;
+      mx = (p1.x+p2.x)/2; my = (p1.y+p2.y)/2;
+    }
     return (
       <g key={conn.id} onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);}} style={{cursor:"pointer"}}>
         {isSelected && <path d={path} fill="none" stroke="#fff" strokeWidth={5} strokeOpacity={0.3} />}
@@ -862,26 +1123,55 @@ export default function SignalFlowPage() {
 
       {/* Canvas */}
       <div id="sf-canvas-export" style={{flex:1,position:"relative",overflow:"hidden",background:"rgb(var(--forge-bg))"}}>
+        {/* Canvas lock / zoom controls */}
+        <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,right:10,zIndex:10,display:"flex",alignItems:"center",gap:6}}>
+          {!canvasLocked && view.zoom !== 1 && (
+            <button onClick={()=>setView({x:0,y:0,zoom:1})} title="Reset zoom & position"
+              style={{padding:"4px 9px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-subtle))",fontSize:11,fontFamily:"'JetBrains Mono', monospace",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+              {Math.round(view.zoom*100)}%
+            </button>
+          )}
+          <button onClick={()=>setCanvasLocked(l=>!l)}
+            title={canvasLocked ? "Unlock canvas — enable panning, scrolling and zooming" : "Lock canvas — disable panning, scrolling and zooming"}
+            style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:canvasLocked?"rgba(239,68,68,0.12)":"rgb(var(--forge-panel))",border:`1px solid ${canvasLocked?"rgba(239,68,68,0.4)":"rgb(var(--border))"}`,borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+            {canvasLocked ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+              </svg>
+            )}
+          </button>
+        </div>
         {/* Connection status */}
         {connecting && (
           <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:5,color:"#3b82f6",fontSize:11,whiteSpace:"nowrap"}}>
-            Click a port to complete connection…
-            <button onClick={()=>setConnecting(null)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:11,marginLeft:4}}>Cancel</button>
+            Click a port to complete — or click the canvas to add right-angle bends
+            <button onClick={()=>{setConnecting(null);setConnectCursor(null);}} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:11,marginLeft:4}}>Cancel</button>
           </div>
         )}
 
         {/* SVG Canvas */}
         <svg ref={canvasRef} width="100%" height="100%" onMouseDown={handleCanvasMouseDown}
-          onMouseMove={activeTool&&activeTool!=="text"?handleToolMove:undefined}
+          onMouseMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
           onMouseUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
           onDoubleClick={e=>{const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);}}}
-          style={{cursor:activeTool==="text"?"text":activeTool?"crosshair":"default"}}>
+          style={{cursor:activeTool==="text"?"text":activeTool?"crosshair":canvasLocked?"default":"grab"}}>
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgb(var(--border))" strokeWidth="0.5" opacity="0.4"/>
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
+
+          {devices.length===0 && (
+            <text x="50%" y="50%" textAnchor="middle" fontSize={14} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif">Click devices from the library to add them to the canvas</text>
+          )}
+
+          {/* World content — pans and zooms as one group */}
+          <g transform={`translate(${view.x},${view.y}) scale(${view.zoom})`}>
 
           {/* Highlight annotations (below everything) */}
           {annotations.filter((a:any)=>a.type==="highlight").map(a=>renderAnnotation(a))}
@@ -918,6 +1208,24 @@ export default function SignalFlowPage() {
 
           {/* Connections */}
           {connections.map(renderConnection)}
+
+          {/* Live manual-routing preview */}
+          {connecting && (()=>{
+            const src = getConnectingSource();
+            if (!src) return null;
+            const wps = connecting.waypoints||[];
+            const sig = SIGNAL_TYPES.find(s=>s.id===connecting.signal)||SIGNAL_TYPES[0];
+            const committed = [src, ...wps];
+            const committedPath = committed.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+            const lastPt = committed[committed.length-1];
+            return (
+              <g style={{pointerEvents:"none"}}>
+                {committed.length>1 && <path d={committedPath} fill="none" stroke={sig.color} strokeWidth={2} strokeOpacity={0.9}/>}
+                {connectCursor && <path d={`M${lastPt.x},${lastPt.y} L${connectCursor.x},${connectCursor.y}`} fill="none" stroke={sig.color} strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}/>}
+                {wps.map((w:{x:number,y:number},i:number)=>(<circle key={i} cx={w.x} cy={w.y} r={3.5} fill={sig.color} stroke="rgb(var(--forge-surface))" strokeWidth={1.5}/>))}
+              </g>
+            );
+          })()}
 
           {/* Devices */}
           {devices.map((dev:any)=>{
@@ -961,13 +1269,11 @@ export default function SignalFlowPage() {
             );
           })}
 
-          {devices.length===0 && (
-            <text x="50%" y="50%" textAnchor="middle" fontSize={14} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif">Click devices from the library to add them to the canvas</text>
-          )}
-
           {/* Pencil / Shape / Text annotations (above devices) */}
           {annotations.filter((a:any)=>a.type!=="highlight"&&a.id!==editingAnnotId).map(a=>renderAnnotation(a))}
           {liveAnnot && liveAnnot.type!=="highlight" && renderAnnotation(liveAnnot, true)}
+
+          </g>
         </svg>
 
         {/* Text tool overlay */}
@@ -1221,13 +1527,9 @@ export default function SignalFlowPage() {
             <button
               disabled={!editDeviceName.trim()}
               onClick={()=>{
-                const leftCount = editDevicePorts.filter((p:any)=>p.side==="left").length;
-                const rightCount = editDevicePorts.filter((p:any)=>p.side==="right").length;
-                const maxPorts = Math.max(leftCount, rightCount, 1);
-                const newH = maxPorts <= 2 ? 56 : maxPorts <= 3 ? 70 : maxPorts <= 5 ? 80 : 90;
                 const removedIds = new Set(editingDevice.ports.map((p:any)=>p.id).filter((id:string)=>!editDevicePorts.find((p:any)=>p.id===id)));
                 if(removedIds.size>0) setConnections((prev:any[])=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
-                setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?{...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,h:newH}:d));
+                setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,w:0,h:0}):d));
                 setEditingDevice(null);
               }}
               style={{padding:"8px 18px",background:editDeviceName.trim()?"#3b82f6":"rgb(var(--forge-surface))",border:"1px solid "+(editDeviceName.trim()?"#3b82f6":"rgb(var(--border))"),borderRadius:6,color:editDeviceName.trim()?"#fff":"rgb(var(--text-subtle))",fontSize:12,cursor:editDeviceName.trim()?"pointer":"not-allowed",fontWeight:600,transition:"all 0.15s"}}>
@@ -1287,8 +1589,7 @@ export default function SignalFlowPage() {
                     onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
                     <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.type}</div>
-                      <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.mfr||"Generic"}{item.cat?" · "+item.cat:""}</div>
+                      <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.mfr||"Generic"} {item.model&&item.model!=="N/A"?item.model:item.type}</div>
                     </div>
                     {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                   </div>

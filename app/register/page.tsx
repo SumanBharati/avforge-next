@@ -39,6 +39,8 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [resendDone, setResendDone] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -58,7 +60,7 @@ export default function RegisterPage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: name } },
@@ -66,6 +68,21 @@ export default function RegisterPage() {
 
     if (error) {
       setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    // With email confirmation enabled, Supabase "succeeds" silently for an
+    // already-registered email but returns no identities — surface it
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setError("An account with this email already exists. Try signing in, or use Forgot password.");
+      setLoading(false);
+      return;
+    }
+
+    // No session means email confirmation is required before they can log in
+    if (!data.session) {
+      setAwaitingConfirmation(true);
       setLoading(false);
       return;
     }
@@ -146,6 +163,41 @@ export default function RegisterPage() {
 
             {/* Register card */}
             <div className="w-full">
+              {awaitingConfirmation ? (
+                <div className="p-2 text-center">
+                  <div className="mb-4 flex justify-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/30">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 7l10 7 10-7"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <h2 className="mb-2 text-2xl font-bold text-heading">Confirm your email</h2>
+                  <p className="mb-1 text-sm text-muted">
+                    We sent a confirmation link to <span className="font-semibold text-heading">{email}</span>.
+                  </p>
+                  <p className="mb-6 text-sm text-muted">
+                    Click the link in that email to activate your account, then sign in. Don&apos;t forget to check your spam folder.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={resendDone}
+                    onClick={async () => {
+                      const { error: resendErr } = await supabase.auth.resend({ type: "signup", email });
+                      if (resendErr) { setError(resendErr.message); return; }
+                      setResendDone(true);
+                    }}
+                    className="rounded-full border border-blue-500/30 bg-blue-500/10 px-5 py-2.5 text-[13px] text-blue-400 hover:bg-blue-500/20 disabled:opacity-60 transition-colors"
+                  >
+                    {resendDone ? "Confirmation email resent" : "Resend confirmation email"}
+                  </button>
+                  {error && <p className="mt-3 text-[13px] text-red-400">{error}</p>}
+                  <p className="mt-6 text-center text-sm text-subtle">
+                    Already confirmed?{" "}
+                    <Link href="/login" className="font-medium text-blue-400 hover:text-blue-300">Sign in</Link>
+                  </p>
+                </div>
+              ) : (
               <div className="p-2">
                 <h2 className="mb-1 text-2xl font-bold text-heading">Create your account</h2>
                 <p className="mb-6 text-sm text-muted">Start your AV project journey today</p>
@@ -260,6 +312,7 @@ export default function RegisterPage() {
                   </Link>
                 </p>
               </div>
+              )}
             </div>
           </div>
 

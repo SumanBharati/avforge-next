@@ -45,7 +45,7 @@ interface DeviceCatalogItem {
   wall: string; type: string; color: string;
 }
 interface PlacedDevice extends DeviceCatalogItem {
-  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; rotation?: number;
+  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; rotation?: number; wallUid?: number;
 }
 
 const roomTypes: RoomType[] = [
@@ -104,6 +104,22 @@ const roomElementItems: DeviceCatalogItem[] = [
 export default function RoomDesignerPage() {
   const { theme } = useTheme();
   const cc = canvasColors[theme];
+
+  // Per-canvas lock toggle (zoom is via ctrl+wheel; +/− buttons removed)
+  const zoomCluster = (k: string) => {
+    const locked = !!lockedViews[k];
+    return (
+      <button onClick={()=>setLockedViews(prev=>({...prev,[k]:!prev[k]}))}
+        title={locked ? "Unlock canvas — enable panning and zooming" : "Lock canvas — disable panning and zooming"}
+        style={{position:"absolute",bottom:12,right:12,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:locked?"rgba(239,68,68,0.12)":cc.panel,border:`1px solid ${locked?"rgba(239,68,68,0.4)":"rgb(var(--border))"}`,borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+        {locked ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+        )}
+      </button>
+    );
+  };
   const [roomSizeMode,  setRoomSizeMode]  = useState<"survey" | "custom" | null>("custom");
   const [showCustomRoom, setShowCustomRoom] = useState(false);
   const [showCustomConfirm, setShowCustomConfirm] = useState(false);
@@ -237,6 +253,9 @@ export default function RoomDesignerPage() {
   const [pan,           setPan]           = useState({x:0,y:0});
   const [isPanning,     setIsPanning]     = useState(false);
   const [panMode,       setPanMode]       = useState(false);
+  // Per-canvas lock: keys are "plan" | "ceil" | "mic" | "wallSpk" | "wallMic".
+  // A locked canvas ignores panning and zooming until unlocked.
+  const [lockedViews,   setLockedViews]   = useState<Record<string, boolean>>({});
   const [moveMode,      setMoveMode]      = useState(false);
   const [moveDragStart, setMoveDragStart] = useState<{x:number;y:number}|null>(null);
   const [marquee, setMarquee] = useState<{startSvgX:number;startSvgY:number;curSvgX:number;curSvgY:number}|null>(null);
@@ -270,6 +289,35 @@ export default function RoomDesignerPage() {
   const wallMicSvgRef = useRef<SVGSVGElement>(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Wheel pan/zoom for all five canvases (same gestures as Signal Flow):
+  // wheel pans, shift+wheel pans horizontally, ctrl/cmd+wheel zooms.
+  // Latest zoom values and locks are mirrored into a ref so the single
+  // document-level listener never sees stale state.
+  const rdWheelState = useRef({ zoom: 1.5, ceilZoom: 1.5, micZoom: 1.5, wallSpkZoom: 1.5, wallMicZoom: 1.5, lockedViews: {} as Record<string, boolean> });
+  rdWheelState.current = { zoom, ceilZoom, micZoom, wallSpkZoom, wallMicZoom, lockedViews };
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const el = (e.target as Element).closest?.("[data-rd-canvas]");
+      if (!el) return;
+      e.preventDefault();
+      const key = el.getAttribute("data-rd-canvas")!;
+      const s = rdWheelState.current;
+      if (s.lockedViews[key]) return;
+      const z = key==="plan" ? s.zoom : key==="ceil" ? s.ceilZoom : key==="mic" ? s.micZoom : key==="wallSpk" ? s.wallSpkZoom : s.wallMicZoom;
+      const setZ = key==="plan" ? setZoom : key==="ceil" ? setCeilZoom : key==="mic" ? setMicZoom : key==="wallSpk" ? setWallSpkZoom : setWallMicZoom;
+      const setP = key==="plan" ? setPan : key==="ceil" ? setCeilPan : key==="mic" ? setMicPan : key==="wallSpk" ? setWallSpkPan : setWallMicPan;
+      if (e.ctrlKey || e.metaKey) {
+        setZ(zv => Math.min(3, Math.max(0.25, zv * Math.exp(-e.deltaY * 0.0015))));
+      } else if (e.shiftKey) {
+        setP(p => ({ x: p.x - (e.deltaY || e.deltaX) / z, y: p.y }));
+      } else {
+        setP(p => ({ x: p.x - e.deltaX / z, y: p.y - e.deltaY / z }));
+      }
+    };
+    document.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => document.removeEventListener("wheel", onWheel, { capture: true } as any);
+  }, []);
 
   // Wall drawing mode (polygonal — continuous click-to-draw)
   const [isDrawingWall,   setIsDrawingWall]   = useState(false);
@@ -677,10 +725,16 @@ export default function RoomDesignerPage() {
 
 
 
+  // Unsnapped cursor-following position during a display drag — lets the user
+  // pull the display back out of the wall's snap zone
+  const freeDragPos = useRef<{x:number;y:number}|null>(null);
+
   const handleDeviceMouseDown = (e: React.MouseEvent, uid: number) => {
     if (isDrawingWall) return; // Don't drag devices while drawing walls
     if (dragNewChair?.active || dragNewTable?.active || dragNewDoor?.active) return; // Don't drag while placement tool is active
     e.stopPropagation();
+    const dev0 = placedDevices.find(d => d.uid === uid);
+    freeDragPos.current = dev0 ? { x: dev0.x, y: dev0.y } : null;
     setDragUid(uid); setSelectedUid(uid); setShowHfov(false);
     const svg = svgRef.current; if (!svg) return;
     const pt = svg.createSVGPoint();
@@ -701,7 +755,21 @@ export default function RoomDesignerPage() {
     if (!dev) return;
     if (viewMode === "plan") {
       const dxW = dxPx / planScale, dyW = dyPx / planScale;
-      if (dev.mountWall === "north" || dev.mountWall === "south") {
+      if (dev.type === "display") {
+        // Displays move freely and stick flush to the nearest wall — boundary
+        // or drawn — when within snapping distance. The free (unsnapped)
+        // position follows the cursor so dragging away from a wall un-sticks.
+        const fp = freeDragPos.current ?? { x: dev.x, y: dev.y };
+        const nx = fp.x + dxW, ny = fp.y + dyW;
+        freeDragPos.current = { x: nx, y: ny };
+        const snap = snapDeviceToNearestWall(nx, ny);
+        if (snap && snap.dist < 1.5) {
+          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:snap.x, y:snap.y, mountWall:snap.mountWall, wallUid:snap.wallUid, rotation:snap.angleDeg} : d));
+        } else {
+          const fx = Math.max(cMinX, Math.min(cMaxX, nx)), fy = Math.max(cMinY, Math.min(cMaxY, ny));
+          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:fx, y:fy} : d));
+        }
+      } else if (dev.mountWall === "north" || dev.mountWall === "south") {
         // Slide freely along the wall; crossing the room's midline flips it to the opposite wall
         const rawX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
         const rawY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
@@ -822,12 +890,29 @@ export default function RoomDesignerPage() {
   const addDeviceToRoom = (dev: DeviceCatalogItem) => {
     const id = Date.now();
     let x=0.5, y=0.5, z=0, mountWall="north";
+    let rotation: number|undefined, wallUid: number|undefined;
     if (dev.wall==="front"||dev.wall==="side") {
-      mountWall=selectedWall;
-      if (selectedWall==="north")  { x=roomW/2;       y=0.02;       z=roomH*0.55; }
-      else if(selectedWall==="south") { x=roomW/2;    y=roomL-0.02; z=roomH*0.55; }
-      else if(selectedWall==="west")  { x=0.02;       y=roomL/2;    z=roomH*0.55; }
-      else if(selectedWall==="east")  { x=roomW-0.02; y=roomL/2;    z=roomH*0.55; }
+      if (isCustomBlank) {
+        // Custom drawn room: default to the "north" wall — the topmost
+        // roughly-horizontal drawn wall; fall back to nearest-to-center
+        const walls = placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined);
+        let north: PlacedDevice | null = null;
+        walls.forEach(w => {
+          const horizontal = Math.abs(Math.sin(w.wallAngle!)) < 0.5;
+          if (horizontal && (!north || w.y < north.y)) north = w;
+        });
+        const ccx = north ? (north as PlacedDevice).x : drawnBounds ? drawnBounds.centerX : roomW/2;
+        const ccy = north ? (north as PlacedDevice).y : drawnBounds ? drawnBounds.centerY : roomL/2;
+        const snap = snapDeviceToNearestWall(ccx, ccy);
+        if (snap) { x=snap.x; y=snap.y; z=roomH*0.55; mountWall=snap.mountWall; rotation=snap.angleDeg; wallUid=snap.wallUid; }
+        else { x=ccx; y=ccy; z=roomH*0.55; }
+      } else {
+        mountWall=selectedWall;
+        if (selectedWall==="north")  { x=roomW/2;       y=0.02;       z=roomH*0.55; }
+        else if(selectedWall==="south") { x=roomW/2;    y=roomL-0.02; z=roomH*0.55; }
+        else if(selectedWall==="west")  { x=0.02;       y=roomL/2;    z=roomH*0.55; rotation=90; }
+        else if(selectedWall==="east")  { x=roomW-0.02; y=roomL/2;    z=roomH*0.55; rotation=90; }
+      }
     } else if(dev.wall==="ceiling") { x=roomW/2; y=roomL/2; z=roomH-0.05; mountWall="ceiling"; }
     else if(dev.wall==="table")     { x=roomW/2; y=roomL/2; z=0.76;       mountWall="floor"; }
     else if(dev.wall==="floor")     { x=roomW/2; y=roomL/2; z=0;          mountWall="floor"; }
@@ -837,7 +922,7 @@ export default function RoomDesignerPage() {
     const covW = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
     const covL = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
     const dispersion = (dev.type==="speaker"&&dev.wall==="ceiling") ? 90 : undefined;
-    setPlacedDevices(prev=>[...prev,{...dev,uid:id,x,y,z,mountWall,hfov,covShape,covDiameter,covW,covL,dispersion}]);
+    setPlacedDevices(prev=>[...prev,{...dev,uid:id,x,y,z,mountWall,rotation,wallUid,hfov,covShape,covDiameter,covW,covL,dispersion}]);
   };
 
   const removeDevice = (uid: number) => { pushUndo(); setPlacedDevices(prev=>prev.filter(d=>d.uid!==uid)); };
@@ -875,6 +960,40 @@ export default function RoomDesignerPage() {
     }
     dists.sort((a, b) => a.d - b.d);
     return { wall: dists[0].wall, pos: dists[0].pos, wallUid: dists[0].wallUid };
+  };
+
+  // Nearest wall (boundary or drawn) to a world point, with the snapped position
+  // and wall angle — used so wall devices like displays can stick to any wall
+  const snapDeviceToNearestWall = (wx: number, wy: number): { x:number; y:number; angleDeg:number; mountWall:string; wallUid?:number; dist:number } | null => {
+    const cands: { x:number; y:number; angleDeg:number; mountWall:string; wallUid?:number; dist:number }[] = [];
+    if (!isCustomBlank) {
+      const bx = Math.max(0, Math.min(roomW, wx)), by = Math.max(0, Math.min(roomL, wy));
+      cands.push(
+        { x: bx, y: 0.02,        angleDeg: 0,  mountWall: "north", dist: Math.abs(wy) },
+        { x: bx, y: roomL-0.02,  angleDeg: 0,  mountWall: "south", dist: Math.abs(wy-roomL) },
+        { x: 0.02,       y: by,  angleDeg: 90, mountWall: "west",  dist: Math.abs(wx) },
+        { x: roomW-0.02, y: by,  angleDeg: 90, mountWall: "east",  dist: Math.abs(wx-roomW) },
+      );
+    }
+    placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).forEach(w => {
+      const angle = w.wallAngle!, len = w.w;
+      const x1 = w.x - Math.cos(angle)*len/2, y1 = w.y - Math.sin(angle)*len/2;
+      const x2 = w.x + Math.cos(angle)*len/2, y2 = w.y + Math.sin(angle)*len/2;
+      const dx = x2-x1, dy = y2-y1, lenSq = dx*dx + dy*dy;
+      if (lenSq < 0.001) return;
+      const t = Math.max(0, Math.min(1, ((wx-x1)*dx + (wy-y1)*dy)/lenSq));
+      const cx = x1 + t*dx, cy = y1 + t*dy;
+      // Sit on the inside face of the wall (toward the room interior),
+      // not on its centerline: offset by half wall thickness + display depth
+      const inset = (w.h ?? 0.333)/2 + 0.15;
+      let nx0 = -Math.sin(angle), ny0 = Math.cos(angle);
+      const refX = drawnBounds ? drawnBounds.centerX : wx, refY = drawnBounds ? drawnBounds.centerY : wy;
+      if (nx0*(refX-cx) + ny0*(refY-cy) < 0) { nx0 = -nx0; ny0 = -ny0; }
+      cands.push({ x: cx + nx0*inset, y: cy + ny0*inset, angleDeg: angle*180/Math.PI, mountWall: "drawn", wallUid: w.uid, dist: Math.hypot(wx-cx, wy-cy) });
+    });
+    if (!cands.length) return null;
+    cands.sort((a,b)=>a.dist-b.dist);
+    return cands[0];
   };
 
   // Get door rendering coords from wall + position
@@ -1032,13 +1151,18 @@ export default function RoomDesignerPage() {
     const id = Date.now();
     let x = dragNewDevice.worldX, y = dragNewDevice.worldY, z = 0;
     let mountWall = "floor";
+    let rotation: number|undefined, wallUid: number|undefined;
     if (item.wall === "front" || item.wall === "side") {
-      const wall = dragNewDevice.wall || "north";
-      mountWall = wall;
-      if (wall === "north") { y = 0.02; z = roomH * 0.55; }
-      else if (wall === "south") { y = roomL - 0.02; z = roomH * 0.55; }
-      else if (wall === "west") { x = 0.02; z = roomH * 0.55; }
-      else if (wall === "east") { x = roomW - 0.02; z = roomH * 0.55; }
+      const snap = snapDeviceToNearestWall(x, y);
+      if (snap) { x = snap.x; y = snap.y; z = roomH * 0.55; mountWall = snap.mountWall; rotation = snap.angleDeg; wallUid = snap.wallUid; }
+      else {
+        const wall = dragNewDevice.wall || "north";
+        mountWall = wall;
+        if (wall === "north") { y = 0.02; z = roomH * 0.55; }
+        else if (wall === "south") { y = roomL - 0.02; z = roomH * 0.55; }
+        else if (wall === "west") { x = 0.02; z = roomH * 0.55; rotation = 90; }
+        else if (wall === "east") { x = roomW - 0.02; z = roomH * 0.55; rotation = 90; }
+      }
     } else if (item.wall === "ceiling") {
       z = roomH - 0.05; mountWall = "ceiling";
     } else if (item.wall === "table") {
@@ -1050,7 +1174,7 @@ export default function RoomDesignerPage() {
     const covW = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
     const covL = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
     const dispersion = (item.type === "speaker" && item.wall === "ceiling") ? 90 : undefined;
-    setPlacedDevices(prev => [...prev, { ...item, uid: id, x, y, z, mountWall, hfov, covShape, covDiameter, covW, covL, dispersion }]);
+    setPlacedDevices(prev => [...prev, { ...item, uid: id, x, y, z, mountWall, rotation, wallUid, hfov, covShape, covDiameter, covW, covL, dispersion }]);
     setDragNewDevice(null);
   };
 
@@ -1709,8 +1833,10 @@ export default function RoomDesignerPage() {
   // In custom blank mode, use drawn room dimensions; nil if nothing drawn
   const hasRoomContent = !isCustomBlank || (showTable && !tableDeleted) || drawnBounds !== null;
   const validRoom = hasRoomContent && !multipleRooms;
-  const effectiveDepth = isCustomBlank ? (drawnBounds ? drawnBounds.depth : 0) : roomL;
-  const effectiveWidth = isCustomBlank ? (drawnBounds ? drawnBounds.width : 0) : roomW;
+  // North wall is the display wall by convention: depth is the north→south
+  // extent (y axis), width the east→west extent (x axis)
+  const effectiveDepth = isCustomBlank ? (drawnBounds ? drawnBounds.maxY - drawnBounds.minY : 0) : roomL;
+  const effectiveWidth = isCustomBlank ? (drawnBounds ? drawnBounds.maxX - drawnBounds.minX : 0) : roomW;
   const farthestViewer = !validRoom ? 0
     : showTable && !tableDeleted ? tableWallDist + tL + Math.max(seatDist, 0.35)
     : Math.max(0, effectiveDepth - 4);
@@ -2091,10 +2217,10 @@ export default function RoomDesignerPage() {
             <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Display Size Guide</div>
             <div style={{padding:10,background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
-                <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveRoomW) : "—"}</span>
+                <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveWidth) : "—"}</span>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
-                <span>Room depth</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveRoomL) : "—"}</span>
+                <span>Room depth</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveDepth) : "—"}</span>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Farthest viewer</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"#60a5fa"}}>{validRoom ? toDisplay(farthestViewer) : "—"}</span>
@@ -2215,13 +2341,13 @@ export default function RoomDesignerPage() {
         </div>
         <div style={{display:"flex",height:"50vh",minHeight:400}}>
         {/* Floor Plan */}
-        <div ref={canvasContainerRef} style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
+        <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
           style={{background:cc.card,userSelect:"none",cursor:isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default"}}
           onMouseMove={e=>{if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
           onMouseUp={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
           onMouseLeave={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
-          onMouseDown={e=>{if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
+          onMouseDown={e=>{if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
           onClick={e=>{if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();}}}>
 
           {viewMode==="plan" ? (
@@ -2715,16 +2841,13 @@ export default function RoomDesignerPage() {
                 const isSelected=selectedUid===dev.uid||selectedUids.has(dev.uid), isDragging=dragUid===dev.uid;
                 const devPx=pX(dev.x), devPy=pY(dev.y||0.1);
                 if(dev.type==="display"){
-                  const dw=dev.w*planScale, mw=dev.mountWall||"north";
-                  let rx2:number,ry2:number,rw2:number,rh2:number;
-                  if(mw==="north")      {rx2=devPx-dw/2;ry2=pY(0)+2;rw2=dw;rh2=6;}
-                  else if(mw==="south") {rx2=devPx-dw/2;ry2=pY(roomL)-8;rw2=dw;rh2=6;}
-                  else if(mw==="west")  {rx2=pX(0)+2;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
-                  else                  {rx2=pX(roomW)-8;ry2=pY(dev.y)-dw/2;rw2=6;rh2=dw;}
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  const dw=dev.w*planScale;
+                  // Draw centered at the device's own position, rotated to its wall angle
+                  const angle = dev.rotation ?? ((dev.mountWall==="west"||dev.mountWall==="east") ? 90 : 0);
+                  const rx2=devPx-dw/2, ry2=devPy-3, rw2=dw, rh2=6;
+                  return (<g key={dev.uid} transform={`rotate(${angle} ${devPx} ${devPy})`} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
                     {/* Invisible hit-area padding so thin wall bars are easy to click */}
-                    {(mw==="north"||mw==="south") && <rect x={rx2-4} y={ry2-10} width={rw2+8} height={rh2+20} fill="transparent" pointerEvents="all"/>}
-                    {(mw==="west"||mw==="east")   && <rect x={rx2-10} y={ry2-4} width={rw2+20} height={rh2+8} fill="transparent" pointerEvents="all"/>}
+                    <rect x={rx2-4} y={ry2-10} width={rw2+8} height={rh2+20} fill="transparent" pointerEvents="all"/>
                     {isSelected&&<rect x={rx2-4} y={ry2-4} width={rw2+8} height={rh2+8} fill="none" stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
                     {/* Blue boundary */}
                     <rect x={rx2-1} y={ry2-1} width={rw2+2} height={rh2+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -3621,11 +3744,7 @@ export default function RoomDesignerPage() {
           <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>in</span>
         </div>
         {/* Zoom controls */}
-        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
-          <button onClick={()=>setZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
-          <button onClick={()=>{setZoom(1);setPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(zoom*100)}%</button>
-          <button onClick={()=>setZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
-        </div>
+        {zoomCluster("plan")}
 
         {/* Furniture item size editor */}
         {showFurnitureEditor && (
@@ -3711,7 +3830,7 @@ export default function RoomDesignerPage() {
         <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers</div>
       </div>
       <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={ceilSvgRef} width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
+        <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
           style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
             if(isCeilPanning){const dx=(e.clientX-ceilPanStart.x)/ceilZoom;const dy=(e.clientY-ceilPanStart.y)/ceilZoom;setCeilPan({x:ceilPanStart.px+dx,y:ceilPanStart.py+dy});return;}
@@ -3727,7 +3846,7 @@ export default function RoomDesignerPage() {
           }}
           onMouseUp={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
           onMouseLeave={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
-          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
+          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.ceil){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
 >
           {(() => {
             const cScale = Math.min(380/roomW, 270/roomL);
@@ -3830,11 +3949,7 @@ export default function RoomDesignerPage() {
           })()}
         </svg>
         {/* Ceiling zoom controls */}
-        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
-          <button onClick={()=>setCeilZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
-          <button onClick={()=>{setCeilZoom(1);setCeilPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(ceilZoom*100)}%</button>
-          <button onClick={()=>setCeilZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
-        </div>
+        {zoomCluster("ceil")}
       </div>{/* end ceiling speakers */}
 
       {/* Row 2: Ceiling Microphones */}
@@ -3842,7 +3957,7 @@ export default function RoomDesignerPage() {
         <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones</div>
       </div>
       <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={micSvgRef} width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
+        <svg ref={micSvgRef} data-rd-canvas="mic" width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
           style={{background:cc.card,cursor:isMicPanning?"grabbing":micDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
             if(isMicPanning){const dx=(e.clientX-micPanStart.x)/micZoom;const dy=(e.clientY-micPanStart.y)/micZoom;setMicPan({x:micPanStart.px+dx,y:micPanStart.py+dy});return;}
@@ -3858,7 +3973,7 @@ export default function RoomDesignerPage() {
           }}
           onMouseUp={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
           onMouseLeave={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
-          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsMicPanning(true);setMicPanStart({x:e.clientX,y:e.clientY,px:micPan.x,py:micPan.y});}}}
+          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.mic){e.preventDefault();setIsMicPanning(true);setMicPanStart({x:e.clientX,y:e.clientY,px:micPan.x,py:micPan.y});}}}
 >
           {(() => {
             const mScale = Math.min(380/roomW, 270/roomL);
@@ -3924,11 +4039,7 @@ export default function RoomDesignerPage() {
           })()}
         </svg>
         {/* Mic zoom controls */}
-        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
-          <button onClick={()=>setMicZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
-          <button onClick={()=>{setMicZoom(1);setMicPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(micZoom*100)}%</button>
-          <button onClick={()=>setMicZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
-        </div>
+        {zoomCluster("mic")}
       </div>
 
       {/* Row 3: Wall Speakers */}
@@ -3936,7 +4047,7 @@ export default function RoomDesignerPage() {
         <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers</div>
       </div>
       <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={wallSpkSvgRef} width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
+        <svg ref={wallSpkSvgRef} data-rd-canvas="wallSpk" width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
           style={{background:cc.card,cursor:isWallSpkPanning?"grabbing":wallSpkDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
             if(isWallSpkPanning){const dx=(e.clientX-wallSpkPanStart.x)/wallSpkZoom;const dy=(e.clientY-wallSpkPanStart.y)/wallSpkZoom;setWallSpkPan({x:wallSpkPanStart.px+dx,y:wallSpkPanStart.py+dy});return;}
@@ -3960,7 +4071,7 @@ export default function RoomDesignerPage() {
           }}
           onMouseUp={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
           onMouseLeave={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
-          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsWallSpkPanning(true);setWallSpkPanStart({x:e.clientX,y:e.clientY,px:wallSpkPan.x,py:wallSpkPan.y});}}}
+          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.wallSpk){e.preventDefault();setIsWallSpkPanning(true);setWallSpkPanStart({x:e.clientX,y:e.clientY,px:wallSpkPan.x,py:wallSpkPan.y});}}}
 >
           {(() => {
             const wScale = Math.min(380/roomW, 270/roomL);
@@ -4006,11 +4117,15 @@ export default function RoomDesignerPage() {
                   const tl2 = tL/2 * wScale;
                   return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
                 })()}
-                {/* Chairs from floor plan */}
-                {placedDevices.filter(d => (d.id === "side-chair" || d.id === "exec-chair") && d.mountWall === "floor").map(dev => {
-                  const cw = Math.max(4, 0.45 * wScale);
-                  const cd = Math.max(3, 0.38 * wScale);
-                  return <rect key={"wsc"+dev.uid} x={wpX(dev.x)-cw/2} y={wpY(dev.y)-cd/2} width={cw} height={cd} rx={1} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.5} opacity={0.5} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
+                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
+                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
+                  const fw = dev.w * wScale, fl = dev.h * wScale;
+                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
+                    const cW2 = Math.max(6, fw);
+                    return <rect key={"wsf"+dev.uid} x={wpX(dev.x)-cW2/2} y={wpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
+                  }
+                  if (dev.id === "round-table") return <ellipse key={"wsf"+dev.uid} cx={wpX(dev.x)} cy={wpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
+                  return <rect key={"wsf"+dev.uid} x={wpX(dev.x)-fw/2} y={wpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
                 })}
                 {/* Wall speaker devices */}
                 {wallSpeakers.map(dev => {
@@ -4048,11 +4163,7 @@ export default function RoomDesignerPage() {
           })()}
         </svg>
         {/* Wall speaker zoom controls */}
-        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
-          <button onClick={()=>setWallSpkZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
-          <button onClick={()=>{setWallSpkZoom(1);setWallSpkPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(wallSpkZoom*100)}%</button>
-          <button onClick={()=>setWallSpkZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
-        </div>
+        {zoomCluster("wallSpk")}
       </div>
 
       {/* Row 4: Wall Microphones */}
@@ -4060,7 +4171,7 @@ export default function RoomDesignerPage() {
         <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones</div>
       </div>
       <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={wallMicSvgRef} width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
+        <svg ref={wallMicSvgRef} data-rd-canvas="wallMic" width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
           style={{background:cc.card,cursor:isWallMicPanning?"grabbing":wallMicDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
             if(isWallMicPanning){const dx=(e.clientX-wallMicPanStart.x)/wallMicZoom;const dy=(e.clientY-wallMicPanStart.y)/wallMicZoom;setWallMicPan({x:wallMicPanStart.px+dx,y:wallMicPanStart.py+dy});return;}
@@ -4084,7 +4195,7 @@ export default function RoomDesignerPage() {
           }}
           onMouseUp={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
           onMouseLeave={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
-          onMouseDown={e=>{if(e.button===1||(e.button===0&&panMode)){e.preventDefault();setIsWallMicPanning(true);setWallMicPanStart({x:e.clientX,y:e.clientY,px:wallMicPan.x,py:wallMicPan.y});}}}
+          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.wallMic){e.preventDefault();setIsWallMicPanning(true);setWallMicPanStart({x:e.clientX,y:e.clientY,px:wallMicPan.x,py:wallMicPan.y});}}}
 >
           {(() => {
             const wScale = Math.min(380/roomW, 270/roomL);
@@ -4130,11 +4241,15 @@ export default function RoomDesignerPage() {
                   const tl2 = tL/2 * wScale;
                   return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
                 })()}
-                {/* Chairs from floor plan */}
-                {placedDevices.filter(d => (d.id === "side-chair" || d.id === "exec-chair") && d.mountWall === "floor").map(dev => {
-                  const cw = Math.max(4, 0.45 * wScale);
-                  const cd = Math.max(3, 0.38 * wScale);
-                  return <rect key={"wmc"+dev.uid} x={wpX(dev.x)-cw/2} y={wpY(dev.y)-cd/2} width={cw} height={cd} rx={1} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.5} opacity={0.5} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
+                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
+                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
+                  const fw = dev.w * wScale, fl = dev.h * wScale;
+                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
+                    const cW2 = Math.max(6, fw);
+                    return <rect key={"wmf"+dev.uid} x={wpX(dev.x)-cW2/2} y={wpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
+                  }
+                  if (dev.id === "round-table") return <ellipse key={"wmf"+dev.uid} cx={wpX(dev.x)} cy={wpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
+                  return <rect key={"wmf"+dev.uid} x={wpX(dev.x)-fw/2} y={wpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
                 })}
                 {/* Wall mic devices */}
                 {wallMics.map(dev => {
@@ -4171,11 +4286,7 @@ export default function RoomDesignerPage() {
           })()}
         </svg>
         {/* Wall mic zoom controls */}
-        <div style={{position:"absolute",bottom:12,right:12,display:"flex",flexDirection:"column",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",overflow:"hidden"}}>
-          <button onClick={()=>setWallMicZoom(z=>Math.min(3,z+0.25))} style={{padding:"6px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>+</button>
-          <button onClick={()=>{setWallMicZoom(1);setWallMicPan({x:0,y:0});}} style={{padding:"4px 10px",background:"none",border:"none",borderBottom:"1px solid rgb(var(--border))",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:11,lineHeight:1,fontFamily:"'JetBrains Mono',monospace"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>{Math.round(wallMicZoom*100)}%</button>
-          <button onClick={()=>setWallMicZoom(z=>Math.max(0.25,z-0.25))} style={{padding:"6px 10px",background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",fontSize:16,lineHeight:1}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>−</button>
-        </div>
+        {zoomCluster("wallMic")}
       </div>
       </>
       </div>{/* end scrollable canvas */}
