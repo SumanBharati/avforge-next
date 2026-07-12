@@ -26,10 +26,10 @@ export default function TapLoadPage() {
 
   return (
     <CalcPageWrapper title="70V Tap Load" desc="Transformer tap and wattage calculator for 70V distribution">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
 
         {/* ── Left: Zones ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 lg:pr-8">
           <CalcSection title="Speaker Zones">
             <div className="mb-1.5 grid grid-cols-[1fr_60px_70px_30px] gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-faint">
               <span>Zone Name</span>
@@ -74,10 +74,10 @@ export default function TapLoadPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingLeft: 32 }}>
+        <div className="min-w-0 flex-1 lg:pl-8">
           <CalcSection title="Results">
 
             {/* Per-zone breakdown */}

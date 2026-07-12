@@ -12,8 +12,8 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      model: "claude-sonnet-5",
+      max_tokens: 16000,
       system: `You are an AV site survey expert. Extract structured site survey data from a conversation transcript between an AV engineer and a client.
 
 Return ONLY valid JSON (no markdown, no explanation) with this structure:
@@ -190,7 +190,8 @@ ${existingRooms?.length ? `\nExisting rooms in the survey: ${existingRooms.join(
       messages: [{ role: "user", content: `Here is the conversation transcript from a site survey:\n\n${transcript}` }],
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    const textBlock = response.content.find((b) => b.type === "text");
+    const text = textBlock && textBlock.type === "text" ? textBlock.text : "";
 
     // Try to parse JSON from the response
     let data;

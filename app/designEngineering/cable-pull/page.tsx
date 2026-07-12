@@ -107,8 +107,8 @@ export default function CablePullPage() {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <h3 style={{fontSize:14,fontWeight:700,color:"rgb(var(--text-body))",margin:0}}>Project Info</h3>
           <div style={{display:"flex",gap:6}}>
-            <button onClick={()=>setShowLegend(!showLegend)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,background:showLegend?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.5)",border:"1px solid "+(showLegend?"rgba(59,130,246,0.3)":"rgb(var(--border))"),color:showLegend?"#60a5fa":"rgb(var(--text-subtle))",cursor:"pointer"}}>Cable Legend</button>
-            <button onClick={exportCSV} style={{padding:"5px 12px",borderRadius:5,fontSize:10,background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.2)",color:"#60a5fa",cursor:"pointer"}}>Export CSV</button>
+            <button onClick={()=>setShowLegend(!showLegend)} style={{padding:"5px 12px",borderRadius:5,fontSize:10,background:showLegend?"rgba(139,92,246,0.15)":"rgb(var(--forge-surface) / 0.5)",border:"1px solid "+(showLegend?"rgba(139,92,246,0.3)":"rgb(var(--border))"),color:showLegend?"#a78bfa":"rgb(var(--text-subtle))",cursor:"pointer"}}>Cable Legend</button>
+            <button onClick={exportCSV} style={{padding:"5px 12px",borderRadius:5,fontSize:10,background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.2)",color:"#a78bfa",cursor:"pointer"}}>Export CSV</button>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
@@ -133,7 +133,7 @@ export default function CablePullPage() {
             <div style={{fontWeight:700,color:"rgb(var(--text-subtle))"}}>Code</div><div style={{fontWeight:700,color:"rgb(var(--text-subtle))"}}>Wire</div><div style={{fontWeight:700,color:"rgb(var(--text-subtle))"}}>Description</div><div style={{fontWeight:700,color:"rgb(var(--text-subtle))"}}>Dia.</div><div style={{fontWeight:700,color:"rgb(var(--text-subtle))"}}>$/ft</div>
             {cableTypes.map(ct=>(
               <React.Fragment key={ct.code}>
-                <div style={{color:"#60a5fa",fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}}>{ct.code}</div>
+                <div style={{color:"#a78bfa",fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}}>{ct.code}</div>
                 <div style={{color:"rgb(var(--text-body))"}}>{ct.wire}</div>
                 <div style={{color:"rgb(var(--text-muted))"}}>{ct.desc}</div>
                 <div style={{color:"rgb(var(--text-muted))"}}>{ct.dia}</div>
@@ -146,9 +146,9 @@ export default function CablePullPage() {
 
       {/* Summary Bar */}
       <div style={{display:"flex",gap:10,marginBottom:14}}>
-        <div style={{flex:1,padding:8,borderRadius:6,background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",textAlign:"center"}}>
-          <div style={{fontSize:18,fontWeight:700,color:"#60a5fa",fontFamily:"'JetBrains Mono',monospace"}}>{cables.length}</div>
-          <div style={{fontSize:8,color:"#60a5fa",fontWeight:600,textTransform:"uppercase"}}>Total Cables</div>
+        <div style={{flex:1,padding:8,borderRadius:6,background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)",textAlign:"center"}}>
+          <div style={{fontSize:18,fontWeight:700,color:"#a78bfa",fontFamily:"'JetBrains Mono',monospace"}}>{cables.length}</div>
+          <div style={{fontSize:8,color:"#a78bfa",fontWeight:600,textTransform:"uppercase"}}>Total Cables</div>
         </div>
         <div style={{flex:1,padding:8,borderRadius:6,background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.15)",textAlign:"center"}}>
           <div style={{fontSize:18,fontWeight:700,color:"#22c55e",fontFamily:"'JetBrains Mono',monospace"}}>{grandTotalFt.toLocaleString()}&apos;</div>
@@ -174,7 +174,7 @@ export default function CablePullPage() {
           <option value="">All Rooms ({cables.length})</option>
           {allRooms.map(r=><option key={r} value={r}>{r} ({cables.filter(c=>c.room===r).length})</option>)}
         </select>
-        <button onClick={addCable} style={{padding:"5px 14px",background:"rgba(59,130,246,0.1)",border:"1px dashed #3b82f6",borderRadius:6,color:"#60a5fa",fontSize:11,cursor:"pointer"}}>+ Add Cable</button>
+        <button onClick={addCable} style={{padding:"5px 14px",background:"rgba(139,92,246,0.1)",border:"1px dashed #8b5cf6",borderRadius:6,color:"#a78bfa",fontSize:11,cursor:"pointer"}}>+ Add Cable</button>
         <button onClick={()=>{for(let i=0;i<5;i++)setCables(prev=>[...prev,{...emptyRow,id:Date.now()+i}]);}} style={{padding:"5px 14px",background:"rgba(34,197,94,0.08)",border:"1px dashed rgba(34,197,94,0.3)",borderRadius:6,color:"#22c55e",fontSize:11,cursor:"pointer"}}>+ Add 5 Rows</button>
       </div>
 
@@ -183,9 +183,9 @@ export default function CablePullPage() {
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:1100}}>
           <thead>
             <tr>
-              <th style={{...thSt,background:"rgba(59,130,246,0.06)"}}>Room</th>
-              <th style={{...thSt,background:"rgba(59,130,246,0.06)"}}>Cable #</th>
-              <th style={{...thSt,background:"rgba(59,130,246,0.06)"}}>Type</th>
+              <th style={{...thSt,background:"rgba(139,92,246,0.06)"}}>Room</th>
+              <th style={{...thSt,background:"rgba(139,92,246,0.06)"}}>Cable #</th>
+              <th style={{...thSt,background:"rgba(139,92,246,0.06)"}}>Type</th>
               <th colSpan={3} style={{...thSt,background:"rgba(34,197,94,0.06)",color:"#22c55e",fontSize:7}}>Starting Point</th>
               <th colSpan={3} style={{...thSt,background:"rgba(245,158,11,0.06)",color:"#f59e0b",fontSize:7}}>Pass-Thru</th>
               <th colSpan={3} style={{...thSt,background:"rgba(168,85,247,0.06)",color:"#a855f7",fontSize:7}}>Ending Point</th>
@@ -225,7 +225,7 @@ export default function CablePullPage() {
                 <tr key={c.id} style={{background:idx%2===0?"transparent":"rgb(var(--forge-surface) / 0.2)"}}>
                   <td style={{padding:2}}><input value={c.room} onChange={e=>updateCable(realIdx,"room",e.target.value)} placeholder="Room" style={{...cellInput,width:80}} list="roomList" /></td>
                   <td style={{padding:2}}><input value={c.cableNum} onChange={e=>updateCable(realIdx,"cableNum",e.target.value)} placeholder="D001" style={{...cellInput,width:60,fontFamily:"'JetBrains Mono',monospace",fontWeight:600}} /></td>
-                  <td style={{padding:2}}><select value={c.cableType} onChange={e=>updateCable(realIdx,"cableType",e.target.value)} style={{...cellInput,width:65,cursor:"pointer",fontSize:10,fontWeight:600,color:"#60a5fa"}}>{cableTypes.map(ct=><option key={ct.code} value={ct.code}>{ct.code}</option>)}</select></td>
+                  <td style={{padding:2}}><select value={c.cableType} onChange={e=>updateCable(realIdx,"cableType",e.target.value)} style={{...cellInput,width:65,cursor:"pointer",fontSize:10,fontWeight:600,color:"#a78bfa"}}>{cableTypes.map(ct=><option key={ct.code} value={ct.code}>{ct.code}</option>)}</select></td>
                   <td style={{padding:2,background:"rgba(34,197,94,0.02)"}}><input value={c.startLoc} onChange={e=>updateCable(realIdx,"startLoc",e.target.value)} placeholder="Back Box" style={{...cellInput,width:80}} /></td>
                   <td style={{padding:2,background:"rgba(34,197,94,0.02)"}}><input value={c.startDwg} onChange={e=>updateCable(realIdx,"startDwg",e.target.value)} placeholder="A-101" style={{...cellInput,width:55}} /></td>
                   <td style={{padding:2,background:"rgba(34,197,94,0.02)"}}><input type="number" value={c.startSlack} onChange={e=>updateCable(realIdx,"startSlack",e.target.value)} style={numInput} /></td>
@@ -241,7 +241,7 @@ export default function CablePullPage() {
                   <td style={{padding:2,textAlign:"center"}}><input type="checkbox" checked={c.tested} onChange={e=>updateCable(realIdx,"tested",e.target.checked)} style={{cursor:"pointer",accentColor:"#22c55e"}} /></td>
                   <td style={{padding:2}}><input value={c.notes} onChange={e=>updateCable(realIdx,"notes",e.target.value)} placeholder="" style={{...cellInput,width:100}} /></td>
                   <td style={{padding:2,display:"flex",gap:2}}>
-                    <button onClick={()=>duplicateCable(realIdx)} title="Duplicate" style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:12,padding:2}}>⧉</button>
+                    <button onClick={()=>duplicateCable(realIdx)} title="Duplicate" style={{background:"none",border:"none",color:"#8b5cf6",cursor:"pointer",fontSize:12,padding:2}}>⧉</button>
                     <button onClick={()=>removeCable(realIdx)} title="Delete" style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:12,padding:2,opacity:0.5}}>×</button>
                   </td>
                 </tr>

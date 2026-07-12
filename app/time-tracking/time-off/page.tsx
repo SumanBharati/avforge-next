@@ -56,7 +56,7 @@ export default function TimeOffPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-heading">Time Off</h1>
           <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">
@@ -227,7 +227,7 @@ function TimeOffModal({
   const [form, setForm] = useState<TimeOff>(initial);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md overflow-hidden rounded-xl border border-border bg-forge-bg shadow-2xl">
         <div className="border-b border-border px-6 py-4">

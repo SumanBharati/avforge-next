@@ -162,7 +162,7 @@ export default function BoardDetailPage({ params }: { params: { boardId: string 
   }
 
   return (
-    <div className="animate-fade-in flex h-full flex-col px-8 py-6" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="animate-fade-in flex h-full flex-col px-4 py-6 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 72px)" }}>
       {/* Header */}
       <div className="mb-5 flex items-center gap-3">
         <button

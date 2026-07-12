@@ -80,7 +80,13 @@ export default function Header() {
   const { theme, toggle } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close the mobile menu on navigation
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -118,12 +124,12 @@ export default function Header() {
 
 
   return (
-    <header className="sticky top-0 z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-forge-panel px-8">
+    <header className="sticky top-0 z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-forge-panel px-4 sm:px-6 xl:px-8">
       {/* Logo + Org */}
-      <div className="flex items-center gap-5">
+      <div className="flex min-w-0 items-center gap-3 xl:gap-5">
         <Link
           href="/home"
-          className="flex items-center gap-3 transition-opacity hover:opacity-80"
+          className="flex shrink-0 items-center gap-3 transition-opacity hover:opacity-80"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600">
             <span className="text-lg font-extrabold text-white">▲</span>
@@ -132,13 +138,15 @@ export default function Header() {
             AV<span className="text-blue-500">Forge</span>
           </span>
         </Link>
-        <div className="h-8 w-px bg-border" />
-        <OrgSwitcher />
+        <div className="hidden h-8 w-px bg-border sm:block" />
+        <div className="hidden min-w-0 sm:block">
+          <OrgSwitcher />
+        </div>
       </div>
 
       {/* Navigation + Theme + Profile */}
-      <div className="flex items-center gap-4">
-        <nav className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2 xl:gap-4">
+        <nav className="hidden items-center gap-1.5 xl:flex">
           {navItems.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
@@ -168,6 +176,27 @@ export default function Header() {
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+        </button>
+
+        {/* Mobile menu toggle */}
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-forge-surface hover:text-heading xl:hidden"
+          aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileMenuOpen}
+        >
+          {mobileMenuOpen ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
+          )}
         </button>
 
         {/* Profile */}
@@ -243,6 +272,39 @@ export default function Header() {
           </div>
         )}
       </div>
+
+      {/* Mobile navigation panel */}
+      {mobileMenuOpen && (
+        <div className="absolute inset-x-0 top-[72px] z-50 max-h-[calc(100dvh-72px)] overflow-y-auto border-b border-border bg-forge-panel shadow-2xl xl:hidden">
+          {/* Org switcher (hidden from the bar on small screens) */}
+          <div className="border-b border-border px-4 py-3 sm:hidden">
+            <OrgSwitcher />
+          </div>
+          <nav className="flex flex-col p-3">
+            {navItems.map((item) => {
+              const isActive =
+                pathname === item.href || pathname.startsWith(item.href + "/");
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 rounded-lg px-4 py-3 text-[15px] transition-all ${
+                    isActive
+                      ? "bg-blue-500/[0.12] font-bold text-blue-400"
+                      : "font-bold text-muted hover:text-body"
+                  }`}
+                >
+                  <Icon />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      )}
     </header>
   );
 }

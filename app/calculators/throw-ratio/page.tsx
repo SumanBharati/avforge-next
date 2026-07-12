@@ -69,7 +69,7 @@ export default function ThrowRatioPage() {
 
   return (
     <CalcPageWrapper title="Throw and Lumens Calculator" desc="Projector throw distance and required brightness calculator">
-      <div className="flex items-stretch gap-6">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left: Inputs ── */}
         <div className="min-w-0 flex-1">
@@ -87,9 +87,9 @@ export default function ThrowRatioPage() {
                   <button key={key} onClick={() => setMode(key as 'dist' | 'ratio')}
                     className="rounded-lg px-3 py-2.5 text-left text-[12px] font-semibold transition-colors"
                     style={{
-                      border: `1px solid ${active ? 'rgba(59,130,246,0.5)' : 'rgb(var(--border))'}`,
-                      background: active ? 'rgba(59,130,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
-                      color: active ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                      border: `1px solid ${active ? 'rgba(139,92,246,0.5)' : 'rgb(var(--border))'}`,
+                      background: active ? 'rgba(139,92,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
+                      color: active ? '#a78bfa' : 'rgb(var(--text-subtle))',
                     }}>
                     {label}
                   </button>
@@ -118,9 +118,9 @@ export default function ThrowRatioPage() {
                   <button key={key} onClick={() => setAspectRatio(key)}
                     className="rounded-lg px-2 py-2 text-center text-[12px] font-semibold transition-colors"
                     style={{
-                      border: `1px solid ${aspectRatio === key ? 'rgba(59,130,246,0.5)' : 'rgb(var(--border))'}`,
-                      background: aspectRatio === key ? 'rgba(59,130,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
-                      color: aspectRatio === key ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                      border: `1px solid ${aspectRatio === key ? 'rgba(139,92,246,0.5)' : 'rgb(var(--border))'}`,
+                      background: aspectRatio === key ? 'rgba(139,92,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
+                      color: aspectRatio === key ? '#a78bfa' : 'rgb(var(--text-subtle))',
                     }}>
                     {key}
                   </button>
@@ -152,7 +152,7 @@ export default function ThrowRatioPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
         <div className="min-w-0 flex-1">

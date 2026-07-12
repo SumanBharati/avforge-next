@@ -182,7 +182,7 @@ export default function ProfileSettingsPage() {
   const cardCls = "rounded-2xl border border-border bg-forge-surface/40 p-6";
 
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-heading">My Settings</h2>
         <p className="mt-1 text-[13px] text-muted">Manage your personal information, security, and preferences.</p>
@@ -350,8 +350,8 @@ export default function ProfileSettingsPage() {
               <div>
                 <div className="flex items-center gap-2 text-[13px] font-semibold text-heading">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <rect x="5" y="11" width="14" height="10" rx="2" stroke="#3b82f6" strokeWidth="1.8" />
-                    <path d="M8 11V7a4 4 0 018 0v4" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" />
+                    <rect x="5" y="11" width="14" height="10" rx="2" stroke="#8b5cf6" strokeWidth="1.8" />
+                    <path d="M8 11V7a4 4 0 018 0v4" stroke="#8b5cf6" strokeWidth="1.8" strokeLinecap="round" />
                   </svg>
                   Two-Factor Authentication
                   {mfaEnabled && (
@@ -432,8 +432,8 @@ export default function ProfileSettingsPage() {
             <div className="flex items-center gap-4 rounded-xl border border-border bg-forge-surface/30 px-4 py-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="#3b82f6" strokeWidth="1.5" />
-                  <polyline points="22,6 12,13 2,6" stroke="#3b82f6" strokeWidth="1.5" />
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="#8b5cf6" strokeWidth="1.5" />
+                  <polyline points="22,6 12,13 2,6" stroke="#8b5cf6" strokeWidth="1.5" />
                 </svg>
               </div>
               <div className="flex-1">
@@ -447,7 +447,7 @@ export default function ProfileSettingsPage() {
             <div className="hidden items-center gap-4 rounded-xl border border-border bg-forge-surface/30 px-4 py-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="#3b82f6" strokeWidth="1.5" />
+                  <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="#8b5cf6" strokeWidth="1.5" />
                 </svg>
               </div>
               <div className="flex-1">

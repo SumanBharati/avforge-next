@@ -60,7 +60,7 @@ export default function ProjectEngineeringLayout({
   return (
     <div>
       {/* Top header */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">

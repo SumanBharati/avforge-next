@@ -34,9 +34,9 @@ function FovPlanDiagram({ hfovWide, hfovZoom, widthWide, widthZoom, distance, un
     ? Math.tan((hfovZoom / 2) * Math.PI / 180) * distPx * scale
     : null;
 
-  const col = accent === 'violet' ? '#a78bfa' : '#60a5fa';
-  const wideFill = accent === 'violet' ? 'rgba(139,92,246,0.07)' : 'rgba(59,130,246,0.07)';
-  const zoomFill = accent === 'violet' ? 'rgba(139,92,246,0.20)' : 'rgba(59,130,246,0.20)';
+  const col = accent === 'violet' ? '#a78bfa' : '#a78bfa';
+  const wideFill = accent === 'violet' ? 'rgba(139,92,246,0.07)' : 'rgba(139,92,246,0.07)';
+  const zoomFill = accent === 'violet' ? 'rgba(139,92,246,0.20)' : 'rgba(139,92,246,0.20)';
   const dimCol = 'rgba(148,163,184,0.45)';
 
   const midX = (camX + endX) / 2;
@@ -214,7 +214,7 @@ export default function CameraFOVPage() {
 
   return (
     <CalcPageWrapper title="Camera FOV Calculator" desc="Field of view calculation at a distance">
-      <div className="flex gap-6">
+      <div className="flex flex-col gap-6 lg:flex-row">
 
         {/* ── Left: inputs ── */}
         <div className="min-w-0 flex-1 space-y-4">
@@ -321,7 +321,7 @@ export default function CameraFOVPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: results ── */}
         <div className="min-w-0 flex-1">

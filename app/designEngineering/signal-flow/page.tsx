@@ -6,7 +6,7 @@ import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 
 const SIGNAL_TYPES = [
-  {id:"hdmi",name:"HDMI",color:"#3b82f6"},
+  {id:"hdmi",name:"HDMI",color:"#8b5cf6"},
   {id:"dante",name:"Dante",color:"#22c55e"},
   {id:"usb",name:"USB",color:"#a855f7"},
   {id:"cat6",name:"Cat6/HDBaseT",color:"#f59e0b"},
@@ -19,13 +19,13 @@ const SIGNAL_TYPES = [
 
 const DEVICE_LIBRARY = [
   {cat:"Sources",items:[
-    {type:"Laptop",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
-    {type:"Media Player",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"}]},
-    {type:"Blu-ray Player",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"}]},
-    {type:"Camera (PTZ)",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"sdi",dir:"out",label:"SDI"},{side:"right",signal:"cat6",dir:"out",label:"IP"}]},
-    {type:"Extron SMP 111",mfr:"Extron",model:"SMP 111",price:2495,w:130,h:56,color:"#3b82f6",ports:[{side:"left",signal:"hdmi",dir:"in",label:"HDMI In"},{side:"right",signal:"cat6",dir:"out",label:"Stream"}]},
-    {type:"Extron ShareLink Pro 2500",mfr:"Extron",model:"ShareLink Pro 2500",price:2195,w:150,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
-    {type:"Barco ClickShare CX-50",mfr:"Barco",model:"CX-50 Gen 2",price:3499,w:150,h:56,color:"#3b82f6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
+    {type:"Laptop",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
+    {type:"Media Player",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"}]},
+    {type:"Blu-ray Player",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"}]},
+    {type:"Camera (PTZ)",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"sdi",dir:"out",label:"SDI"},{side:"right",signal:"cat6",dir:"out",label:"IP"}]},
+    {type:"Extron SMP 111",mfr:"Extron",model:"SMP 111",price:2495,w:130,h:56,color:"#8b5cf6",ports:[{side:"left",signal:"hdmi",dir:"in",label:"HDMI In"},{side:"right",signal:"cat6",dir:"out",label:"Stream"}]},
+    {type:"Extron ShareLink Pro 2500",mfr:"Extron",model:"ShareLink Pro 2500",price:2195,w:150,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
+    {type:"Barco ClickShare CX-50",mfr:"Barco",model:"CX-50 Gen 2",price:3499,w:150,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
   ]},
   {cat:"Displays",items:[
     {type:"Display / TV",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"left",signal:"hdmi",dir:"in",label:"HDMI"}]},
@@ -103,8 +103,13 @@ export default function SignalFlowPage() {
   const [view, setView] = useState({x:0,y:0,zoom:1});
   const viewRef = useRef(view);
   viewRef.current = view;
+  // Marquee multi-select (AutoCAD-style): L→R drag = window (fully inside), R→L = crossing (touches)
+  const [selectedIds, setSelectedIds] = useState<Set<any>>(new Set());
+  const [marquee, setMarquee] = useState<{sx:number;sy:number;cx:number;cy:number}|null>(null);
   const canvasLockedRef = useRef(canvasLocked);
   canvasLockedRef.current = canvasLocked;
+  const devicesRef = useRef<any[]>([]);
+  devicesRef.current = devices;
   const [libOpen, setLibOpen] = useState(true);
   const [libSearch, setLibSearch] = useState("");
   const [libResults, setLibResults] = useState<any[]>([]);
@@ -134,10 +139,11 @@ export default function SignalFlowPage() {
 
   // Annotation tools
   const [activeTool, setActiveTool] = useState<"text"|"shape"|"pencil"|"highlight"|"eraser"|null>(null);
-  const [shapeSubtype, setShapeSubtype] = useState<"rect"|"circle"|"line"|"arrow">("rect");
+  const [shapeSubtype, setShapeSubtype] = useState<"rect"|"circle"|"triangle"|"line"|"arrow"|"polyline">("rect");
   const [toolColor, setToolColor] = useState("#374151");
   const [hlColor, setHlColor] = useState("#fbbf24");
   const [hlSubtype, setHlSubtype] = useState<"rect"|"freehand">("rect");
+  const [eraserSize, setEraserSize] = useState(15);
   const [strokeW, setStrokeW] = useState(2);
   const [annotations, setAnnotations] = useState<any[]>([]);
   const [liveAnnot, setLiveAnnot] = useState<any>(null);
@@ -366,7 +372,7 @@ export default function SignalFlowPage() {
     setDevices(prev=>[...prev,sizeDevice({...template,id,x:wx,y:wy,ports})]);
   };
 
-  const roomColors = ["#4b5563","#6b7280","#3b82f6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
+  const roomColors = ["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
   const addRoom = () => {
     const id = "room-"+(Date.now());
     const v = viewRef.current;
@@ -473,6 +479,43 @@ export default function SignalFlowPage() {
     window.addEventListener("mouseup",onUp);
   };
 
+  // Marquee select on empty-canvas left drag. Direction picks the mode, same as the
+  // room designer: left-to-right = window (fully inside), right-to-left = crossing (intersects).
+  const startMarquee = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const start = getSVGCoords(e);
+    let cur = start;
+    setMarquee({ sx: start.x, sy: start.y, cx: start.x, cy: start.y });
+    const onMove = (me: MouseEvent) => {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const v = viewRef.current;
+      cur = { x: (me.clientX - rect.left - v.x) / v.zoom, y: (me.clientY - rect.top - v.y) / v.zoom };
+      setMarquee({ sx: start.x, sy: start.y, cx: cur.x, cy: cur.y });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const minDrag = 4 / viewRef.current.zoom;
+      if (Math.abs(cur.x - start.x) > minDrag || Math.abs(cur.y - start.y) > minDrag) {
+        const isWindow = cur.x >= start.x;
+        const x1 = Math.min(start.x, cur.x), x2 = Math.max(start.x, cur.x);
+        const y1 = Math.min(start.y, cur.y), y2 = Math.max(start.y, cur.y);
+        const hits = new Set<any>();
+        devicesRef.current.forEach((d: any) => {
+          const dX1 = d.x, dY1 = d.y, dX2 = d.x + d.w, dY2 = d.y + d.h;
+          const hit = isWindow
+            ? dX1 >= x1 && dX2 <= x2 && dY1 >= y1 && dY2 <= y2
+            : !(dX2 < x1 || dX1 > x2 || dY2 < y1 || dY1 > y2);
+          if (hit) hits.add(d.id);
+        });
+        setSelectedIds(hits);
+      }
+      setMarquee(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (!canvasLocked && e.button === 1) { startPan(e); return; }
     if (activeTool) { handleToolDown(e); return; }
@@ -484,8 +527,8 @@ export default function SignalFlowPage() {
       return;
     }
     if(isEmpty){
-      setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null);
-      if (!canvasLocked && e.button === 0) startPan(e);
+      setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); setSelectedIds(new Set());
+      if (e.button === 0) startMarquee(e); // pan via middle-drag or scroll wheel
     }
   };
 
@@ -517,14 +560,22 @@ export default function SignalFlowPage() {
 
   const handleDeviceMouseDown = (e: React.MouseEvent, dev: any) => {
     e.stopPropagation();
-    setSelected(dev.id); setSelectedConn(null); setSelectedRoom(null);
+    // Dragging a marquee-selected device moves the whole selection; otherwise single-select
+    const inGroup = selectedIds.has(dev.id);
+    if (inGroup) { setSelected(null); }
+    else { setSelected(dev.id); setSelectedIds(new Set()); }
+    setSelectedConn(null); setSelectedRoom(null);
     const z = viewRef.current.zoom;
-    const startX = e.clientX/z - dev.x - panOffset.x;
-    const startY = e.clientY/z - dev.y - panOffset.y;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    const ids = inGroup ? new Set(selectedIds) : new Set([dev.id]);
+    const origins = new Map<any,{x:number;y:number}>(devicesRef.current.filter((d:any)=>ids.has(d.id)).map((d:any)=>[d.id,{x:d.x,y:d.y}]));
     const onMove = (me: MouseEvent) => {
-      const nx = me.clientX/z - startX - panOffset.x;
-      const ny = me.clientY/z - startY - panOffset.y;
-      setDevices(prev=>prev.map((d:any)=>d.id===dev.id?{...d,x:nx,y:ny}:d));
+      const dx = me.clientX/z - startX;
+      const dy = me.clientY/z - startY;
+      setDevices(prev=>prev.map((d:any)=>{
+        const o = origins.get(d.id);
+        return o ? {...d, x: o.x + dx, y: o.y + dy} : d;
+      }));
     };
     const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
     window.addEventListener("mousemove",onMove);
@@ -573,7 +624,11 @@ export default function SignalFlowPage() {
   };
 
   const deleteSelected = useCallback(() => {
-    if(selectedAnnotId!==null){
+    if(selectedIds.size>0){
+      setConnections(prev=>prev.filter((c:any)=>!selectedIds.has(c.from.deviceId)&&!selectedIds.has(c.to.deviceId)));
+      setDevices(prev=>prev.filter((d:any)=>!selectedIds.has(d.id)));
+      setSelectedIds(new Set());
+    } else if(selectedAnnotId!==null){
       setAnnotations(prev=>prev.filter((a:any)=>a.id!==selectedAnnotId));
       setSelectedAnnotId(null);
     } else if(selectedRoom!==null){
@@ -586,7 +641,7 @@ export default function SignalFlowPage() {
       setDevices(prev=>prev.filter((d:any)=>d.id!==selected));
       setSelected(null);
     }
-  }, [selected, selectedConn, selectedRoom, selectedAnnotId]);
+  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds]);
 
   const getSVGCoords = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -595,7 +650,7 @@ export default function SignalFlowPage() {
   };
 
   const eraseAtPoint = (x: number, y: number) => {
-    const R = 15;
+    const R = eraserSize;
     setAnnotations(prev => prev.filter((a: any) => {
       if (a.type === "pencil") {
         const pts = [...a.d.matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)];
@@ -612,6 +667,10 @@ export default function SignalFlowPage() {
         return !(x >= a.x - R && x <= a.x + a.w + R && y >= a.y - R && y <= a.y + a.h + R);
       }
       if (a.type === "shape") {
+        if (a.sub === "polyline" && a.pts?.length) {
+          const xs = a.pts.map((p:any)=>p.x), ys = a.pts.map((p:any)=>p.y);
+          return !(x >= Math.min(...xs) - R && x <= Math.max(...xs) + R && y >= Math.min(...ys) - R && y <= Math.max(...ys) + R);
+        }
         const minX = Math.min(a.x1, a.x2), maxX = Math.max(a.x1, a.x2);
         const minY = Math.min(a.y1, a.y2), maxY = Math.max(a.y1, a.y2);
         return !(x >= minX - R && x <= maxX + R && y >= minY - R && y <= maxY + R);
@@ -641,6 +700,17 @@ export default function SignalFlowPage() {
       setTextValue("");
       return;
     }
+    if (activeTool === "shape" && shapeSubtype === "polyline") {
+      // click-to-add-points; committed on double-click via finishPolyline
+      if (drawRef.current?.pts) {
+        const prev = drawRef.current.pts[drawRef.current.pts.length - 1];
+        drawRef.current.pts.push(e.shiftKey ? snapTo45(prev.x, prev.y, x, y) : {x, y});
+      } else {
+        drawRef.current = {sx: x, sy: y, pts: [{x, y}]};
+      }
+      setLiveAnnot({type:"shape", sub:"polyline", pts:[...drawRef.current.pts!], color:toolColor, sw:strokeW});
+      return;
+    }
     drawRef.current = {sx: x, sy: y, pts: (activeTool === "pencil" || (activeTool === "highlight" && hlSubtype === "freehand")) ? [{x, y}] : undefined};
   };
 
@@ -665,18 +735,60 @@ export default function SignalFlowPage() {
         setLiveAnnot({type:"highlight", sub:"rect", x:Math.min(sx,x), y:Math.min(sy,y), w:Math.abs(x-sx), h:Math.abs(y-sy), color:hlColor});
       }
     } else if (activeTool === "shape") {
-      setLiveAnnot({type:"shape", sub:shapeSubtype, x1:sx, y1:sy, x2:x, y2:y, color:toolColor, sw:strokeW});
+      if (shapeSubtype === "polyline") {
+        // preview: committed points plus the cursor position
+        if (drawRef.current.pts) {
+          const prev = drawRef.current.pts[drawRef.current.pts.length - 1];
+          const end = e.shiftKey ? snapTo45(prev.x, prev.y, x, y) : {x, y};
+          setLiveAnnot({type:"shape", sub:"polyline", pts:[...drawRef.current.pts, end], color:toolColor, sw:strokeW});
+        }
+      } else {
+        // shift constrains lines/arrows to 45° increments
+        const end = e.shiftKey && (shapeSubtype === "line" || shapeSubtype === "arrow") ? snapTo45(sx, sy, x, y) : {x, y};
+        setLiveAnnot({type:"shape", sub:shapeSubtype, x1:sx, y1:sy, x2:end.x, y2:end.y, color:toolColor, sw:strokeW});
+      }
     }
+  };
+
+  // Snap a segment endpoint to the nearest 45° increment from its anchor
+  const snapTo45 = (ax: number, ay: number, x: number, y: number) => {
+    const dx = x - ax, dy = y - ay;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.01) return {x, y};
+    const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+    return {x: ax + dist * Math.cos(ang), y: ay + dist * Math.sin(ang)};
   };
 
   const handleToolUp = () => {
     if (!drawRef.current) return;
+    // polylines accumulate points across clicks; they commit on double-click
+    if (activeTool === "shape" && shapeSubtype === "polyline") return;
     if (liveAnnot) {
       setAnnotations(prev=>[...prev, {...liveAnnot, id:`a${annotIdRef.current++}`}]);
       setLiveAnnot(null);
     }
     drawRef.current = null;
   };
+
+  const finishPolyline = () => {
+    const pts = drawRef.current?.pts ?? [];
+    // drop the duplicate points the finishing double-click adds
+    const clean: {x:number;y:number}[] = [];
+    for (const p of pts) {
+      const prev = clean[clean.length - 1];
+      if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 3) clean.push(p);
+    }
+    if (clean.length >= 2) {
+      setAnnotations(prev=>[...prev, {type:"shape", sub:"polyline", pts:clean, color:toolColor, sw:strokeW, id:`a${annotIdRef.current++}`}]);
+    }
+    setLiveAnnot(null);
+    drawRef.current = null;
+  };
+
+  // Mirrored into a ref so the window keydown handler (mounted once, with
+  // stale closures) can finish an in-progress polyline on Enter/Escape
+  const polylineKeyRef = useRef({ active: false, finish: () => {} });
+  polylineKeyRef.current = { active: activeTool === "shape" && shapeSubtype === "polyline", finish: finishPolyline };
 
   const textValueRef = useRef("");
   const textInputRef = useRef<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
@@ -729,7 +841,7 @@ export default function SignalFlowPage() {
   const renderAnnotation = (a: any, isLive = false) => {
     const key = isLive ? "live" : a.id;
     const isSel = !isLive && selectedAnnotId === a.id;
-    const selRing = isSel ? {filter:"drop-shadow(0 0 3px #3b82f6)"} : {};
+    const selRing = isSel ? {filter:"drop-shadow(0 0 3px #8b5cf6)"} : {};
     if (a.type === "pencil") return (
       <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
     );
@@ -747,6 +859,11 @@ export default function SignalFlowPage() {
       const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}};
       if (sub==="rect") return <rect key={key} x={Math.min(x1,x2)} y={Math.min(y1,y2)} width={Math.abs(x2-x1)} height={Math.abs(y2-y1)} rx={3} {...props}/>;
       if (sub==="circle") { const cx=(x1+x2)/2,cy=(y1+y2)/2,rx2=Math.abs(x2-x1)/2,ry=Math.abs(y2-y1)/2; return <ellipse key={key} cx={cx} cy={cy} rx={rx2} ry={ry} {...props}/>; }
+      if (sub==="triangle") {
+        const minX=Math.min(x1,x2), maxX=Math.max(x1,x2), minY=Math.min(y1,y2), maxY=Math.max(y1,y2);
+        return <polygon key={key} points={`${(minX+maxX)/2},${minY} ${maxX},${maxY} ${minX},${maxY}`} strokeLinejoin="round" {...props}/>;
+      }
+      if (sub==="polyline") return <polyline key={key} points={(a.pts||[]).map((p:any)=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} strokeLinecap="round" strokeLinejoin="round" {...props}/>;
       if (sub==="line") return <line key={key} x1={x1} y1={y1} x2={x2} y2={y2} strokeLinecap="round" {...props}/>;
       if (sub==="arrow") {
         const ang=Math.atan2(y2-y1,x2-x1), hl=14, ha=Math.PI/6;
@@ -787,8 +904,17 @@ export default function SignalFlowPage() {
       const tag = (e.target as HTMLElement).tagName;
       const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
       if(e.key === "Escape") {
-        setSelected(null); setSelectedConn(null); setSelectedRoom(null); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
+        // finish (not discard) an in-progress polyline — the drawn segments stay
+        if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
+        setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedIds(new Set()); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
         textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null;
+        return;
+      }
+      if(e.key === "Enter" && !isTyping && polylineKeyRef.current.active && drawRef.current?.pts) {
+        // Enter finishes the polyline and exits the command (AutoCAD-style)
+        e.preventDefault();
+        polylineKeyRef.current.finish();
+        setActiveTool(null);
         return;
       }
       if(e.key !== "Delete" && e.key !== "Backspace") return;
@@ -800,7 +926,7 @@ export default function SignalFlowPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteSelected]);
 
-  const clearAll = () => { setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); nextId.current=1; annotIdRef.current=1; };
+  const clearAll = () => { setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); setSelectedIds(new Set()); nextId.current=1; annotIdRef.current=1; };
 
   // Expand endpoint + waypoints into an axis-aligned point list, inserting
   // elbows where consecutive points aren't aligned (e.g. after a device moves)
@@ -967,7 +1093,7 @@ export default function SignalFlowPage() {
       {/* === RIBBON === */}
       <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",flexShrink:0,userSelect:"none"}}>
         {/* Tool groups */}
-        <div style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
+        <div className="overflow-x-auto" style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
 
           {/* Drawing group */}
           <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
@@ -985,7 +1111,7 @@ export default function SignalFlowPage() {
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:56}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
                 </svg>
                 <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Location</span>
@@ -1003,11 +1129,11 @@ export default function SignalFlowPage() {
               const isActive = activeTool === id;
               return (
                 <button key={id} onClick={()=>{if(textInput)commitText();setActiveTool(isActive?null:id);}} title={title}
-                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 10px",background:isActive?"rgba(59,130,246,0.12)":"transparent",border:`1px solid ${isActive?"#3b82f6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 10px",background:isActive?"rgba(139,92,246,0.12)":"transparent",border:`1px solid ${isActive?"#8b5cf6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
                   onMouseEnter={e=>{if(!isActive){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
                   onMouseLeave={e=>{if(!isActive){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
                   {icon}
-                  <span style={{fontSize:9,color:isActive?"#3b82f6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>{label}</span>
+                  <span style={{fontSize:9,color:isActive?"#8b5cf6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>{label}</span>
                 </button>
               );
             };
@@ -1015,23 +1141,29 @@ export default function SignalFlowPage() {
               <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
                 <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
                   {toolBtn("text","Add Text",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="text"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="text"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
                     "Text"
                   )}
                   {toolBtn("shape","Draw Shape",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="shape"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/></svg>,
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="shape"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M7 3.5 L10.5 9.5 H3.5 Z"/>
+                      <path d="M14.5 8 C14.5 5 16.5 3.5 19.5 4"/>
+                      <path d="M17.5 2.5 L19.8 4.05 L18.2 6.3"/>
+                      <circle cx="7" cy="17.5" r="3.5"/>
+                      <rect x="14" y="14" width="7" height="7" rx="1.8"/>
+                    </svg>,
                     "Shape"
                   )}
                   {toolBtn("pencil","Freehand Draw",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="pencil"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>,
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="pencil"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>,
                     "Pencil"
                   )}
                   {toolBtn("highlight","Highlight",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="highlight"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><rect x="9" y="9" width="13" height="13" rx="2" fill={activeTool==="highlight"?"#fbbf2440":"none"}/></svg>,
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="highlight"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><rect x="9" y="9" width="13" height="13" rx="2" fill={activeTool==="highlight"?"#fbbf2440":"none"}/></svg>,
                     "Highlight"
                   )}
                   {toolBtn("eraser","Erase Annotation",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="eraser"?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-1.5 1.5"/><path d="M6.5 17.5l5-5"/></svg>,
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="eraser"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-1.5 1.5"/><path d="M6.5 17.5l5-5"/></svg>,
                     "Eraser"
                   )}
                 </div>
@@ -1040,73 +1172,14 @@ export default function SignalFlowPage() {
             );
           })()}
 
-          {/* Tool Options (shown when annotation tool is active) */}
-          {activeTool && activeTool !== "text" && (
-            <>
-              <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
-              <div style={{display:"flex",flexDirection:"column",justifyContent:"center",padding:"5px 10px",gap:6}}>
-                {/* Shape subtypes */}
-                {activeTool === "shape" && (
-                  <div style={{display:"flex",gap:3}}>
-                    {([["rect","□","Rect"],["circle","○","Ellipse"],["line","—","Line"],["arrow","→","Arrow"]] as const).map(([id,sym,label])=>(
-                      <button key={id} onClick={()=>setShapeSubtype(id as any)} title={label}
-                        style={{width:28,height:22,display:"flex",alignItems:"center",justifyContent:"center",background:shapeSubtype===id?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface))",border:`1px solid ${shapeSubtype===id?"#3b82f6":"rgb(var(--border))"}`,borderRadius:3,cursor:"pointer",fontSize:12,color:shapeSubtype===id?"#3b82f6":"rgb(var(--text-subtle))"}}>
-                        {sym}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {/* Stroke width */}
-                {(activeTool==="pencil"||activeTool==="shape") && (
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    {[1,2,4,6].map(w=>(
-                      <button key={w} onClick={()=>setStrokeW(w)} title={`${w}px`}
-                        style={{width:28,height:22,display:"flex",alignItems:"center",justifyContent:"center",background:strokeW===w?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface))",border:`1px solid ${strokeW===w?"#3b82f6":"rgb(var(--border))"}`,borderRadius:3,cursor:"pointer"}}>
-                        <div style={{width:Math.min(w*2.5,18),height:w,background:strokeW===w?"#3b82f6":"rgb(var(--text-muted))",borderRadius:w}}/>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {/* Color swatches */}
-                {(activeTool==="pencil"||activeTool==="shape") && (
-                  <div style={{display:"flex",gap:4}}>
-                    {["#374151","#3b82f6","#ef4444","#22c55e","#f59e0b","#a855f7"].map(c=>(
-                      <button key={c} onClick={()=>setToolColor(c)}
-                        style={{width:16,height:16,borderRadius:"50%",background:c,border:toolColor===c?"2px solid #fff":"2px solid transparent",outline:toolColor===c?`2px solid ${c}`:"none",cursor:"pointer",padding:0,flexShrink:0}}/>
-                    ))}
-                  </div>
-                )}
-                {/* Highlight options */}
-                {activeTool==="highlight" && (
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    {/* Subtype toggle */}
-                    {[
-                      {id:"rect", label:"Rect", icon:<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="12" height="8" rx="1.5" fill={hlSubtype==="rect"?"#fbbf24":"none"} stroke={hlSubtype==="rect"?"#92400e":"rgb(var(--text-subtle))"} strokeWidth="1.5" opacity={hlSubtype==="rect"?0.8:1}/></svg>},
-                      {id:"freehand", label:"Pen", icon:<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 10 Q4 5 7 7 Q10 9 12 4" stroke={hlSubtype==="freehand"?"#fbbf24":"rgb(var(--text-subtle))"} strokeWidth={hlSubtype==="freehand"?3:2} strokeLinecap="round" fill="none" opacity={hlSubtype==="freehand"?0.9:1}/></svg>},
-                    ].map(({id,label,icon})=>(
-                      <button key={id} onClick={()=>setHlSubtype(id as "rect"|"freehand")} title={label}
-                        style={{display:"flex",alignItems:"center",justifyContent:"center",width:26,height:22,background:hlSubtype===id?"rgba(251,191,36,0.15)":"rgb(var(--forge-surface))",border:`1px solid ${hlSubtype===id?"#fbbf24":"rgb(var(--border))"}`,borderRadius:4,cursor:"pointer",padding:0}}>
-                        {icon}
-                      </button>
-                    ))}
-                    <div style={{width:1,height:16,background:"rgb(var(--border))"}}/>
-                    <span style={{fontSize:9,color:"rgb(var(--text-subtle))"}}>Color</span>
-                    {["#fbbf24","#fb923c","#4ade80","#60a5fa","#f472b6","#c084fc"].map(c=>(
-                      <button key={c} onClick={()=>setHlColor(c)}
-                        style={{width:18,height:18,borderRadius:3,background:c,opacity:0.7,border:hlColor===c?"2px solid rgb(var(--text-body))":"2px solid transparent",cursor:"pointer",padding:0,flexShrink:0}}/>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+          {/* Tool options live in the floating palette on the canvas */}
 
           {/* Spacer pushes export button to far right */}
           <div style={{flex:1}}/>
           <div style={{display:"flex",alignItems:"center",paddingRight:4}}>
             <button onClick={exportAsPDF} title="Export canvas as PDF"
               style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",color:"rgb(var(--text-body))",fontSize:12,fontWeight:500,transition:"all 0.15s",whiteSpace:"nowrap"}}
-              onMouseEnter={e=>{e.currentTarget.style.background="rgba(59,130,246,0.1)";e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(139,92,246,0.1)";e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}}
               onMouseLeave={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-body))"}}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -1145,9 +1218,85 @@ export default function SignalFlowPage() {
             )}
           </button>
         </div>
+        {/* Tool palette — GoodNotes-style floating toolbar on the left edge of the canvas */}
+        {activeTool && activeTool !== "text" && (
+          <div data-html2canvas-ignore="true"
+            style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",zIndex:10,display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"10px 7px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:16,boxShadow:"0 4px 18px rgba(0,0,0,0.18)",maxHeight:"calc(100% - 24px)",overflowY:"auto"}}>
+            {/* Shape subtypes */}
+            {activeTool === "shape" && ([
+              ["rect",     <rect key="i" x="3.5" y="6" width="15" height="10" rx="1.5"/>,                        "Rectangle"],
+              ["circle",   <ellipse key="i" cx="11" cy="11" rx="7.5" ry="6"/>,                                    "Ellipse"],
+              ["triangle", <path key="i" d="M11 4.5 L18 17.5 H4 Z"/>,                                             "Triangle"],
+              ["line",     <line key="i" x1="4.5" y1="17.5" x2="17.5" y2="4.5"/>,                                 "Line"],
+              ["arrow",    <g key="i"><line x1="4.5" y1="17.5" x2="16.5" y2="5.5"/><polyline points="9.5 5 17 5 17 12.5"/></g>, "Arrow"],
+              ["polyline", <polyline key="i" points="3.5 16.5 8 8.5 12.5 13 18.5 4.5"/>,                          "Polyline — click points, Enter or double-click to finish"],
+            ] as const).map(([id,icon,label])=>(
+              <button key={id as string}
+                onClick={()=>{
+                  // abandon an in-progress polyline when switching subtype
+                  if (shapeSubtype === "polyline" && id !== "polyline" && drawRef.current?.pts) { setLiveAnnot(null); drawRef.current = null; }
+                  setShapeSubtype(id as any);
+                }}
+                title={label as string}
+                style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:shapeSubtype===id?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${shapeSubtype===id?"#8b5cf6":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke={shapeSubtype===id?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
+              </button>
+            ))}
+            {activeTool === "shape" && <div style={{height:1,alignSelf:"stretch",margin:"3px 2px",background:"rgb(var(--border))",flexShrink:0}}/>}
+            {/* Stroke width — pencil & shapes */}
+            {(activeTool === "shape" || activeTool === "pencil") && [1,2,4,6].map(w=>(
+              <button key={w} onClick={()=>setStrokeW(w)} title={`${w}px`}
+                style={{width:34,height:24,display:"flex",alignItems:"center",justifyContent:"center",background:strokeW===w?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${strokeW===w?"#8b5cf6":"transparent"}`,borderRadius:7,cursor:"pointer",flexShrink:0}}>
+                <div style={{width:18,height:w,background:strokeW===w?"#8b5cf6":"rgb(var(--text-muted))",borderRadius:w}}/>
+              </button>
+            ))}
+            {(activeTool === "shape" || activeTool === "pencil") && <>
+              <div style={{height:1,alignSelf:"stretch",margin:"3px 2px",background:"rgb(var(--border))",flexShrink:0}}/>
+              {/* Colors */}
+              {["#374151","#8b5cf6","#ef4444","#22c55e","#f59e0b","#a855f7"].map(c=>(
+                <button key={c} onClick={()=>setToolColor(c)} title={c}
+                  style={{width:18,height:18,borderRadius:"50%",background:c,border:toolColor===c?"2px solid rgb(var(--forge-panel))":"2px solid transparent",outline:toolColor===c?`2px solid ${c}`:"none",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
+              ))}
+            </>}
+            {/* Highlighter — mode + colors */}
+            {activeTool === "highlight" && <>
+              {[
+                {id:"rect", label:"Highlight area (rectangle)", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="10" rx="2" fill={hlSubtype==="rect"?hlColor:"none"} stroke={hlSubtype==="rect"?hlColor:"rgb(var(--text-muted))"} strokeWidth="1.7" opacity={hlSubtype==="rect"?0.75:1}/></svg>},
+                {id:"freehand", label:"Highlight freehand (pen)", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M2.5 14 Q6 6 10 9.5 Q14 13 17.5 5.5" stroke={hlSubtype==="freehand"?hlColor:"rgb(var(--text-muted))"} strokeWidth={hlSubtype==="freehand"?4.5:2} strokeLinecap="round" fill="none" opacity={hlSubtype==="freehand"?0.85:1}/></svg>},
+              ].map(({id,label,icon})=>(
+                <button key={id} onClick={()=>setHlSubtype(id as "rect"|"freehand")} title={label}
+                  style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:hlSubtype===id?"rgba(251,191,36,0.15)":"transparent",border:`1px solid ${hlSubtype===id?"#fbbf24":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
+                  {icon}
+                </button>
+              ))}
+              <div style={{height:1,alignSelf:"stretch",margin:"3px 2px",background:"rgb(var(--border))",flexShrink:0}}/>
+              {["#fbbf24","#fb923c","#4ade80","#a78bfa","#f472b6","#c084fc"].map(c=>(
+                <button key={c} onClick={()=>setHlColor(c)} title={c}
+                  style={{width:18,height:18,borderRadius:4,background:c,opacity:0.75,border:hlColor===c?"2px solid rgb(var(--text-body))":"2px solid transparent",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
+              ))}
+            </>}
+            {/* Eraser — size presets */}
+            {activeTool === "eraser" && [
+              {r: 8,  d: 10, label: "Small eraser"},
+              {r: 15, d: 16, label: "Medium eraser"},
+              {r: 26, d: 24, label: "Large eraser"},
+            ].map(({r, d, label})=>(
+              <button key={r} onClick={()=>setEraserSize(r)} title={label}
+                style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:eraserSize===r?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${eraserSize===r?"#8b5cf6":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
+                <div style={{width:d,height:d,borderRadius:"50%",border:`2px solid ${eraserSize===r?"#8b5cf6":"rgb(var(--text-muted))"}`,flexShrink:0}}/>
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Polyline drawing hint */}
+        {activeTool === "shape" && shapeSubtype === "polyline" && !connecting && (
+          <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
+            Click to add points — hold Shift for straight lines, Enter or double-click to finish
+          </div>
+        )}
         {/* Connection status */}
         {connecting && (
-          <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:5,color:"#3b82f6",fontSize:11,whiteSpace:"nowrap"}}>
+          <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
             Click a port to complete — or click the canvas to add right-angle bends
             <button onClick={()=>{setConnecting(null);setConnectCursor(null);}} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:11,marginLeft:4}}>Cancel</button>
           </div>
@@ -1157,8 +1306,8 @@ export default function SignalFlowPage() {
         <svg ref={canvasRef} width="100%" height="100%" onMouseDown={handleCanvasMouseDown}
           onMouseMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
           onMouseUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
-          onDoubleClick={e=>{const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);}}}
-          style={{cursor:activeTool==="text"?"text":activeTool?"crosshair":canvasLocked?"default":"grab"}}>
+          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);setSelectedIds(new Set());}}}
+          style={{cursor:activeTool==="text"?"text":activeTool?"crosshair":marquee?"crosshair":"default"}}>
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgb(var(--border))" strokeWidth="0.5" opacity="0.4"/>
@@ -1229,13 +1378,13 @@ export default function SignalFlowPage() {
 
           {/* Devices */}
           {devices.map((dev:any)=>{
-            const isSel = selected===dev.id;
+            const isSel = selected===dev.id || selectedIds.has(dev.id);
             const leftPorts = dev.ports.filter((p:any)=>p.side==="left");
             const rightPorts = dev.ports.filter((p:any)=>p.side==="right");
             return (
               <g key={dev.id} onMouseDown={(e)=>handleDeviceMouseDown(e,dev)} onContextMenu={(e)=>handleDeviceContextMenu(e,dev)} style={{cursor:"grab"}}>
                 <rect x={dev.x+panOffset.x+2} y={dev.y+panOffset.y+2} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--text-faint))" opacity={0.15} />
-                <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#3b82f6":"#4b5563"} strokeWidth={isSel?2:1.5} />
+                <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#8b5cf6":"#4b5563"} strokeWidth={isSel?2:1.5} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={4} height={dev.h} rx={2} fill="#4b5563" opacity={0.8} />
                 {(dev.mfr||dev.model)&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={11} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={700}>{[dev.mfr&&dev.mfr!=="Generic"?dev.mfr:null,dev.model&&dev.model!=="—"?dev.model:null].filter(Boolean).join(" · ")}</text>}
                 <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(dev.mfr||dev.model?23:16)} textAnchor="middle" fontSize={8} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif">{dev.type}</text>
@@ -1273,6 +1422,24 @@ export default function SignalFlowPage() {
           {annotations.filter((a:any)=>a.type!=="highlight"&&a.id!==editingAnnotId).map(a=>renderAnnotation(a))}
           {liveAnnot && liveAnnot.type!=="highlight" && renderAnnotation(liveAnnot, true)}
 
+          {/* Marquee selection rectangle — blue solid = window, green dashed = crossing */}
+          {marquee && (()=>{
+            const isWindow = marquee.cx >= marquee.sx;
+            const x = Math.min(marquee.sx, marquee.cx);
+            const y = Math.min(marquee.sy, marquee.cy);
+            const w = Math.abs(marquee.cx - marquee.sx);
+            const h = Math.abs(marquee.cy - marquee.sy);
+            return (
+              <rect x={x} y={y} width={w} height={h}
+                fill={isWindow ? "rgba(139,92,246,0.07)" : "rgba(34,197,94,0.07)"}
+                stroke={isWindow ? "#8b5cf6" : "#22c55e"}
+                strokeWidth={0.8/view.zoom}
+                strokeDasharray={isWindow ? undefined : `${3/view.zoom} ${2/view.zoom}`}
+                pointerEvents="none"
+              />
+            );
+          })()}
+
           </g>
         </svg>
 
@@ -1285,21 +1452,21 @@ export default function SignalFlowPage() {
               <span style={{fontSize:12,fontFamily:"monospace",color:"rgb(var(--text-body))",minWidth:24,textAlign:"center",userSelect:"none"}}>{textFontSize}</span>
               <button onClick={()=>setTextFontSize(s=>Math.min(72,s+2))} style={{width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none",color:"rgb(var(--text-subtle))",fontSize:14,cursor:"pointer",borderRadius:4}}>+</button>
               <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
-              <button onClick={()=>setTextBold(b=>!b)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textBold?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textBold?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"Georgia,serif",color:textBold?"#3b82f6":"rgb(var(--text-body))"}}>B</button>
-              <button onClick={()=>setTextItalic(i=>!i)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textItalic?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textItalic?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",fontStyle:"italic",fontSize:13,fontFamily:"Georgia,serif",color:textItalic?"#3b82f6":"rgb(var(--text-body))"}}>I</button>
+              <button onClick={()=>setTextBold(b=>!b)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textBold?"rgba(139,92,246,0.12)":"none",border:`1px solid ${textBold?"#8b5cf6":"transparent"}`,borderRadius:5,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"Georgia,serif",color:textBold?"#8b5cf6":"rgb(var(--text-body))"}}>B</button>
+              <button onClick={()=>setTextItalic(i=>!i)} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textItalic?"rgba(139,92,246,0.12)":"none",border:`1px solid ${textItalic?"#8b5cf6":"transparent"}`,borderRadius:5,cursor:"pointer",fontStyle:"italic",fontSize:13,fontFamily:"Georgia,serif",color:textItalic?"#8b5cf6":"rgb(var(--text-body))"}}>I</button>
               <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
               {(["left","center","right"] as const).map(al=>(
-                <button key={al} onClick={()=>setTextAlign(al)} title={`Align ${al}`} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textAlign===al?"rgba(59,130,246,0.12)":"none",border:`1px solid ${textAlign===al?"#3b82f6":"transparent"}`,borderRadius:5,cursor:"pointer",padding:0}}>
+                <button key={al} onClick={()=>setTextAlign(al)} title={`Align ${al}`} style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",background:textAlign===al?"rgba(139,92,246,0.12)":"none",border:`1px solid ${textAlign===al?"#8b5cf6":"transparent"}`,borderRadius:5,cursor:"pointer",padding:0}}>
                   <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                    {al==="left"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="6" x2="9" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="10" x2="11" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
-                    {al==="center"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="6" x2="11" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="2" y1="10" x2="12" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
-                    {al==="right"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="5" y1="6" x2="13" y2="6" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="10" x2="13" y2="10" stroke={textAlign===al?"#3b82f6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                    {al==="left"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="6" x2="9" y2="6" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="1" y1="10" x2="11" y2="10" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                    {al==="center"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="6" x2="11" y2="6" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="2" y1="10" x2="12" y2="10" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
+                    {al==="right"&&<><line x1="1" y1="2" x2="13" y2="2" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="5" y1="6" x2="13" y2="6" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/><line x1="3" y1="10" x2="13" y2="10" stroke={textAlign===al?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth="1.4" strokeLinecap="round"/></>}
                   </svg>
                 </button>
               ))}
               <div style={{width:1,height:18,background:"rgb(var(--border))",margin:"0 3px"}}/>
-              {["#1e293b","#3b82f6","#ef4444","#10b981","#f59e0b","#a855f7"].map(c=>(
-                <button key={c} onClick={()=>setToolColor(c)} style={{width:14,height:14,borderRadius:"50%",background:c,border:toolColor===c?"2px solid #3b82f6":"2px solid rgb(var(--border))",cursor:"pointer",padding:0,outline:"none",flexShrink:0}} />
+              {["#1e293b","#8b5cf6","#ef4444","#10b981","#f59e0b","#a855f7"].map(c=>(
+                <button key={c} onClick={()=>setToolColor(c)} style={{width:14,height:14,borderRadius:"50%",background:c,border:toolColor===c?"2px solid #8b5cf6":"2px solid rgb(var(--border))",cursor:"pointer",padding:0,outline:"none",flexShrink:0}} />
               ))}
             </div>
 
@@ -1311,7 +1478,7 @@ export default function SignalFlowPage() {
                 value={textValue}
                 onChange={e=>{textValueRef.current=e.target.value;setTextValue(e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
                 onKeyDown={e=>{e.stopPropagation();if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitText();}if(e.key==="Escape"){textInputRef.current=null;setTextInput(null);setTextValue("");setEditingAnnotId(null);editingAnnotIdRef.current=null;}}}
-                style={{background:"rgb(var(--forge-panel))",border:"2px solid #3b82f6",borderRadius:6,outline:"none",fontSize:textFontSize,fontWeight:textBold?"700":"400",fontStyle:textItalic?"italic":"normal",textAlign,color:"rgb(var(--text-body))",fontFamily:"Inter,sans-serif",padding:"6px 10px",minWidth:140,resize:"none",overflow:"hidden",caretColor:"#3b82f6",boxShadow:"0 2px 12px rgba(59,130,246,0.2)",lineHeight:1.4}}
+                style={{background:"rgb(var(--forge-panel))",border:"2px solid #8b5cf6",borderRadius:6,outline:"none",fontSize:textFontSize,fontWeight:textBold?"700":"400",fontStyle:textItalic?"italic":"normal",textAlign,color:"rgb(var(--text-body))",fontFamily:"Inter,sans-serif",padding:"6px 10px",minWidth:140,resize:"none",overflow:"hidden",caretColor:"#8b5cf6",boxShadow:"0 2px 12px rgba(139,92,246,0.2)",lineHeight:1.4}}
                 placeholder="Type here…"
               />
             </div>
@@ -1423,7 +1590,7 @@ export default function SignalFlowPage() {
               <input autoFocus value={editDeviceName} onChange={e=>setEditDeviceName(e.target.value)}
                 onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
                 style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
               />
             </label>
             {/* Make / Model */}
@@ -1433,7 +1600,7 @@ export default function SignalFlowPage() {
                 <input value={editDeviceMfr} onChange={e=>setEditDeviceMfr(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
                   style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                  onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                  onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
                 />
               </label>
               <label style={{flex:1,display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>
@@ -1441,7 +1608,7 @@ export default function SignalFlowPage() {
                 <input value={editDeviceModel} onChange={e=>setEditDeviceModel(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
                   style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                  onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                  onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
                 />
               </label>
             </div>
@@ -1468,7 +1635,7 @@ export default function SignalFlowPage() {
                       <input value={port.label} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,label:e.target.value}:p))}
                         placeholder="Label"
                         style={{flex:1,padding:"3px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                        onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
                       />
                       <button onClick={()=>setEditDevicePorts(prev=>prev.filter((p:any)=>p.id!==port.id))}
                         style={{background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",padding:"2px 5px",fontSize:15,lineHeight:1,flexShrink:0}}
@@ -1478,7 +1645,7 @@ export default function SignalFlowPage() {
                   <button
                     onClick={()=>setEditDevicePorts(prev=>[...prev,{id:`new-${Date.now()}-${Math.random()}`,side:"left",signal:"hdmi",dir:"in",label:""}])}
                     style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,width:"100%",padding:"4px 0",marginTop:2,background:"none",border:"1px dashed rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-subtle))",fontSize:11,cursor:"pointer"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
                     + Add Left Port
                   </button>
                 </div>
@@ -1502,7 +1669,7 @@ export default function SignalFlowPage() {
                       <input value={port.label} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,label:e.target.value}:p))}
                         placeholder="Label"
                         style={{flex:1,padding:"3px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
+                        onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
                       />
                       <button onClick={()=>setEditDevicePorts(prev=>prev.filter((p:any)=>p.id!==port.id))}
                         style={{background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",padding:"2px 5px",fontSize:15,lineHeight:1,flexShrink:0}}
@@ -1512,7 +1679,7 @@ export default function SignalFlowPage() {
                   <button
                     onClick={()=>setEditDevicePorts(prev=>[...prev,{id:`new-${Date.now()}-${Math.random()}`,side:"right",signal:"hdmi",dir:"out",label:""}])}
                     style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,width:"100%",padding:"4px 0",marginTop:2,background:"none",border:"1px dashed rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-subtle))",fontSize:11,cursor:"pointer"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#3b82f6";e.currentTarget.style.color="#3b82f6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
                     + Add Right Port
                   </button>
                 </div>
@@ -1532,7 +1699,7 @@ export default function SignalFlowPage() {
                 setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,w:0,h:0}):d));
                 setEditingDevice(null);
               }}
-              style={{padding:"8px 18px",background:editDeviceName.trim()?"#3b82f6":"rgb(var(--forge-surface))",border:"1px solid "+(editDeviceName.trim()?"#3b82f6":"rgb(var(--border))"),borderRadius:6,color:editDeviceName.trim()?"#fff":"rgb(var(--text-subtle))",fontSize:12,cursor:editDeviceName.trim()?"pointer":"not-allowed",fontWeight:600,transition:"all 0.15s"}}>
+              style={{padding:"8px 18px",background:editDeviceName.trim()?"#8b5cf6":"rgb(var(--forge-surface))",border:"1px solid "+(editDeviceName.trim()?"#8b5cf6":"rgb(var(--border))"),borderRadius:6,color:editDeviceName.trim()?"#fff":"rgb(var(--text-subtle))",fontSize:12,cursor:editDeviceName.trim()?"pointer":"not-allowed",fontWeight:600,transition:"all 0.15s"}}>
               Save
             </button>
           </div>
@@ -1585,13 +1752,13 @@ export default function SignalFlowPage() {
                 const isSel = modalSelected===item;
                 return (
                   <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
-                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(59,130,246,0.1)":"transparent",transition:"background 0.1s"}}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(139,92,246,0.1)":"transparent",transition:"background 0.1s"}}
                     onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
                     <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.mfr||"Generic"} {item.model&&item.model!=="N/A"?item.model:item.type}</div>
                     </div>
-                    {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+                    {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                   </div>
                 );
               })}
@@ -1636,7 +1803,7 @@ export default function SignalFlowPage() {
                 }
                 setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");
               }}
-              style={{padding:"8px 18px",background:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--forge-surface))":"#3b82f6",border:"1px solid "+((!modalSelected&&!modalDeviceName.trim())?"rgb(var(--border))":"#3b82f6"),borderRadius:6,color:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--text-subtle))":"#fff",fontSize:12,cursor:(!modalSelected&&!modalDeviceName.trim())?"not-allowed":"pointer",fontWeight:600,transition:"all 0.15s"}}>
+              style={{padding:"8px 18px",background:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--forge-surface))":"#8b5cf6",border:"1px solid "+((!modalSelected&&!modalDeviceName.trim())?"rgb(var(--border))":"#8b5cf6"),borderRadius:6,color:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--text-subtle))":"#fff",fontSize:12,cursor:(!modalSelected&&!modalDeviceName.trim())?"not-allowed":"pointer",fontWeight:600,transition:"all 0.15s"}}>
               + Add
             </button>
           </div>

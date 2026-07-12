@@ -72,7 +72,7 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
   return (
     <div>
       {/* Top header */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4" style={{flexShrink:0,position:"sticky",top:0,zIndex:20}}>
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8" style={{flexShrink:0,position:"sticky",top:0,zIndex:20}}>
         <div className="flex items-center justify-between">
           <div>
             {projectId && (
@@ -101,9 +101,9 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
       </div>
 
       {/* Body: sidebar + content */}
-      <div className="flex" style={{ minHeight: "calc(100vh - 72px - 85px)" }}>
+      <div className="flex flex-col lg:flex-row" style={{ minHeight: "calc(100vh - 72px - 85px)" }}>
       {/* Left sidebar */}
-      <aside className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-r border-border bg-forge-panel/30 px-4 py-5">
+      <aside className="flex w-full shrink-0 flex-col overflow-y-auto border-b border-border bg-forge-panel/30 px-4 py-5 lg:max-h-none lg:w-[300px] lg:border-b-0 lg:border-r max-h-[40vh]">
         <div className="mb-3 px-2">
           <span className="text-xs font-semibold uppercase tracking-widest text-faint">Rooms</span>
         </div>

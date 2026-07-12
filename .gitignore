@@ -42,3 +42,6 @@ next-env.d.ts
 
 # Deploy logs
 deploy.log
+
+# AI knowledge-base source PDFs (ingested into Supabase, not committed)
+/data

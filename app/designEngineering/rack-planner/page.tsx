@@ -9,7 +9,7 @@ export default function RackPlannerPage() {
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
   const defaultItems = [
     {name:"Patch Panel",ru:1,color:"rgb(var(--text-subtle))"},
-    {name:"NETGEAR M4250-48G4X PoE+",ru:1,color:"#3b82f6"},
+    {name:"NETGEAR M4250-48G4X PoE+",ru:1,color:"#8b5cf6"},
     {name:"Q-SYS Core 110f",ru:1,color:"#8b5cf6"},
     {name:"Extron DTP3 CrossPoint 642",ru:2,color:"#0e7a3a"},
     {name:"Biamp TesiraFORTÉ AVB",ru:1,color:"#10b981"},
@@ -68,6 +68,77 @@ export default function RackPlannerPage() {
   const ruH = 18;
   const rackW = 340;
 
+  // Marquee multi-select on the rack elevation (AutoCAD-style):
+  // L→R drag = window (rows fully inside), R→L = crossing (rows touched)
+  const [selectedIdxs, setSelectedIdxs] = useState<Set<number>>(new Set());
+  const [marquee, setMarquee] = useState<{sx:number;sy:number;cx:number;cy:number}|null>(null);
+  const rackRef = useRef<HTMLDivElement>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const didMarqueeDrag = useRef(false);
+
+  const startRackMarquee = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const el = rackRef.current; if (!el) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    let cur = start;
+    didMarqueeDrag.current = false;
+    setMarquee({ sx: start.x, sy: start.y, cx: start.x, cy: start.y });
+    const onMove = (me: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      cur = { x: me.clientX - r.left, y: me.clientY - r.top };
+      setMarquee({ sx: start.x, sy: start.y, cx: cur.x, cy: cur.y });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (Math.abs(cur.x - start.x) > 4 || Math.abs(cur.y - start.y) > 4) {
+        didMarqueeDrag.current = true;
+        const isWindow = cur.x >= start.x;
+        const x1 = Math.min(start.x, cur.x), x2 = Math.max(start.x, cur.x);
+        const y1 = Math.min(start.y, cur.y), y2 = Math.max(start.y, cur.y);
+        const width = el.clientWidth;
+        const hits = new Set<number>();
+        let top = 0;
+        itemsRef.current.forEach((item, i) => {
+          const h = item.ru * ruH;
+          const xOverlap = !(width < x1 || 0 > x2);
+          const hit = isWindow
+            ? xOverlap && top >= y1 && top + h <= y2   // window: row fully inside vertically
+            : xOverlap && !(top + h < y1 || top > y2); // crossing: row touched
+          if (hit) hits.add(i);
+          top += h + 1;
+        });
+        setSelectedIdxs(hits);
+        setEditingIdx(null);
+      } else {
+        setSelectedIdxs(new Set());
+      }
+      setMarquee(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  // Delete / Backspace removes marquee-selected devices; Escape clears the selection
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Escape") { setSelectedIdxs(new Set()); return; }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (selectedIdxs.size === 0) return;
+      e.preventDefault();
+      setItems(prev => prev.filter((_, i) => !selectedIdxs.has(i)));
+      setSelectedIdxs(new Set());
+      setEditingIdx(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIdxs]);
+
   return (
     <div className="animate-fade-in flex" style={{minHeight:"calc(100vh - 157px)"}}>
       {/* Main content */}
@@ -78,19 +149,19 @@ export default function RackPlannerPage() {
       <h2 className="mb-0.5 text-lg font-semibold text-heading">Rack Builder</h2>
       <p className="mb-5 text-[13px] text-subtle">Visual 42U rack elevation builder</p>
 
-      <div style={{display:"flex",gap:20}}>
+      <div className="flex flex-col gap-5 lg:flex-row">
         {/* Left: Device Editor Panel */}
-        <div style={{width:260,flexShrink:0}}>
+        <div className="w-full shrink-0 lg:w-[260px]">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div style={{fontSize:12,color:"rgb(var(--text-muted))"}}>
-              <span style={{color:totalRU>maxRU?"#f87171":"#3b82f6",fontWeight:700,fontFamily:"'JetBrains Mono', monospace",fontSize:16}}>{totalRU}</span>
+              <span style={{color:totalRU>maxRU?"#f87171":"#8b5cf6",fontWeight:700,fontFamily:"'JetBrains Mono', monospace",fontSize:16}}>{totalRU}</span>
               <span style={{fontSize:11}}>/{maxRU} RU</span>
             </div>
-            <button onClick={()=>setItems([...items,{name:"New Device",ru:1,color:rackColors[items.length%rackColors.length]}])} style={{background:"rgba(59,130,246,0.1)",border:"1px dashed rgba(59,130,246,0.4)",borderRadius:6,padding:"5px 12px",color:"#3b82f6",fontSize:10,cursor:"pointer"}}>+ Add Device</button>
+            <button onClick={()=>setItems([...items,{name:"New Device",ru:1,color:rackColors[items.length%rackColors.length]}])} style={{background:"rgba(139,92,246,0.1)",border:"1px dashed rgba(139,92,246,0.4)",borderRadius:6,padding:"5px 12px",color:"#8b5cf6",fontSize:10,cursor:"pointer"}}>+ Add Device</button>
           </div>
           <div style={{maxHeight:500,overflowY:"auto",paddingRight:4}}>
             {items.map((item,i)=>(
-              <div key={i} style={{padding:"8px 10px",marginBottom:4,background:editingIdx===i?"rgba(59,130,246,0.08)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(editingIdx===i?"rgba(59,130,246,0.3)":"rgb(var(--border))"),borderRadius:6,borderLeft:"3px solid "+item.color,cursor:"pointer"}} onClick={()=>setEditingIdx(editingIdx===i?null:i)}>
+              <div key={i} style={{padding:"8px 10px",marginBottom:4,background:editingIdx===i?"rgba(139,92,246,0.08)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(editingIdx===i?"rgba(139,92,246,0.3)":"rgb(var(--border))"),borderRadius:6,borderLeft:"3px solid "+item.color,cursor:"pointer"}} onClick={()=>setEditingIdx(editingIdx===i?null:i)}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <div style={{fontSize:11,color:"rgb(var(--text-body))",fontWeight:500,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
                   <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
@@ -112,8 +183,8 @@ export default function RackPlannerPage() {
                       </div>
                     </div>
                     <div style={{display:"flex",gap:4}}>
-                      <button disabled={i===0} onClick={(e)=>{e.stopPropagation();const n=[...items];[n[i-1],n[i]]=[n[i],n[i-1]];setItems(n);setEditingIdx(i-1);}} style={{flex:1,padding:"3px",background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:3,color:i===0?"rgb(var(--text-faint))":"#3b82f6",fontSize:9,cursor:i===0?"default":"pointer"}}>▲ Move Up</button>
-                      <button disabled={i===items.length-1} onClick={(e)=>{e.stopPropagation();const n=[...items];[n[i],n[i+1]]=[n[i+1],n[i]];setItems(n);setEditingIdx(i+1);}} style={{flex:1,padding:"3px",background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:3,color:i===items.length-1?"rgb(var(--text-faint))":"#3b82f6",fontSize:9,cursor:i===items.length-1?"default":"pointer"}}>▼ Move Down</button>
+                      <button disabled={i===0} onClick={(e)=>{e.stopPropagation();const n=[...items];[n[i-1],n[i]]=[n[i],n[i-1]];setItems(n);setEditingIdx(i-1);}} style={{flex:1,padding:"3px",background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.2)",borderRadius:3,color:i===0?"rgb(var(--text-faint))":"#8b5cf6",fontSize:9,cursor:i===0?"default":"pointer"}}>▲ Move Up</button>
+                      <button disabled={i===items.length-1} onClick={(e)=>{e.stopPropagation();const n=[...items];[n[i],n[i+1]]=[n[i+1],n[i]];setItems(n);setEditingIdx(i+1);}} style={{flex:1,padding:"3px",background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.2)",borderRadius:3,color:i===items.length-1?"rgb(var(--text-faint))":"#8b5cf6",fontSize:9,cursor:i===items.length-1?"default":"pointer"}}>▼ Move Down</button>
                     </div>
                   </div>
                 )}
@@ -123,7 +194,7 @@ export default function RackPlannerPage() {
         </div>
 
         {/* Right: Rack Visualization */}
-        <div style={{flex:1,display:"flex",justifyContent:"center"}}>
+        <div className="flex flex-1 justify-center overflow-x-auto">
           <div style={{position:"relative"}}>
             {/* Rack frame */}
             <div style={{width:rackW+60,background:"rgb(var(--forge-surface))",borderRadius:6,border:"2px solid rgb(var(--border))",padding:"6px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.15),inset 0 0 30px rgba(0,0,0,0.05)"}}>
@@ -131,14 +202,14 @@ export default function RackPlannerPage() {
               <div style={{height:8,margin:"0 8px 4px",background:"linear-gradient(180deg,rgb(var(--border)),rgb(var(--forge-surface)))",borderRadius:"3px 3px 0 0",border:"1px solid rgb(var(--border))"}} />
 
               {/* Rack units container */}
-              <div style={{position:"relative",margin:"0 8px"}}>
+              <div ref={rackRef} onMouseDown={startRackMarquee} style={{position:"relative",margin:"0 8px",userSelect:"none",cursor:marquee?"crosshair":"default"}}>
                 {(()=>{
                   let y = 0;
                   const elements: React.ReactNode[] = [];
                   items.forEach((item,i) => {
                     const h = item.ru * ruH;
                     elements.push(
-                      <div key={"item-"+i} style={{display:"flex",alignItems:"stretch",height:h,marginBottom:1}}>
+                      <div key={"item-"+i} style={{display:"flex",alignItems:"stretch",height:h,marginBottom:1,outline:selectedIdxs.has(i)?"2px solid #8b5cf6":undefined,outlineOffset:-1,position:"relative",zIndex:selectedIdxs.has(i)?1:undefined}}>
                         {/* Left rail with RU numbers */}
                         <div style={{width:26,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",background:"rgb(var(--forge-panel))",borderLeft:"2px solid rgb(var(--border))",borderRight:"1px solid rgb(var(--border))"}}>
                           {Array.from({length:item.ru},(_,r)=>(
@@ -147,7 +218,7 @@ export default function RackPlannerPage() {
                         </div>
 
                         {/* Device faceplate */}
-                        <div onClick={()=>setEditingIdx(editingIdx===i?null:i)} style={{flex:1,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:"none",borderRight:"none",display:"flex",alignItems:"center",padding:"0 12px",gap:8,cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.15s",outline:editingIdx===i?"1px solid "+item.color+"88":"none"}}>
+                        <div onClick={()=>{if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}setEditingIdx(editingIdx===i?null:i);}} style={{flex:1,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:"none",borderRight:"none",display:"flex",alignItems:"center",padding:"0 12px",gap:8,cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.15s",outline:editingIdx===i?"1px solid "+item.color+"88":"none"}}>
                           {/* Left mounting screws */}
                           <div style={{display:"flex",flexDirection:"column",gap:Math.max(4,h-14),position:"absolute",left:4,top:"50%",transform:"translateY(-50%)"}}>
                             <div style={{width:5,height:5,borderRadius:5,background:"rgb(var(--text-faint))",border:"1px solid rgb(var(--text-subtle))"}} />
@@ -207,6 +278,19 @@ export default function RackPlannerPage() {
                     );
                   }
                   return elements;
+                })()}
+                {/* Marquee rectangle — blue solid = window, green dashed = crossing */}
+                {marquee && (()=>{
+                  const isWindow = marquee.cx >= marquee.sx;
+                  const x = Math.min(marquee.sx, marquee.cx);
+                  const y = Math.min(marquee.sy, marquee.cy);
+                  const w = Math.abs(marquee.cx - marquee.sx);
+                  const h = Math.abs(marquee.cy - marquee.sy);
+                  return (
+                    <div style={{position:"absolute",left:x,top:y,width:w,height:h,zIndex:5,pointerEvents:"none",
+                      background:isWindow?"rgba(139,92,246,0.07)":"rgba(34,197,94,0.07)",
+                      border:`1px ${isWindow?"solid #8b5cf6":"dashed #22c55e"}`}} />
+                  );
                 })()}
               </div>
 

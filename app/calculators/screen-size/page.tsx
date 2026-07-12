@@ -152,14 +152,14 @@ export default function ScreenSizePage() {
               <button key={i} onClick={() => { setArW(p.w); setArH(p.h); clearAll(); }}
                 className="rounded-md px-3 py-2 text-left transition-colors"
                 style={{
-                  background: active ? 'rgba(59,130,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)',
-                  border: '1px solid ' + (active ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'),
+                  background: active ? 'rgba(139,92,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)',
+                  border: '1px solid ' + (active ? 'rgba(139,92,246,0.4)' : 'rgb(var(--border))'),
                   minWidth: 120,
                 }}>
-                <div className="text-[12px] font-semibold" style={{ color: active ? '#60a5fa' : 'rgb(var(--text-body))' }}>{p.name}</div>
+                <div className="text-[12px] font-semibold" style={{ color: active ? '#a78bfa' : 'rgb(var(--text-body))' }}>{p.name}</div>
                 <div className="mt-0.5 flex items-center gap-1.5">
                   {p.res && <span className="text-[10px]" style={{ color: 'rgb(var(--text-subtle))' }}>{p.res}</span>}
-                  <span className="text-[10px] font-mono" style={{ color: active ? '#60a5fa' : 'rgb(var(--text-faint))' }}>[{p.ratio}]</span>
+                  <span className="text-[10px] font-mono" style={{ color: active ? '#a78bfa' : 'rgb(var(--text-faint))' }}>[{p.ratio}]</span>
                 </div>
               </button>
             );
@@ -183,24 +183,28 @@ export default function ScreenSizePage() {
             if (row.dim.cm) return row.calc(row.dim.cm, 'cm');
           };
           return (
-            <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '24px 76px 1fr 1fr 1fr 100px', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-              <span className="text-subtle" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{row.icon}</span>
-              <span className="text-[13px] font-medium text-body">{row.label}</span>
-              {(['cm', 'in', 'ft'] as Unit[]).map(unit => (
-                <div key={unit} style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    value={row.dim[unit]}
-                    onChange={e => row.setDim(prev => ({ ...prev, [unit]: e.target.value, last: unit }))}
-                    placeholder="—"
-                    style={inputSt}
-                  />
-                  <span style={unitLabel}>{unit}</span>
-                </div>
-              ))}
+            <div key={row.label} className="mb-2.5 flex flex-col gap-2 sm:grid sm:grid-cols-[24px_76px_1fr_1fr_1fr_100px] sm:items-center">
+              <div className="flex items-center gap-2 sm:contents">
+                <span className="flex items-center justify-center text-subtle">{row.icon}</span>
+                <span className="text-[13px] font-medium text-body">{row.label}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:contents">
+                {(['cm', 'in', 'ft'] as Unit[]).map(unit => (
+                  <div key={unit} style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      value={row.dim[unit]}
+                      onChange={e => row.setDim(prev => ({ ...prev, [unit]: e.target.value, last: unit }))}
+                      placeholder="—"
+                      style={inputSt}
+                    />
+                    <span style={unitLabel}>{unit}</span>
+                  </div>
+                ))}
+              </div>
               <button onClick={onCalc}
                 className="flex items-center justify-center gap-1.5 rounded-md text-[12px] font-semibold text-white transition-colors hover:bg-blue-600"
-                style={{ padding: '8px 10px', background: '#2563eb', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                style={{ padding: '8px 10px', background: '#7c3aed', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 <Calculator size={12} />
                 Calculate
               </button>

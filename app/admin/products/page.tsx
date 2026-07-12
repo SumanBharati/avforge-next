@@ -165,7 +165,7 @@ export default function AdminProductsPage() {
 
   const placeholder = [
     "Category,Type,Manufacturer,Model,Price,Color,Ports,Amp,Volt,Watts,BTU,RackMounted,RackUnits,WidthIn,HeightIn,DepthIn",
-    "Sources,Laptop,Generic,,0,#3b82f6,right:hdmi:out:HDMI|right:usb:out:USB,,,,,No,,,,,",
+    "Sources,Laptop,Generic,,0,#8b5cf6,right:hdmi:out:HDMI|right:usb:out:USB,,,,,No,,,,,",
     "Audio,QSC Core 110f,QSC,Core 110f,0,#22c55e,left:dante:in:Dante In|right:dante:out:Dante Out,1.5,120,180,614,Yes,1,19,1.75,16",
   ].join("\n");
 
@@ -199,7 +199,7 @@ export default function AdminProductsPage() {
           />
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={handleImport} disabled={importing}
-              style={{ padding: "8px 18px", background: "#2563eb", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", opacity: importing ? 0.6 : 1 }}>
+              style={{ padding: "8px 18px", background: "#7c3aed", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", opacity: importing ? 0.6 : 1 }}>
               {importing ? "Importing…" : "Import CSV"}
             </button>
             {importResult && <span style={{ fontSize: 12, color: importResult.startsWith("✓") ? "#4ade80" : "#f87171" }}>{importResult}</span>}
@@ -263,7 +263,7 @@ export default function AdminProductsPage() {
                       <td style={{ ...TD, textAlign: "right" }}>{fmt(p.power_watts, "W", 0)}</td>
                       <td style={{ ...TD, textAlign: "right" }}>{fmt(p.btu_hr, "", 0)}</td>
                       <td style={{ ...TD, fontFamily: "inherit" }}>
-                        <span style={{ padding: "2px 7px", borderRadius: 10, fontSize: 10, fontFamily: "inherit", background: p.rack_mounted ? "rgba(59,130,246,0.12)" : "rgba(100,116,139,0.1)", color: p.rack_mounted ? "#60a5fa" : "rgb(var(--text-subtle))" }}>
+                        <span style={{ padding: "2px 7px", borderRadius: 10, fontSize: 10, fontFamily: "inherit", background: p.rack_mounted ? "rgba(139,92,246,0.12)" : "rgba(100,116,139,0.1)", color: p.rack_mounted ? "#a78bfa" : "rgb(var(--text-subtle))" }}>
                           {p.rack_mounted ? "Yes" : "No"}
                         </span>
                       </td>

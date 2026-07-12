@@ -24,7 +24,7 @@ export default function PlatformComparisonPage() {
             <tr>
               {[
                 { label: "Feature",   color: "rgb(var(--text-muted))" },
-                { label: "Q-SYS",    color: "#93c5fd" },
+                { label: "Q-SYS",    color: "#c4b5fd" },
                 { label: "Crestron", color: "#fbbf24" },
                 { label: "Extron",   color: "#34d399" },
                 { label: "Biamp",    color: "#c084fc" },
@@ -39,7 +39,7 @@ export default function PlatformComparisonPage() {
             {PLATFORM_COMPARISONS.map((row, i) => (
               <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgb(var(--forge-surface) / 0.3)" }}>
                 <td style={{ padding: "9px 14px", color: "rgb(var(--text-body))", fontWeight: 500, borderBottom: "1px solid rgb(var(--border))" }}>{row.feature}</td>
-                <td style={{ padding: "9px 14px", color: "#93c5fd", borderBottom: "1px solid rgb(var(--border))" }}>{row.qsys}</td>
+                <td style={{ padding: "9px 14px", color: "#c4b5fd", borderBottom: "1px solid rgb(var(--border))" }}>{row.qsys}</td>
                 <td style={{ padding: "9px 14px", color: "#fbbf24", borderBottom: "1px solid rgb(var(--border))" }}>{row.crestron}</td>
                 <td style={{ padding: "9px 14px", color: "#34d399", borderBottom: "1px solid rgb(var(--border))" }}>{row.extron}</td>
                 <td style={{ padding: "9px 14px", color: "#c084fc", borderBottom: "1px solid rgb(var(--border))" }}>{row.biamp}</td>

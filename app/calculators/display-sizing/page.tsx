@@ -117,15 +117,15 @@ export default function DisplaySizingPage() {
 
   return (
     <CalcPageWrapper title="Display Sizing" desc="Image height and viewer distance calculator" subtitle="Note: Use Consistent Units Throughout">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+      <div className="flex flex-col items-stretch gap-6 xl:flex-row xl:gap-0">
 
         {/* ── Left column ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 xl:pr-8">
 
           {/* BASE PARAMETERS */}
           <div className="mb-5 rounded-xl border border-border bg-forge-surface/50 p-4">
             <SectionHeader icon={<TableProperties size={13} className="text-blue-400" />} title="Base Parameters" />
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">
                   Standard Eye Level
@@ -153,9 +153,9 @@ export default function DisplaySizingPage() {
                     <button key={i} onClick={() => setAspectRatio(p.val)}
                       className="rounded px-2 py-0.5 text-[10px] transition-colors"
                       style={{
-                        background: Math.abs(aspectRatio - p.val) < 0.01 ? 'rgba(59,130,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)',
-                        border: '1px solid ' + (Math.abs(aspectRatio - p.val) < 0.01 ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'),
-                        color: Math.abs(aspectRatio - p.val) < 0.01 ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                        background: Math.abs(aspectRatio - p.val) < 0.01 ? 'rgba(139,92,246,0.15)' : 'rgb(var(--forge-surface) / 0.5)',
+                        border: '1px solid ' + (Math.abs(aspectRatio - p.val) < 0.01 ? 'rgba(139,92,246,0.4)' : 'rgb(var(--border))'),
+                        color: Math.abs(aspectRatio - p.val) < 0.01 ? '#a78bfa' : 'rgb(var(--text-subtle))',
                       }}>
                       {p.label}
                     </button>
@@ -172,7 +172,7 @@ export default function DisplaySizingPage() {
               Choose a card based on what value you need to solve. All outputs use the same units as your inputs.
             </p>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
 
               {/* Card 1: Find Farthest Viewer */}
               <div className="flex flex-col gap-3 rounded-xl border border-border bg-forge-surface/50 p-3.5">
@@ -322,10 +322,10 @@ export default function DisplaySizingPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border xl:h-auto xl:w-px" />
 
         {/* ── Right column: AVIXA Reference ── */}
-        <div style={{ width: 675, flexShrink: 0, paddingLeft: 32 }}>
+        <div className="w-full shrink-0 xl:w-[675px] xl:pl-8">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
           <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="Reference" />
 

@@ -14,15 +14,15 @@ import HomePageSkeleton from "@/components/HomePageSkeleton";
 /* ── Pinned tools (calculators only) ───────────────────────── */
 const VideoWallIconSmall = () => (
   <svg width="16" height="16" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
-    <rect x="0"    y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="0"    y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="0"    y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="0"    y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="0"    y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="0"    y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
   </svg>
 );
 
@@ -158,20 +158,20 @@ export default function DashboardPage() {
   if (orgLoading || !loaded) return <HomePageSkeleton />;
 
   return (
-    <div className="animate-fade-in flex flex-col px-8 pt-6 pb-16" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="animate-fade-in flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 72px)" }}>
 
       {/* ── Info cards (full width) ────────────────── */}
-      <div className="mb-4 grid grid-cols-3 gap-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
 
           {/* Projects Card */}
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
               background: "#ffffff",
-              borderTop:    "1.5px solid #D6E3FA",
-              borderRight:  "1.5px solid #D6E3FA",
-              borderBottom: "1.5px solid #B8CEFA",
-              borderLeft:   "1.5px solid #B8CEFA",
-              boxShadow: "0 4px 24px rgba(40,105,243,0.08)",
+              borderTop:    "1.5px solid #e6def9",
+              borderRight:  "1.5px solid #e6def9",
+              borderBottom: "1.5px solid #d8ccf6",
+              borderLeft:   "1.5px solid #d8ccf6",
+              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
             }}
           >
             {/* Text content — above wave */}
@@ -184,12 +184,12 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>Projects</span>
                 {projectCount > 0 && (
-                  <span className="rounded-lg px-2 py-0.5 text-[12px] font-semibold" style={{ background: "#E5ECFA", color: "#2869F3" }}>
+                  <span className="rounded-lg px-2 py-0.5 text-[12px] font-semibold" style={{ background: "#ede9fe", color: "#7c3aed" }}>
                     {projectCount}
                   </span>
                 )}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto transition-opacity opacity-50 group-hover:opacity-100">
-                  <path d="M6 3L11 8L6 13" stroke="#2869F3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
               {recentProjects.length > 0 ? (
@@ -217,7 +217,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#EAF3FB" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
             {/* 3D Folder illustration */}
@@ -234,28 +234,28 @@ export default function DashboardPage() {
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
               background: "#ffffff",
-              borderTop:    "1.5px solid #D6E3FA",
-              borderRight:  "1.5px solid #D6E3FA",
-              borderBottom: "1.5px solid #B8CEFA",
-              borderLeft:   "1.5px solid #B8CEFA",
-              boxShadow: "0 4px 24px rgba(40,105,243,0.08)",
+              borderTop:    "1.5px solid #e6def9",
+              borderRight:  "1.5px solid #e6def9",
+              borderBottom: "1.5px solid #d8ccf6",
+              borderLeft:   "1.5px solid #d8ccf6",
+              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
             }}
           >
             {/* Text content — above wave */}
             <div className="relative z-10 flex flex-col">
               <Link href="/calculators" className="group mb-3 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#E5ECFA" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#ede9fe" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                    <rect x="4" y="4" width="16" height="16" rx="3" stroke="#4B76EC" strokeWidth="1.8" />
-                    <line x1="8" y1="9" x2="16" y2="9" stroke="#4B76EC" strokeWidth="1.2" opacity="0.7" />
-                    <circle cx="9"  cy="13" r="1" fill="#4B76EC" opacity="0.8" />
-                    <circle cx="12" cy="13" r="1" fill="#4B76EC" opacity="0.5" />
-                    <circle cx="15" cy="13" r="1" fill="#4B76EC" opacity="0.8" />
+                    <rect x="4" y="4" width="16" height="16" rx="3" stroke="#8b5cf6" strokeWidth="1.8" />
+                    <line x1="8" y1="9" x2="16" y2="9" stroke="#8b5cf6" strokeWidth="1.2" opacity="0.7" />
+                    <circle cx="9"  cy="13" r="1" fill="#8b5cf6" opacity="0.8" />
+                    <circle cx="12" cy="13" r="1" fill="#8b5cf6" opacity="0.5" />
+                    <circle cx="15" cy="13" r="1" fill="#8b5cf6" opacity="0.8" />
                   </svg>
                 </div>
                 <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>Calculators</span>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto opacity-50 transition-opacity group-hover:opacity-100">
-                  <path d="M6 3L11 8L6 13" stroke="#2869F3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
               {(() => {
@@ -288,7 +288,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#EAF3FB" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
             {/* 3D Calculator illustration */}
@@ -305,11 +305,11 @@ export default function DashboardPage() {
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
               background: "#ffffff",
-              borderTop:    "1.5px solid #D6E3FA",
-              borderRight:  "1.5px solid #D6E3FA",
-              borderBottom: "1.5px solid #B8CEFA",
-              borderLeft:   "1.5px solid #B8CEFA",
-              boxShadow: "0 4px 24px rgba(40,105,243,0.08)",
+              borderTop:    "1.5px solid #e6def9",
+              borderRight:  "1.5px solid #e6def9",
+              borderBottom: "1.5px solid #d8ccf6",
+              borderLeft:   "1.5px solid #d8ccf6",
+              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
             }}
           >
             {/* Text content — above wave */}
@@ -325,7 +325,7 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>AV News & Podcasts</span>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto opacity-50">
-                  <path d="M6 3L11 8L6 13" stroke="#2869F3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
               <p className="mb-2.5 text-[12px] font-medium" style={{ color: "#69728F" }}>Recently updated</p>
@@ -345,7 +345,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#EAF3FB" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
             {/* 3D News illustration */}
@@ -364,26 +364,26 @@ export default function DashboardPage() {
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/15">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="8" height="10" rx="1.5" stroke="#3b82f6" strokeWidth="1.8" />
-              <rect x="3" y="15" width="8" height="6" rx="1.5" stroke="#3b82f6" strokeWidth="1.8" />
-              <rect x="13" y="3" width="8" height="6" rx="1.5" stroke="#3b82f6" strokeWidth="1.8" />
-              <rect x="13" y="11" width="8" height="10" rx="1.5" stroke="#3b82f6" strokeWidth="1.8" />
+              <rect x="3" y="3" width="8" height="10" rx="1.5" stroke="#8b5cf6" strokeWidth="1.8" />
+              <rect x="3" y="15" width="8" height="6" rx="1.5" stroke="#8b5cf6" strokeWidth="1.8" />
+              <rect x="13" y="3" width="8" height="6" rx="1.5" stroke="#8b5cf6" strokeWidth="1.8" />
+              <rect x="13" y="11" width="8" height="10" rx="1.5" stroke="#8b5cf6" strokeWidth="1.8" />
             </svg>
           </div>
           <span className="text-[20px] font-bold tracking-tight text-heading">Dashboard</span>
         </div>
 
-        <div className="flex flex-1 min-h-0 gap-5">
+        <div className="flex flex-1 min-h-0 flex-col gap-5 xl:flex-row">
 
         {/* ── Project Dashboard ──────────────────────── */}
         <div className="flex flex-[3] min-w-0 flex-col p-4">
-          <div className="flex flex-1 gap-4 overflow-hidden">
+          <div className="flex flex-1 flex-col gap-4 overflow-hidden lg:flex-row">
             {/* Left: Pie Chart */}
             <div className="flex flex-1 min-w-0 flex-col">
               <div className="mb-3 flex items-center gap-2">
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                  <circle cx="8" cy="8" r="6" stroke="#3b82f6" strokeWidth="1.2" />
-                  <path d="M8 2a6 6 0 015.2 3L8 8V2z" fill="#3b82f6" opacity="0.35" />
+                  <circle cx="8" cy="8" r="6" stroke="#8b5cf6" strokeWidth="1.2" />
+                  <path d="M8 2a6 6 0 015.2 3L8 8V2z" fill="#8b5cf6" opacity="0.35" />
                 </svg>
                 <span className="text-[13px] font-semibold text-secondary">Projects by Stages</span>
               </div>
@@ -391,8 +391,8 @@ export default function DashboardPage() {
                 const total = stageCounts.reduce((s, d) => s + d.count, 0);
                 return (
                   <div className="flex w-full flex-1 flex-col items-center justify-center gap-4">
-                    <div className="flex w-full items-center justify-center gap-4">
-                      <svg viewBox="0 0 220 220" className="h-[280px] w-[280px]">
+                    <div className="flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
+                      <svg viewBox="0 0 220 220" className="h-[220px] w-[220px] sm:h-[280px] sm:w-[280px]">
                         {total > 0 ? (() => {
                           const cx = 110, cy = 110, r = 90;
                           const nonZero = stageCounts.filter(s => s.count > 0);
@@ -442,18 +442,18 @@ export default function DashboardPage() {
             </div>
 
             {/* Divider */}
-            <div className="w-px bg-border" />
+            <div className="h-px w-full bg-border lg:h-auto lg:w-px" />
 
             {/* Pipeline Overview */}
-            <div className="flex w-[230px] shrink-0 flex-col gap-3">
+            <div className="flex w-full shrink-0 flex-col gap-3 lg:w-[230px]">
               <div className="mb-1 flex items-center gap-2">
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 3h12L9 8.5V13l-2-1V8.5L2 3z" stroke="#3b82f6" strokeWidth="1.3" strokeLinejoin="round" />
+                  <path d="M2 3h12L9 8.5V13l-2-1V8.5L2 3z" stroke="#8b5cf6" strokeWidth="1.3" strokeLinejoin="round" />
                 </svg>
                 <span className="text-[13px] font-semibold text-secondary">Pipeline Overview</span>
               </div>
               {[
-                { label: "Total Pipeline", value: pipelineValues.total, color: "#3b82f6" },
+                { label: "Total Pipeline", value: pipelineValues.total, color: "#8b5cf6" },
                 { label: "In Proposal", value: pipelineValues.inProposal, color: "#10b981" },
                 { label: "In Execution", value: pipelineValues.inExecution, color: "#f59e0b" },
               ].map((card) => {
@@ -472,16 +472,16 @@ export default function DashboardPage() {
             </div>
 
             {/* Divider */}
-            <div className="w-px bg-border" />
+            <div className="h-px w-full bg-border lg:h-auto lg:w-px" />
 
             {/* Right: Team Activity */}
-            <div className="flex w-[280px] shrink-0 flex-col">
+            <div className="flex w-full shrink-0 flex-col lg:w-[280px]">
               <div className="mb-3 flex items-center gap-2">
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                  <circle cx="6" cy="5" r="3" stroke="#3b82f6" strokeWidth="1.2" />
-                  <path d="M1 14c0-2.8 2.2-4 5-4" stroke="#3b82f6" strokeWidth="1.2" strokeLinecap="round" />
-                  <circle cx="11" cy="5" r="2.5" stroke="#3b82f6" strokeWidth="1.2" />
-                  <path d="M15 13c0-2.2-1.8-3.5-4-3.5" stroke="#3b82f6" strokeWidth="1.2" strokeLinecap="round" />
+                  <circle cx="6" cy="5" r="3" stroke="#8b5cf6" strokeWidth="1.2" />
+                  <path d="M1 14c0-2.8 2.2-4 5-4" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
+                  <circle cx="11" cy="5" r="2.5" stroke="#8b5cf6" strokeWidth="1.2" />
+                  <path d="M15 13c0-2.2-1.8-3.5-4-3.5" stroke="#8b5cf6" strokeWidth="1.2" strokeLinecap="round" />
                 </svg>
                 <span className="text-[13px] font-semibold text-secondary">Team Activity</span>
               </div>
@@ -525,19 +525,19 @@ export default function DashboardPage() {
         </div>
 
         {/* Divider between Project Dashboard and Schedule Dashboard */}
-        <div className="w-px bg-border" />
+        <div className="h-px w-full bg-border xl:h-auto xl:w-px" />
 
         {/* ── Schedule Dashboard ─────────────────────── */}
         <div className="flex flex-[2] min-w-0 flex-col overflow-hidden p-4">
           <div className="mb-3 flex items-center gap-2">
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="#3b82f6" strokeWidth="1.3" />
-              <path d="M2 6h12" stroke="#3b82f6" strokeWidth="1.3" />
-              <path d="M6 2v2M10 2v2" stroke="#3b82f6" strokeWidth="1.3" strokeLinecap="round" />
+              <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="#8b5cf6" strokeWidth="1.3" />
+              <path d="M2 6h12" stroke="#8b5cf6" strokeWidth="1.3" />
+              <path d="M6 2v2M10 2v2" stroke="#8b5cf6" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
             <span className="text-[13px] font-semibold text-secondary">Schedule</span>
           </div>
-          <div className="flex-1 overflow-hidden rounded-lg border border-border">
+          <div className="min-h-[320px] flex-1 overflow-hidden rounded-lg border border-border">
             <PMStoreProvider>
               <Scheduler hideToolbar compact />
             </PMStoreProvider>
@@ -589,7 +589,7 @@ function NewProjectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-[440px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
         <div className="mb-6 flex items-center justify-between">

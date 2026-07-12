@@ -2,11 +2,11 @@ import Shimmer from "./Shimmer";
 
 const CARD_STYLE = {
   background: "#ffffff",
-  borderTop: "1.5px solid #D6E3FA",
-  borderRight: "1.5px solid #D6E3FA",
-  borderBottom: "1.5px solid #B8CEFA",
-  borderLeft: "1.5px solid #B8CEFA",
-  boxShadow: "0 4px 24px rgba(40,105,243,0.08)",
+  borderTop: "1.5px solid #e6def9",
+  borderRight: "1.5px solid #e6def9",
+  borderBottom: "1.5px solid #d8ccf6",
+  borderLeft: "1.5px solid #d8ccf6",
+  boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
 };
 
 const INFO_ROW_WIDTHS  = [72, 85, 55, 78, 62];

@@ -20,7 +20,7 @@ function SaveIndicator() {
 function TabBar() {
   const pathname = usePathname();
   return (
-    <div className="flex items-center justify-between border-b border-border bg-forge-panel px-8">
+    <div className="flex items-center justify-between gap-3 overflow-x-auto border-b border-border bg-forge-panel px-4 sm:px-6 lg:px-8">
       <nav className="flex items-center gap-1.5 py-2">
         {TABS.map((tab) => {
           const active = tab.exact ? pathname === tab.href : pathname.startsWith(tab.href);

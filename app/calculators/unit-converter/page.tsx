@@ -103,7 +103,7 @@ export default function UnitConverterPage() {
         {CATEGORIES.map(c => (
           <button key={c.name} onClick={() => handleCatChange(c.name)}
             className="rounded-md px-3.5 py-1.5 text-[11px] transition-colors"
-            style={{ fontWeight: activeCat === c.name ? 700 : 400, background: activeCat === c.name ? 'rgba(59,130,246,0.15)' : 'rgb(var(--forge-surface) / 0.4)', border: '1px solid ' + (activeCat === c.name ? 'rgba(59,130,246,0.4)' : 'rgb(var(--border))'), color: activeCat === c.name ? '#60a5fa' : 'rgb(var(--text-muted))' }}>
+            style={{ fontWeight: activeCat === c.name ? 700 : 400, background: activeCat === c.name ? 'rgba(139,92,246,0.15)' : 'rgb(var(--forge-surface) / 0.4)', border: '1px solid ' + (activeCat === c.name ? 'rgba(139,92,246,0.4)' : 'rgb(var(--border))'), color: activeCat === c.name ? '#a78bfa' : 'rgb(var(--text-muted))' }}>
             {c.name}
           </button>
         ))}

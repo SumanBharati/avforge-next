@@ -75,10 +75,10 @@ export default function SpeakerWirePage() {
       title="Speaker Wire Gauge"
       desc="NEC Article 640 / AVIXA CTS-D — determine minimum AWG for any speaker run"
     >
-      <div style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-0">
 
         {/* ── Inputs ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 lg:pr-8">
           <CalcSection title="System Type">
             <div className="mb-4 flex gap-2">
               {(['direct', '70v', '100v'] as SystemType[]).map(type => (
@@ -150,10 +150,10 @@ export default function SpeakerWirePage() {
         </div>
 
         {/* ── Divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0, alignSelf: 'stretch' }} />
+        <div className="h-px w-full shrink-0 self-stretch bg-border lg:h-auto lg:w-px" />
 
         {/* ── Results ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingLeft: 32 }}>
+        <div className="min-w-0 flex-1 lg:pl-8">
           <CalcSection title="Recommendation">
             {results.recommended ? (
               <div className="mb-3 rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-4">

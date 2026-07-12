@@ -53,7 +53,7 @@ export default function RFIManagementPage() {
   const deleteRFI = (idx: number) => { const n=rfiList.filter((_,i)=>i!==idx); setRfiList(n); if(activeRFI>=n.length) setActiveRFI(Math.max(0, n.length-1)); };
 
   const statusColors: Record<string,string> = {Open:"#f59e0b",Answered:"#22c55e",Closed:"rgb(var(--text-subtle))","Needs Followup":"#ef4444"};
-  const priorityColors: Record<string,string> = {Low:"rgb(var(--text-subtle))",Normal:"#3b82f6",High:"#f59e0b",Urgent:"#ef4444"};
+  const priorityColors: Record<string,string> = {Low:"rgb(var(--text-subtle))",Normal:"#8b5cf6",High:"#f59e0b",Urgent:"#ef4444"};
 
   const openCount = rfi?.items?.filter(i=>i.status==="Open").length ?? 0;
   const answeredCount = rfi?.items?.filter(i=>i.status==="Answered").length ?? 0;
@@ -138,7 +138,7 @@ export default function RFIManagementPage() {
       <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
         {rfiList.map((r,i)=>(
           <div key={r.id} style={{position:"relative",display:"inline-flex"}} className="group">
-            <button onClick={()=>setActiveRFI(i)} style={{padding:"6px 24px 6px 14px",borderRadius:6,fontSize:11,fontWeight:activeRFI===i?700:400,background:activeRFI===i?"rgba(59,130,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(activeRFI===i?"rgba(59,130,246,0.4)":"rgb(var(--border))"),color:activeRFI===i?"#60a5fa":"rgb(var(--text-muted))",cursor:"pointer"}}>
+            <button onClick={()=>setActiveRFI(i)} style={{padding:"6px 24px 6px 14px",borderRadius:6,fontSize:11,fontWeight:activeRFI===i?700:400,background:activeRFI===i?"rgba(139,92,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(activeRFI===i?"rgba(139,92,246,0.4)":"rgb(var(--border))"),color:activeRFI===i?"#a78bfa":"rgb(var(--text-muted))",cursor:"pointer"}}>
               {r.rfiNum}
             </button>
             {r.items.some(it=>it.status==="Open") && <span style={{position:"absolute",top:-3,left:-3,width:8,height:8,borderRadius:4,background:"#f59e0b",zIndex:1}}></span>}
@@ -156,7 +156,7 @@ export default function RFIManagementPage() {
         <button onClick={addRFI} style={{padding:"6px 14px",borderRadius:6,fontSize:11,background:"rgba(34,197,94,0.08)",border:"1px dashed rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>+ New RFI</button>
         {rfiList.length>0 && (
           <div style={{marginLeft:"auto",position:"relative"}}>
-            <button onClick={()=>setShowExportMenu(!showExportMenu)} style={{padding:"6px 14px",borderRadius:6,fontSize:11,background:"rgba(59,130,246,0.08)",border:"1px solid rgba(59,130,246,0.2)",color:"#60a5fa",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+            <button onClick={()=>setShowExportMenu(!showExportMenu)} style={{padding:"6px 14px",borderRadius:6,fontSize:11,background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.2)",color:"#a78bfa",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
               Export Report
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
             </button>
@@ -164,12 +164,12 @@ export default function RFIManagementPage() {
               <>
                 <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowExportMenu(false)} />
                 <div style={{position:"absolute",right:0,top:32,zIndex:50,width:170,background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:8,padding:4,boxShadow:"0 10px 40px rgba(0,0,0,0.5)"}}>
-                  <button onClick={()=>{exportPDF();setShowExportMenu(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",borderRadius:6,textAlign:"left"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                  <button onClick={()=>{exportPDF();setShowExportMenu(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",borderRadius:6,textAlign:"left"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(139,92,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="14" rx="2" stroke="#ef4444" strokeWidth="1.2"/><text x="8" y="11" textAnchor="middle" fontSize="6" fill="#ef4444" fontWeight="700">PDF</text></svg>
                     Export as PDF
                   </button>
-                  <button onClick={()=>{exportWord();setShowExportMenu(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",borderRadius:6,textAlign:"left"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(59,130,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="14" rx="2" stroke="#3b82f6" strokeWidth="1.2"/><text x="8" y="11" textAnchor="middle" fontSize="5" fill="#3b82f6" fontWeight="700">DOC</text></svg>
+                  <button onClick={()=>{exportWord();setShowExportMenu(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 12px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",borderRadius:6,textAlign:"left"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(139,92,246,0.1)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="14" rx="2" stroke="#8b5cf6" strokeWidth="1.2"/><text x="8" y="11" textAnchor="middle" fontSize="5" fill="#8b5cf6" fontWeight="700">DOC</text></svg>
                     Export as Word
                   </button>
                 </div>
@@ -200,9 +200,9 @@ export default function RFIManagementPage() {
           <div style={{fontSize:22,fontWeight:700,color:"#22c55e",fontFamily:"'JetBrains Mono', monospace"}}>{answeredCount}</div>
           <div style={{fontSize:9,color:"#22c55e",fontWeight:600,textTransform:"uppercase"}}>Answered</div>
         </div>
-        <div style={{flex:1,padding:10,borderRadius:8,background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",textAlign:"center"}}>
-          <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:"'JetBrains Mono', monospace"}}>{rfi.items.length}</div>
-          <div style={{fontSize:9,color:"#60a5fa",fontWeight:600,textTransform:"uppercase"}}>Total Items</div>
+        <div style={{flex:1,padding:10,borderRadius:8,background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)",textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:700,color:"#a78bfa",fontFamily:"'JetBrains Mono', monospace"}}>{rfi.items.length}</div>
+          <div style={{fontSize:9,color:"#a78bfa",fontWeight:600,textTransform:"uppercase"}}>Total Items</div>
         </div>
       </div>
 
@@ -216,12 +216,12 @@ export default function RFIManagementPage() {
       {/* RFI Items */}
       <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <h3 style={{fontSize:13,fontWeight:600,color:"rgb(var(--text-body))",margin:0}}>RFI Items</h3>
-        <button onClick={addItem} style={{padding:"6px 14px",background:"rgba(59,130,246,0.1)",border:"1px dashed #3b82f6",borderRadius:6,color:"#60a5fa",fontSize:11,cursor:"pointer"}}>+ Add Item</button>
+        <button onClick={addItem} style={{padding:"6px 14px",background:"rgba(139,92,246,0.1)",border:"1px dashed #8b5cf6",borderRadius:6,color:"#a78bfa",fontSize:11,cursor:"pointer"}}>+ Add Item</button>
       </div>
 
       {rfi.items.map((item,idx)=>{
         const stColor = statusColors[item.status]||"rgb(var(--text-subtle))";
-        const prColor = priorityColors[item.priority]||"#3b82f6";
+        const prColor = priorityColors[item.priority]||"#8b5cf6";
         return (
           <div key={idx} style={{padding:14,background:"rgb(var(--forge-surface) / 0.4)",borderRadius:8,border:"1px solid rgb(var(--border))",marginBottom:10,borderLeft:"3px solid "+stColor}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -255,7 +255,7 @@ export default function RFIManagementPage() {
 
       {/* Delete Confirmation Modal */}
       {deleteConfirm !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setDeleteConfirm(null)} />
           <div className="relative w-full max-w-[360px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">

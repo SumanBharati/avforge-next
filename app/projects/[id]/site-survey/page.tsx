@@ -473,7 +473,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
 
   if (!project) {
     return (
-      <div className="animate-fade-in px-8 py-6">
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
         <Link href="/projects" className="mb-4 inline-flex items-center gap-1.5 text-sm text-subtle hover:text-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           Back to Projects
@@ -499,7 +499,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
   return (
     <div className="animate-fade-in">
       {/* ── Top header ────────────────────────────────── */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
@@ -1420,7 +1420,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative flex max-h-[85vh] w-full max-w-[700px] flex-col overflow-hidden rounded-xl border border-border bg-forge-bg shadow-2xl">
         {/* Header */}

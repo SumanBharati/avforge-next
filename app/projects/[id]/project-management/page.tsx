@@ -98,9 +98,9 @@ const TEAM_ROLES = ["Project Manager", "Lead Engineer", "Design Engineer", "Prog
 const statusLabel = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const statusColor = (s: string) => {
   const map: Record<string, string> = {
-    not_started: "#94a3b8", in_progress: "#3b82f6", completed: "#22c55e", blocked: "#ef4444",
+    not_started: "#94a3b8", in_progress: "#8b5cf6", completed: "#22c55e", blocked: "#ef4444",
     open: "#f97316", resolved: "#22c55e", verified: "#06b6d4",
-    draft: "#94a3b8", submitted: "#3b82f6", approved: "#22c55e", rejected: "#ef4444",
+    draft: "#94a3b8", submitted: "#8b5cf6", approved: "#22c55e", rejected: "#ef4444",
     pending: "#f59e0b", approved_as_noted: "#eab308", resubmit: "#f97316",
     answered: "#22c55e", closed: "#94a3b8",
     low: "#94a3b8", medium: "#f59e0b", high: "#f97316", critical: "#ef4444",
@@ -254,7 +254,7 @@ export default function ProjectManagementPage({ params }: { params: { id: string
   /* ── Loading state ─────────────────────────────── */
   if (!project) {
     return (
-      <div className="animate-fade-in px-8 py-6">
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
         <Link href="/projects" className="mb-4 inline-flex items-center gap-1.5 text-sm text-subtle hover:text-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           Back to Projects
@@ -346,7 +346,7 @@ export default function ProjectManagementPage({ params }: { params: { id: string
           <MetricCard label="Task Progress" value={`${tasksPct}%`} sub={`${tasksDone} of ${tasksTotal} tasks`} />
           <MetricCard label="Milestones" value={`${milestonesDone}/${pm.milestones.length}`} sub={milestonesDone === pm.milestones.length && pm.milestones.length > 0 ? "All complete" : "In progress"} color="#22c55e" />
           <MetricCard label="Open Punch Items" value={punchOpen} sub={`${pm.punchList.length} total`} color={punchOpen > 0 ? "#f97316" : "#22c55e"} />
-          <MetricCard label="Budget" value={fmt$(totalActual)} sub={`of ${fmt$(totalBudgeted)} budgeted`} color={totalActual > totalBudgeted && totalBudgeted > 0 ? "#ef4444" : "#3b82f6"} />
+          <MetricCard label="Budget" value={fmt$(totalActual)} sub={`of ${fmt$(totalBudgeted)} budgeted`} color={totalActual > totalBudgeted && totalBudgeted > 0 ? "#ef4444" : "#8b5cf6"} />
         </div>
 
         {/* Schedule */}
@@ -520,7 +520,7 @@ export default function ProjectManagementPage({ params }: { params: { id: string
 
         {/* Summary cards */}
         <div className="mb-6 grid grid-cols-4 gap-3">
-          <MetricCard label="Total Budgeted" value={fmt$(totalBudgeted)} color="#3b82f6" />
+          <MetricCard label="Total Budgeted" value={fmt$(totalBudgeted)} color="#8b5cf6" />
           <MetricCard label="Committed" value={fmt$(totalCommitted)} color="#f59e0b" />
           <MetricCard label="Actual Spent" value={fmt$(totalActual)} color={totalActual > totalBudgeted && totalBudgeted > 0 ? "#ef4444" : "#22c55e"} />
           <MetricCard label="Remaining" value={fmt$(totalBudgeted - totalActual)} color={totalBudgeted - totalActual < 0 ? "#ef4444" : "#22c55e"} />
@@ -778,7 +778,7 @@ export default function ProjectManagementPage({ params }: { params: { id: string
   return (
     <div className="animate-fade-in">
       {/* ── Top header ────────────────────────────────── */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">

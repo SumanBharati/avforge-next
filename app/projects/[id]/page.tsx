@@ -174,7 +174,7 @@ const bottomRow = [
 
 const colorStyles: Record<string, { border: string; iconBg: string; iconBorder: string; iconText: string; accent: string }> = {
   cyan:    { border: "border-cyan-500/30",    iconBg: "bg-cyan-500/15",    iconBorder: "border-cyan-500/40",    iconText: "text-cyan-400",    accent: "#06b6d4" },
-  blue:    { border: "border-blue-500/30",    iconBg: "bg-blue-500/15",    iconBorder: "border-blue-500/40",    iconText: "text-blue-400",    accent: "#3b82f6" },
+  blue:    { border: "border-blue-500/30",    iconBg: "bg-blue-500/15",    iconBorder: "border-blue-500/40",    iconText: "text-blue-400",    accent: "#8b5cf6" },
   violet:  { border: "border-violet-500/30",  iconBg: "bg-violet-500/15",  iconBorder: "border-violet-500/40",  iconText: "text-violet-400",  accent: "#8b5cf6" },
   emerald: { border: "border-emerald-500/30", iconBg: "bg-emerald-500/15", iconBorder: "border-emerald-500/40", iconText: "text-emerald-400", accent: "#10b981" },
   amber:   { border: "border-amber-500/30",   iconBg: "bg-amber-500/15",   iconBorder: "border-amber-500/40",   iconText: "text-amber-400",   accent: "#f59e0b" },
@@ -186,7 +186,7 @@ const colorStyles: Record<string, { border: string; iconBg: string; iconBorder: 
 };
 
 const phases = [
-  { id: "opportunity",    label: "Opportunity",   color: "#3b82f6" },
+  { id: "opportunity",    label: "Opportunity",   color: "#8b5cf6" },
   { id: "proposal",       label: "Proposal",      color: "#10b981" },
   { id: "contract",       label: "Contract",      color: "#f59e0b" },
   { id: "installation",   label: "Execution",     color: "#8b5cf6" },
@@ -380,7 +380,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
   if (!project) {
     return (
-      <div className="animate-fade-in px-8 py-6">
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
         <Link href="/projects" className="mb-4 inline-flex items-center gap-1.5 text-sm text-subtle transition-colors hover:text-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -395,7 +395,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   const phaseIndex = phases.findIndex((p) => p.id === currentPhase);
 
   return (
-    <div className="animate-fade-in overflow-x-hidden px-10 py-4" style={{ height: "calc(100vh - 72px)", overflowY: "auto" }}>
+    <div className="animate-fade-in overflow-x-hidden px-4 py-4 sm:px-6 lg:px-10" style={{ height: "calc(100vh - 72px)", overflowY: "auto" }}>
       {/* Back link */}
       <Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-[13px] text-subtle transition-colors hover:text-secondary">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -448,7 +448,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
             )}
           </div>
         </div>
-        <div className="mt-2 flex items-center gap-5 text-[15px] text-subtle">
+        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[15px] text-subtle">
           {project.job_number && (
             <span className="flex items-center gap-2">
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
@@ -481,7 +481,8 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
               <span className="text-xs text-faint">Click to update the current Milestone</span>
             </div>
             {/* background matches inactive segment colour so clip-path notch gaps are invisible */}
-            <div className="flex w-full overflow-hidden" style={{ borderRadius: 9999, height: 40, background: "#e2e8f0" }}>
+            <div className="overflow-x-auto">
+            <div className="flex w-full overflow-hidden" style={{ borderRadius: 9999, height: 40, background: "#e2e8f0", minWidth: 560 }}>
               {mainPhases.map((phase, i) => {
                 const isActive = phase.id === currentPhase;
                 const isPast = i < mainIndex;
@@ -494,7 +495,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   ? `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, ${A}px 50%)`
                   : `polygon(0% 0%, calc(100% - ${A}px) 0%, 100% 50%, calc(100% - ${A}px) 100%, 0% 100%, ${A}px 50%)`;
 
-                const bg = isActive ? "#2563eb" : "#e2e8f0";
+                const bg = isActive ? "#7c3aed" : "#e2e8f0";
                 const color = isActive ? "#ffffff" : isPast ? "#6b7280" : "#9ca3af";
 
                 return (
@@ -536,6 +537,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   </button>
                 );
               })}
+            </div>
             </div>
           </div>
         );
@@ -580,7 +582,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           }
 
           return (
-            <div className="grid grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
               {allTools.map((tool) => (
                 <Card key={tool.id} tool={tool} />
               ))}
@@ -611,7 +613,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         const shippingTotal = equipmentTotal * ((proposalData?.taxRate || 0) / 100);
 
         const costSegments: { label: string; value: number; color: string }[] = [];
-        if (equipmentTotal > 0) costSegments.push({ label: "Equipment", value: equipmentTotal, color: "#3b82f6" });
+        if (equipmentTotal > 0) costSegments.push({ label: "Equipment", value: equipmentTotal, color: "#8b5cf6" });
         if (laborTotal > 0) costSegments.push({ label: "Labor", value: laborTotal, color: "#f97316" });
         if (shippingTotal > 0) costSegments.push({ label: "Shipping", value: shippingTotal, color: "#10b981" });
 
@@ -643,7 +645,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         const roomList = surveyRooms.length > 0 ? surveyRooms : sections;
 
         return (
-          <div className="mt-6 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-border bg-border">
+          <div className="mt-6 grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
             {/* Rooms */}
             <div className="bg-forge-panel p-5">
               <h3 className="mb-4 text-[13px] font-bold uppercase tracking-wider text-heading">Rooms</h3>
@@ -763,7 +765,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
       {/* ── Team Members ─────────────────────────────── */}
       <div className="mt-6 rounded-lg border border-border bg-forge-panel p-5">
         <h3 className="mb-4 text-[13px] font-bold uppercase tracking-wider text-heading">Team Members</h3>
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           {ROLE_OPTIONS.map((role) => {
             const assigned = projectMembers.find((m) => m.role === role);
             const isAssigning = assigningRole === role;
@@ -841,7 +843,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
       {/* Stage Change Confirmation Modal */}
       {phaseConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setPhaseConfirm(null)} />
           <div className="relative w-full max-w-[380px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <div className="mb-4">
@@ -861,7 +863,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
       {/* ── Edit Project Modal ─────────────────────────── */}
       {editProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditProjectModal(false)} />
           <div className="relative w-full max-w-[520px] rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
@@ -925,7 +927,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
       {/* ── Close Project Modal ────────────────────────── */}
       {closeProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setCloseProjectModal(false)} />
           <div className="relative w-full max-w-[380px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <h3 className="mb-2 text-[15px] font-semibold text-heading">Close Project</h3>
@@ -947,7 +949,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
 
       {/* ── Delete Project Modal ───────────────────────── */}
       {deleteProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setDeleteProjectModal(false)} />
           <div className="relative w-full max-w-[380px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">

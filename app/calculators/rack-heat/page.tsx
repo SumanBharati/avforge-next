@@ -27,10 +27,10 @@ export default function RackHeatPage() {
 
   return (
     <CalcPageWrapper title="Rack Heat Load" desc="BTU/hr thermal calculation for rack equipment">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
 
         {/* ── Left half: Inputs ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 lg:pr-8">
           <CalcSection title="Equipment">
             <div className="mb-1.5 grid grid-cols-[1fr_80px_30px] gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-faint">
               <span>Device Name</span><span className="text-center">Watts</span><span></span>
@@ -50,10 +50,10 @@ export default function RackHeatPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingLeft: 32 }}>
+        <div className="min-w-0 flex-1 lg:pl-8">
           <CalcSection title="Results">
             <div className="grid grid-cols-2 gap-2.5">
               <ResultCard label="Total Power" value={totalWatts.toLocaleString()} unit="W" accent />

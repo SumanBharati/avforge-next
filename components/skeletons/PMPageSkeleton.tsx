@@ -13,7 +13,7 @@ export default function PMPageSkeleton() {
   return (
     <div className="flex h-full flex-col">
       {/* Header bar */}
-      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <Shimmer className="h-6 w-28" />
           <Shimmer className="h-5 w-8 rounded-md" />

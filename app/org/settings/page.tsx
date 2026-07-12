@@ -192,7 +192,7 @@ export default function OrgSettingsPage() {
   }
 
   return (
-    <div className="animate-fade-in px-8 py-4">
+    <div className="animate-fade-in px-4 py-4 sm:px-6 lg:px-8">
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-heading">Organization Settings</h2>
         <p className="mt-0.5 text-sm text-muted">Manage your organization&apos;s details and members.</p>

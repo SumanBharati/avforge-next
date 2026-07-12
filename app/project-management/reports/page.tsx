@@ -29,7 +29,7 @@ export default function ReportsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-heading">Reports</h1>
           <div className="flex items-center gap-1 rounded-lg border border-border bg-forge-surface/60 p-0.5 text-xs">
@@ -64,7 +64,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-6">
+      <div className="flex-1 overflow-auto px-4 py-6 sm:px-6 lg:px-8">
         {tab === "utilization" && <UtilizationReport rangeStart={rangeStart} rangeEnd={rangeEnd} />}
         {tab === "budget" && <BudgetReport />}
         {tab === "forecast" && <ForecastReport rangeStart={rangeStart} rangeEnd={rangeEnd} />}
@@ -98,7 +98,7 @@ export default function ReportsPage() {
     return (
       <>
         <div className="mb-6 grid grid-cols-4 gap-3">
-          <Stat label="Avg utilization" value={`${avgUtilization.toFixed(0)}%`} color={avgUtilization > 100 ? "#ef4444" : "#3b82f6"} />
+          <Stat label="Avg utilization" value={`${avgUtilization.toFixed(0)}%`} color={avgUtilization > 100 ? "#ef4444" : "#8b5cf6"} />
           <Stat label="Scheduled" value={`${totalScheduled.toFixed(0)}h`} color="#8b5cf6" />
           <Stat label="Capacity" value={`${totalCapacity.toFixed(0)}h`} color="#64748b" />
           <Stat label="Logged (actual)" value={`${totalLogged.toFixed(0)}h`} color="#22c55e" />
@@ -199,7 +199,7 @@ export default function ReportsPage() {
           <Stat
             label="$ spent / budget"
             value={totalBudget$ > 0 ? `${((totalSpent$ / totalBudget$) * 100).toFixed(0)}%` : "—"}
-            color="#3b82f6"
+            color="#8b5cf6"
           />
         </div>
         <div className="overflow-hidden rounded-xl border border-border">
@@ -299,7 +299,7 @@ export default function ReportsPage() {
     return (
       <>
         <div className="mb-6 grid grid-cols-3 gap-3">
-          <Stat label="Weeks in range" value={`${weeks.length}`} color="#3b82f6" />
+          <Stat label="Weeks in range" value={`${weeks.length}`} color="#8b5cf6" />
           <Stat label="Team capacity / week" value={`${totalCapacity}h`} color="#64748b" />
           <Stat
             label="Avg load"
@@ -326,7 +326,7 @@ export default function ReportsPage() {
                         className="rounded-t"
                         style={{
                           height: `${pct}%`,
-                          backgroundColor: over ? "#ef4444" : "#3b82f6",
+                          backgroundColor: over ? "#ef4444" : "#8b5cf6",
                           opacity: 0.9,
                         }}
                       />
@@ -430,7 +430,7 @@ export default function ReportsPage() {
     return (
       <>
         <div className="mb-6 grid grid-cols-4 gap-3">
-          <Stat label="Total logged" value={`${totalLogged.toFixed(1)}h`} color="#3b82f6" />
+          <Stat label="Total logged" value={`${totalLogged.toFixed(1)}h`} color="#8b5cf6" />
           <Stat label="Billable" value={`${totalBillable.toFixed(1)}h`} color="#22c55e" />
           <Stat label="Non-billable" value={`${totalNonBillable.toFixed(1)}h`} color="#f59e0b" />
           <Stat label="Entries" value={`${entries.length}`} color="#64748b" />

@@ -60,7 +60,7 @@ export default function ProjectorLumensPage() {
 
   return (
     <CalcPageWrapper title="Projector Lumens Calculator" desc="Required brightness based on screen size and room conditions">
-      <div className="flex items-stretch gap-6">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left: Inputs ── */}
         <div className="min-w-0 flex-1">
@@ -78,9 +78,9 @@ export default function ProjectorLumensPage() {
                   <button key={key} onClick={() => setAspectRatio(key)}
                     className="rounded-lg px-2 py-2 text-center text-[12px] font-semibold transition-colors"
                     style={{
-                      border: `1px solid ${aspectRatio === key ? 'rgba(59,130,246,0.5)' : 'rgb(var(--border))'}`,
-                      background: aspectRatio === key ? 'rgba(59,130,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
-                      color: aspectRatio === key ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                      border: `1px solid ${aspectRatio === key ? 'rgba(139,92,246,0.5)' : 'rgb(var(--border))'}`,
+                      background: aspectRatio === key ? 'rgba(139,92,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
+                      color: aspectRatio === key ? '#a78bfa' : 'rgb(var(--text-subtle))',
                     }}>
                     {key}
                   </button>
@@ -100,7 +100,7 @@ export default function ProjectorLumensPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
         <div className="min-w-0 flex-1">

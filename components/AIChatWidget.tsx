@@ -16,7 +16,7 @@ export default function AIChatWidget() {
     <>
       {/* Chat Panel */}
       {open && (
-        <div className="fixed bottom-20 right-6 z-[1000] flex h-[520px] w-[400px] flex-col overflow-hidden rounded-2xl border border-border bg-forge-bg shadow-2xl shadow-[var(--shadow-color)]">
+        <div className="fixed bottom-20 right-3 z-[1000] flex h-[min(520px,calc(100dvh-120px))] w-[calc(100vw-24px)] max-w-[400px] flex-col overflow-hidden rounded-2xl border border-border bg-forge-bg shadow-2xl shadow-[var(--shadow-color)] sm:right-6">
           {/* Panel Header */}
           <div className="flex items-center justify-between border-b border-border bg-forge-panel px-[18px] py-3.5">
             <div className="flex items-center gap-2">

@@ -81,10 +81,10 @@ export default function LEDPitchPage() {
 
   return (
     <CalcPageWrapper title="LED Pixel Pitch" desc="Optimal pitch and resolution for LED walls">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
 
         {/* ── Left half: Inputs ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 lg:pr-8">
           <CalcSection title="Inputs">
             <TriUnitInput label="Viewing Distance" valueM={viewDistM} onChangeM={setViewDistM} />
             <TriUnitInput label="Wall Width" valueM={wallWM} onChangeM={setWallWM} />
@@ -93,10 +93,10 @@ export default function LEDPitchPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results + Formulas ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingLeft: 32 }}>
+        <div className="min-w-0 flex-1 lg:pl-8">
           <CalcSection title="Results">
             <div className="grid grid-cols-2 gap-2.5">
               <ResultCard label="Recommended Pitch" value={`P${bestPP}`} unit="mm" accent />

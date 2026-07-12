@@ -15,10 +15,10 @@ export default function PAGNAGPage() {
 
   return (
     <CalcPageWrapper title="PAG / NAG" desc="Potential and needed acoustic gain for microphone systems">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'stretch' }}>
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
 
         {/* ── Left half: Inputs ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+        <div className="min-w-0 flex-1 lg:pr-8">
           <CalcSection title="Distances">
             <InputField label="D1 — Source to Farthest Listener" value={d1} onChange={setD1} unit="ft" min={1} max={200} />
             <InputField label="D0 — Mic to Source" value={d0} onChange={setD0} unit="ft" min={0.5} max={50} step={0.5} />
@@ -28,10 +28,10 @@ export default function PAGNAGPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results ── */}
-        <div style={{ flex: 1, minWidth: 0, paddingLeft: 32 }}>
+        <div className="min-w-0 flex-1 lg:pl-8">
           <CalcSection title="Results">
             <div className="mb-2.5 grid grid-cols-2 gap-2.5">
               <ResultCard label="PAG" value={pag.toFixed(1)} unit="dB" accent />

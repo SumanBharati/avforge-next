@@ -3,7 +3,7 @@ import Shimmer from "@/components/Shimmer";
 export default function AuthPageSkeleton({ fields = 2 }: { fields?: number }) {
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden" style={{
-      background: "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(59,130,246,0.08) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.05) 0%, transparent 50%), linear-gradient(180deg, #ffffff 0%, #f8fafc 40%, #f1f5f9 100%)",
+      background: "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(139,92,246,0.08) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.05) 0%, transparent 50%), linear-gradient(180deg, #ffffff 0%, #f8fafc 40%, #f1f5f9 100%)",
     }}>
       {/* Header */}
       <header className="relative z-10 flex h-[72px] shrink-0 items-center px-8">

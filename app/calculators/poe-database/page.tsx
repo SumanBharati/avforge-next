@@ -106,7 +106,7 @@ export default function PoEDatabasePage() {
                 <td style={{ padding: "8px 12px", color: "rgb(var(--text-body))", fontWeight: 500, borderBottom: "1px solid rgb(var(--border))" }}>{d.name}</td>
                 <td style={{ padding: "8px 12px", color: "rgb(var(--text-muted))", borderBottom: "1px solid rgb(var(--border))" }}>{d.type}</td>
                 <td style={{ padding: "8px 12px", color: "#fbbf24", borderBottom: "1px solid rgb(var(--border))" }}>Class {d.poeClass}</td>
-                <td style={{ padding: "8px 12px", borderBottom: "1px solid rgb(var(--border))", fontFamily: "'JetBrains Mono', monospace", color: "#60a5fa" }}>{d.draw}W</td>
+                <td style={{ padding: "8px 12px", borderBottom: "1px solid rgb(var(--border))", fontFamily: "'JetBrains Mono', monospace", color: "#a78bfa" }}>{d.draw}W</td>
                 <td style={{ padding: "8px 12px", borderBottom: "1px solid rgb(var(--border))" }}>
                   <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600, background: stdColors[d.standard]?.bg, color: stdColors[d.standard]?.text }}>
                     {d.standard}

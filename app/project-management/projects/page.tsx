@@ -137,7 +137,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-heading">Projects</h1>
           <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">
@@ -171,7 +171,7 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
         {filtered.length === 0 ? (
           <div className="py-20 text-center">
             <p className="mb-3 text-sm text-faint">No projects yet</p>

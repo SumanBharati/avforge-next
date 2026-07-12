@@ -60,8 +60,8 @@ function MiniToggle({ value, onChange, options }: {
           <button key={key} onClick={() => onChange(key)}
             className="px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
             style={{
-              background: active ? 'rgba(59,130,246,0.15)' : 'transparent',
-              color: active ? '#60a5fa' : 'rgb(var(--text-subtle))',
+              background: active ? 'rgba(139,92,246,0.15)' : 'transparent',
+              color: active ? '#a78bfa' : 'rgb(var(--text-subtle))',
               borderRight: key !== options[options.length - 1].key ? '1px solid rgb(var(--border))' : undefined,
             }}>
             {label}
@@ -102,7 +102,7 @@ export default function ProjectorThrowPage() {
 
   return (
     <CalcPageWrapper title="Projector Throw Calculator" desc="Compute throw ratio, lens type, and image dimensions">
-      <div className="flex items-stretch gap-6">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left: Inputs ── */}
         <div className="min-w-0 flex-1">
@@ -120,9 +120,9 @@ export default function ProjectorThrowPage() {
                   <button key={key} onClick={() => setMode(key as 'dist' | 'ratio')}
                     className="rounded-lg px-3 py-2.5 text-left text-[12px] font-semibold transition-colors"
                     style={{
-                      border: `1px solid ${active ? 'rgba(59,130,246,0.5)' : 'rgb(var(--border))'}`,
-                      background: active ? 'rgba(59,130,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
-                      color: active ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                      border: `1px solid ${active ? 'rgba(139,92,246,0.5)' : 'rgb(var(--border))'}`,
+                      background: active ? 'rgba(139,92,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
+                      color: active ? '#a78bfa' : 'rgb(var(--text-subtle))',
                     }}>
                     {label}
                   </button>
@@ -176,9 +176,9 @@ export default function ProjectorThrowPage() {
                   <button key={key} onClick={() => setAspectRatio(key)}
                     className="rounded-lg px-2 py-2 text-center text-[12px] font-semibold transition-colors"
                     style={{
-                      border: `1px solid ${aspectRatio === key ? 'rgba(59,130,246,0.5)' : 'rgb(var(--border))'}`,
-                      background: aspectRatio === key ? 'rgba(59,130,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
-                      color: aspectRatio === key ? '#60a5fa' : 'rgb(var(--text-subtle))',
+                      border: `1px solid ${aspectRatio === key ? 'rgba(139,92,246,0.5)' : 'rgb(var(--border))'}`,
+                      background: aspectRatio === key ? 'rgba(139,92,246,0.08)' : 'rgb(var(--forge-surface) / 0.5)',
+                      color: aspectRatio === key ? '#a78bfa' : 'rgb(var(--text-subtle))',
                     }}>
                     {key}
                   </button>
@@ -189,7 +189,7 @@ export default function ProjectorThrowPage() {
         </div>
 
         {/* ── Vertical divider ── */}
-        <div style={{ width: 1, background: 'rgb(var(--border))', flexShrink: 0 }} />
+        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
         <div className="min-w-0 flex-1">

@@ -815,14 +815,14 @@ function AllocationModal({
               type="button"
               onClick={() => setShowPalette((v) => !v)}
               className="h-9 w-9 rounded-md border-2 border-border transition-transform hover:scale-110"
-              style={{ backgroundColor: form.color ?? proj?.color ?? person?.color ?? "#3b82f6" }}
+              style={{ backgroundColor: form.color ?? proj?.color ?? person?.color ?? "#8b5cf6" }}
               title="Pick colour"
             />
             {showPalette && (
               <div className="absolute bottom-11 left-0 z-30 w-[150px] rounded-xl border border-border bg-forge-bg p-2 shadow-xl">
                 <div className="grid grid-cols-4 gap-1.5">
                   {PALETTE.map((c) => {
-                    const active = (form.color ?? proj?.color ?? person?.color ?? "#3b82f6") === c;
+                    const active = (form.color ?? proj?.color ?? person?.color ?? "#8b5cf6") === c;
                     return (
                       <button
                         key={c}

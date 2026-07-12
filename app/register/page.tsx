@@ -97,8 +97,8 @@ export default function RegisterPage() {
       {/* Background */}
       <div className="pointer-events-none absolute inset-0" style={{
         background: theme === "dark"
-          ? "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(59,130,246,0.12) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.08) 0%, transparent 50%), radial-gradient(ellipse 50% 40% at 80% 20%, rgba(16,185,129,0.06) 0%, transparent 50%), linear-gradient(180deg, #080d17 0%, #0c1220 40%, #0f172a 100%)"
-          : "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(59,130,246,0.08) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.05) 0%, transparent 50%), radial-gradient(ellipse 50% 40% at 80% 20%, rgba(16,185,129,0.04) 0%, transparent 50%), linear-gradient(180deg, #ffffff 0%, #f8fafc 40%, #f1f5f9 100%)",
+          ? "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(139,92,246,0.12) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.08) 0%, transparent 50%), radial-gradient(ellipse 50% 40% at 80% 20%, rgba(16,185,129,0.06) 0%, transparent 50%), linear-gradient(180deg, #080d17 0%, #0c1220 40%, #0f172a 100%)"
+          : "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(139,92,246,0.08) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 20% 80%, rgba(139,92,246,0.05) 0%, transparent 50%), radial-gradient(ellipse 50% 40% at 80% 20%, rgba(16,185,129,0.04) 0%, transparent 50%), linear-gradient(180deg, #ffffff 0%, #f8fafc 40%, #f1f5f9 100%)",
       }} />
       {/* Grid pattern overlay */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.04]" style={{
@@ -107,16 +107,16 @@ export default function RegisterPage() {
       }} />
       {/* Circuit-style decorative lines */}
       <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.06]" xmlns="http://www.w3.org/2000/svg">
-        <line x1="20%" y1="0" x2="20%" y2="100%" stroke="#3b82f6" strokeWidth="0.5" />
-        <line x1="40%" y1="0" x2="40%" y2="100%" stroke="#3b82f6" strokeWidth="0.5" />
-        <line x1="60%" y1="0" x2="60%" y2="100%" stroke="#3b82f6" strokeWidth="0.5" />
-        <line x1="80%" y1="0" x2="80%" y2="100%" stroke="#3b82f6" strokeWidth="0.5" />
+        <line x1="20%" y1="0" x2="20%" y2="100%" stroke="#8b5cf6" strokeWidth="0.5" />
+        <line x1="40%" y1="0" x2="40%" y2="100%" stroke="#8b5cf6" strokeWidth="0.5" />
+        <line x1="60%" y1="0" x2="60%" y2="100%" stroke="#8b5cf6" strokeWidth="0.5" />
+        <line x1="80%" y1="0" x2="80%" y2="100%" stroke="#8b5cf6" strokeWidth="0.5" />
         <line x1="0" y1="30%" x2="100%" y2="30%" stroke="#8b5cf6" strokeWidth="0.5" />
         <line x1="0" y1="60%" x2="100%" y2="60%" stroke="#8b5cf6" strokeWidth="0.5" />
-        <circle cx="40%" cy="30%" r="4" fill="#3b82f6" opacity="0.3" />
+        <circle cx="40%" cy="30%" r="4" fill="#8b5cf6" opacity="0.3" />
         <circle cx="60%" cy="60%" r="4" fill="#8b5cf6" opacity="0.3" />
         <circle cx="20%" cy="60%" r="3" fill="#10b981" opacity="0.2" />
-        <circle cx="80%" cy="30%" r="3" fill="#3b82f6" opacity="0.2" />
+        <circle cx="80%" cy="30%" r="3" fill="#8b5cf6" opacity="0.2" />
       </svg>
 
       {/* Header */}
@@ -167,7 +167,7 @@ export default function RegisterPage() {
                 <div className="p-2 text-center">
                   <div className="mb-4 flex justify-center">
                     <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/30">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 7l10 7 10-7"/>
                       </svg>
                     </div>

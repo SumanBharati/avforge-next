@@ -3,7 +3,7 @@ import React from 'react';
 import { useBOM, BOMSource } from '@/lib/bom-context';
 
 const SOURCE_META: Record<BOMSource, { label: string; color: string }> = {
-  'signal-flow':    { label: 'SIG',  color: '#3b82f6' },
+  'signal-flow':    { label: 'SIG',  color: '#8b5cf6' },
   'room-designer':  { label: 'ROOM', color: '#22c55e' },
   'rack-builder':   { label: 'RACK', color: '#a855f7' },
 };
@@ -110,7 +110,7 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                           {item.mfr || '—'}
                         </td>
                         <td style={{ ...tdSt, textAlign: 'center' }}>
-                          <span style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6', padding: '2px 8px', borderRadius: 10, fontWeight: 600, fontSize: 11 }}>
+                          <span style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', padding: '2px 8px', borderRadius: 10, fontWeight: 600, fontSize: 11 }}>
                             {item.qty}
                           </span>
                         </td>
@@ -122,7 +122,7 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                             style={{ width: 60, padding: '3px 5px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 4, color: 'rgb(var(--text-body))', fontSize: 10, fontFamily: "'JetBrains Mono',monospace", textAlign: 'right', outline: 'none' }}
                           />
                         </td>
-                        <td style={{ ...tdSt, textAlign: 'right', paddingRight: 10, color: extPrice > 0 ? '#60a5fa' : '#475569', fontFamily: "'JetBrains Mono',monospace", fontWeight: 500 }}>
+                        <td style={{ ...tdSt, textAlign: 'right', paddingRight: 10, color: extPrice > 0 ? '#a78bfa' : '#475569', fontFamily: "'JetBrains Mono',monospace", fontWeight: 500 }}>
                           {extPrice > 0 ? '$' + extPrice.toLocaleString() : '—'}
                         </td>
                       </tr>
@@ -134,7 +134,7 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                     <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, color: 'rgb(var(--text-body))', fontSize: 11, borderTop: '2px solid rgb(var(--border))' }}>TOTAL</td>
                     <td style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 700, color: 'rgb(var(--text-body))', fontSize: 11, borderTop: '2px solid rgb(var(--border))' }}>{totalQty}</td>
                     <td style={{ borderTop: '2px solid rgb(var(--border))' }} />
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#3b82f6', fontFamily: "'JetBrains Mono',monospace", fontSize: 12, borderTop: '2px solid rgb(var(--border))' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#8b5cf6', fontFamily: "'JetBrains Mono',monospace", fontSize: 12, borderTop: '2px solid rgb(var(--border))' }}>
                       {'$' + totalCost.toLocaleString()}
                     </td>
                   </tr>

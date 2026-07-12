@@ -7,7 +7,7 @@ import { uid, type BoardMeta } from "@/lib/pm-store";
 import BoardPageSkeleton from "@/components/skeletons/BoardPageSkeleton";
 
 const BOARD_COLORS = [
-  "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444",
+  "#8b5cf6", "#8b5cf6", "#ec4899", "#ef4444",
   "#f97316", "#f59e0b", "#22c55e", "#14b8a6",
   "#06b6d4", "#6366f1",
 ];
@@ -49,11 +49,11 @@ export default function BoardsPage() {
   }
 
   return (
-    <div className="px-8 py-6">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <line x1="9" y1="3" x2="9" y2="21" />
             <line x1="15" y1="3" x2="15" y2="21" />

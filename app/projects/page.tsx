@@ -135,9 +135,9 @@ export default function ProjectsPage() {
   const hasProjects = projects.length > 0;
 
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       {/* ── Top bar ──────────────────────────────────── */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M2 4h5l1.5-2H14v12H2V4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
@@ -145,15 +145,15 @@ export default function ProjectsPage() {
           Projects
         </h2>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-1 items-center justify-end gap-3 sm:flex-none">
           {hasProjects && (
-            <div className="relative">
+            <div className="relative min-w-0 flex-1 sm:flex-none">
               <input
                 type="text"
                 placeholder="Search by name or job #..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="forge-input w-[260px] pr-9 text-[13px]"
+                className="forge-input w-full pr-9 text-[13px] sm:w-[260px]"
               />
               <svg
                 width="15"
@@ -179,7 +179,7 @@ export default function ProjectsPage() {
 
       {/* ── Filters ────────────────────────────────────── */}
       {hasProjects && (
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5 text-xs text-subtle">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <path d="M2 3h12L9 8.5V13l-2-1V8.5L2 3z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
@@ -209,10 +209,10 @@ export default function ProjectsPage() {
       {/* ── Projects table ───────────────────────────── */}
       <div className="overflow-visible rounded-lg border border-border">
         {hasProjects && (
-          <div className="grid grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] gap-4 border-b border-border bg-forge-surface/60 px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-secondary">
-            <span>Client Name</span>
+          <div className="grid grid-cols-[1fr_auto_40px] gap-3 border-b border-border bg-forge-surface/60 px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-secondary md:grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] md:gap-4 md:px-5">
+            <span className="hidden md:block">Client Name</span>
             <span>Project Name</span>
-            <span>Job Number</span>
+            <span className="hidden md:block">Job Number</span>
             <span>Stage</span>
             <span />
           </div>
@@ -316,7 +316,7 @@ function NewProjectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-[520px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
         <div className="mb-6 flex items-center justify-between">
@@ -433,11 +433,11 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
     <>
       <Link
         href={`/projects/${project.id}`}
-        className="grid grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] items-center gap-4 border-b border-border/50 px-5 py-3.5 transition-colors hover:bg-forge-surface/40"
+        className="grid grid-cols-[1fr_auto_40px] items-center gap-3 border-b border-border/50 px-4 py-3.5 transition-colors hover:bg-forge-surface/40 md:grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] md:gap-4 md:px-5"
       >
-        <div className="text-sm text-secondary">{project.client_name || <span className="text-xs text-faint">&mdash;</span>}</div>
+        <div className="hidden text-sm text-secondary md:block">{project.client_name || <span className="text-xs text-faint">&mdash;</span>}</div>
         <div><div className="text-sm font-semibold text-heading">{project.name}</div></div>
-        <div>
+        <div className="hidden md:block">
           {project.job_number ? (
             <span className="font-mono text-xs text-secondary">{project.job_number}</span>
           ) : (
@@ -477,7 +477,7 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
 
       {/* Close Project Modal */}
       {closeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setCloseModal(false)} />
           <div className="relative w-full max-w-[380px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <h3 className="mb-2 text-[15px] font-semibold text-heading">Close Project</h3>
@@ -507,7 +507,7 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
 
       {/* Delete Confirmation Modal */}
       {deleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setDeleteModal(false)} />
           <div className="relative w-full max-w-[380px] rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">

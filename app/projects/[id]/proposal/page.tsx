@@ -298,7 +298,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
   return (
     <div className="animate-fade-in">
       {/* Top header */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
@@ -546,7 +546,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
       </div>
       {/* Add Equipment Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowAddModal(false)} />
           <div className="relative w-full max-w-[680px] rounded-2xl border border-border bg-forge-bg shadow-2xl shadow-black/50">
             {/* Modal header */}

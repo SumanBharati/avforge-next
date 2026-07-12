@@ -58,10 +58,10 @@ export default function EDIDHDCPPage() {
         </div>
         <div style={{marginTop:12,fontSize:12,color:"rgb(var(--text-muted))",lineHeight:1.8}}>
           <div style={{fontWeight:600,color:"rgb(var(--text-body))",marginBottom:4}}>Key components of an EDID strategy:</div>
-          <div><strong style={{color:"#60a5fa"}}>EDID Management Tools</strong> — using hardware (matrix switchers, scalers, or EDID emulators) to customize EDID info</div>
-          <div><strong style={{color:"#60a5fa"}}>Predefined EDIDs</strong> — locking devices to specific profiles, preventing unexpected changes when devices are plugged/unplugged</div>
-          <div><strong style={{color:"#60a5fa"}}>EDID Passthrough</strong> — allowing the source to read EDID directly from the display — useful for simple setups</div>
-          <div><strong style={{color:"#60a5fa"}}>EDID Emulation</strong> — creating custom profiles for complex setups, ensuring compatibility across multiple displays</div>
+          <div><strong style={{color:"#a78bfa"}}>EDID Management Tools</strong> — using hardware (matrix switchers, scalers, or EDID emulators) to customize EDID info</div>
+          <div><strong style={{color:"#a78bfa"}}>Predefined EDIDs</strong> — locking devices to specific profiles, preventing unexpected changes when devices are plugged/unplugged</div>
+          <div><strong style={{color:"#a78bfa"}}>EDID Passthrough</strong> — allowing the source to read EDID directly from the display — useful for simple setups</div>
+          <div><strong style={{color:"#a78bfa"}}>EDID Emulation</strong> — creating custom profiles for complex setups, ensuring compatibility across multiple displays</div>
         </div>
       </div>
 
@@ -81,14 +81,14 @@ export default function EDIDHDCPPage() {
       {/* Signal Chain Table */}
       <div style={{marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <h3 style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-body))"}}>Signal Chain Planner</h3>
-        <button onClick={addRow} style={{padding:"6px 14px",background:"rgba(59,130,246,0.1)",border:"1px dashed #3b82f6",borderRadius:6,color:"#60a5fa",fontSize:11,cursor:"pointer"}}>+ Add Row</button>
+        <button onClick={addRow} style={{padding:"6px 14px",background:"rgba(139,92,246,0.1)",border:"1px dashed #8b5cf6",borderRadius:6,color:"#a78bfa",fontSize:11,cursor:"pointer"}}>+ Add Row</button>
       </div>
 
       <div style={{overflowX:"auto",borderRadius:8,border:"1px solid rgb(var(--border))"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:1200}}>
           <thead>
             <tr>
-              <th colSpan={2} style={{...thStyle,textAlign:"center",background:"rgba(59,130,246,0.08)",color:"#60a5fa",fontSize:10}}>Source</th>
+              <th colSpan={2} style={{...thStyle,textAlign:"center",background:"rgba(139,92,246,0.08)",color:"#a78bfa",fontSize:10}}>Source</th>
               <th colSpan={2} style={{...thStyle,textAlign:"center",background:"rgba(168,85,247,0.08)",color:"#a855f7",fontSize:10}}>Intermediary Devices</th>
               <th colSpan={2} style={{...thStyle,textAlign:"center",background:"rgba(251,191,36,0.08)",color:"#fbbf24",fontSize:10}}>Settings</th>
               <th colSpan={6} style={{...thStyle,textAlign:"center",background:"rgba(34,197,94,0.08)",color:"#22c55e",fontSize:10}}>Destination</th>
@@ -155,7 +155,7 @@ export default function EDIDHDCPPage() {
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                   <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:12,fontSize:10,fontWeight:600,background:hdcp.color+"18",border:"1px solid "+hdcp.color+"33",color:hdcp.color}} title={hdcp.tip}>{row.hdcp==="On"?"✓":"⚠"} {hdcp.text}</span>
                   <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:12,fontSize:10,fontWeight:600,background:res.color+"18",border:"1px solid "+res.color+"33",color:res.color}} title={res.tip}>{res.text==="Match"?"✓":"⚠"} Resolution: {res.text}</span>
-                  {is4KSrc && row.chroma==="4:4:4" && <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:12,fontSize:10,fontWeight:600,background:"rgba(59,130,246,0.12)",border:"1px solid rgba(59,130,246,0.3)",color:"#60a5fa"}} title="4K 4:4:4 requires 18Gbps — ensure DTP3, SDVoE, or HDMI 2.0+ throughout chain">ℹ 4K 4:4:4 → 18Gbps required</span>}
+                  {is4KSrc && row.chroma==="4:4:4" && <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:12,fontSize:10,fontWeight:600,background:"rgba(139,92,246,0.12)",border:"1px solid rgba(139,92,246,0.3)",color:"#a78bfa"}} title="4K 4:4:4 requires 18Gbps — ensure DTP3, SDVoE, or HDMI 2.0+ throughout chain">ℹ 4K 4:4:4 → 18Gbps required</span>}
                   {row.hdcp==="Off" && <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:12,fontSize:10,fontWeight:600,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171"}}>⚠ Protected content will show black screen</span>}
                 </div>
               </div>
@@ -170,7 +170,7 @@ export default function EDIDHDCPPage() {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:11}}>
           <div><strong style={{color:"rgb(var(--text-body))"}}>HDCP 1.4</strong><br/>1080p max, HDMI 1.x/DVI</div>
           <div><strong style={{color:"#f59e0b"}}>HDCP 2.2</strong><br/>4K UHD required, HDMI 2.0</div>
-          <div><strong style={{color:"#60a5fa"}}>HDCP 2.3</strong><br/>Latest, HDMI 2.1 (Extron DTP3)</div>
+          <div><strong style={{color:"#a78bfa"}}>HDCP 2.3</strong><br/>Latest, HDMI 2.1 (Extron DTP3)</div>
         </div>
         <div style={{marginTop:10,fontWeight:600,color:"rgb(var(--text-muted))",marginBottom:4}}>Bandwidth Reference</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,fontSize:10}}>

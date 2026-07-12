@@ -18,37 +18,70 @@
 
 import fs from "fs";
 import path from "path";
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import { createClient } from "@supabase/supabase-js";
 import { VoyageAIClient } from "voyageai";
+import { config } from "dotenv";
+
+// Load .env.local BEFORE reading process.env below
+config({ path: ".env.local" });
 
 // ── Config ──────────────────────────────────────────────────
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Service role key required: document_chunks has RLS with read-only public access
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY!;
 
 const CHUNK_SIZE = 800;      // target tokens per chunk (approx chars / 4)
 const CHUNK_OVERLAP = 100;   // overlap between chunks for context continuity
 const EMBEDDING_MODEL = "voyage-3-lite";
-const EMBEDDING_BATCH_SIZE = 8; // Voyage supports batching
+const EMBEDDING_BATCH_SIZE = 4; // sized to stay under Voyage free-tier 10K tokens/min
+const BATCH_DELAY_MS = 21000;   // free tier allows 3 requests/min
+
+// Voyage free tier (no payment method) is limited to 3 RPM / 10K TPM —
+// wait and retry instead of dying on 429s
+async function embedWithRetry(voyage: VoyageAIClient, texts: string[], inputType: "document" | "query") {
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      return await voyage.embed({ input: texts, model: EMBEDDING_MODEL, inputType });
+    } catch (err: any) {
+      if (err?.statusCode === 429 && attempt < 10) {
+        process.stdout.write(`\n  Rate limited — waiting 25s (attempt ${attempt})...`);
+        await new Promise((r) => setTimeout(r, 25000));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error("Embedding failed after retries");
+}
 
 // ── Helpers ─────────────────────────────────────────────────
 
 function chunkText(text: string, docName: string): { content: string; metadata: Record<string, any> }[] {
-  // Clean up text
+  // Clean up text — collapse spaces/tabs but PRESERVE newlines,
+  // since paragraph splitting below depends on them
   const cleaned = text
     .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s+/g, " ")
     .trim();
 
   const targetChars = CHUNK_SIZE * 4; // rough token-to-char ratio
   const overlapChars = CHUNK_OVERLAP * 4;
   const chunks: { content: string; metadata: Record<string, any> }[] = [];
 
-  // Try to split on paragraph boundaries
-  const paragraphs = cleaned.split(/\n\n+/);
+  // Split on paragraph boundaries; hard-split any paragraph that is
+  // itself longer than the chunk target (e.g. dense PDF text)
+  const paragraphs = cleaned.split(/\n\n+/).flatMap((p) => {
+    if (p.length <= targetChars) return [p];
+    const parts: string[] = [];
+    for (let i = 0; i < p.length; i += targetChars - overlapChars) {
+      parts.push(p.slice(i, i + targetChars));
+    }
+    return parts;
+  });
   let currentChunk = "";
   let chunkIndex = 0;
 
@@ -123,8 +156,10 @@ async function main() {
     console.log(`\nParsing: ${file}`);
 
     const buffer = fs.readFileSync(filePath);
-    const pdf = await pdfParse(buffer);
-    console.log(`  Pages: ${pdf.numpages}, Characters: ${pdf.text.length}`);
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const pdf = await parser.getText();
+    await parser.destroy();
+    console.log(`  Pages: ${pdf.total}, Characters: ${pdf.text.length}`);
 
     const chunks = chunkText(pdf.text, file);
     console.log(`  Chunks: ${chunks.length}`);
@@ -141,11 +176,7 @@ async function main() {
     const texts = batch.map((c) => c.content);
 
     // Generate embeddings
-    const embeddingResponse = await voyage.embed({
-      input: texts,
-      model: EMBEDDING_MODEL,
-      inputType: "document",
-    });
+    const embeddingResponse = await embedWithRetry(voyage, texts, "document");
 
     // Store in Supabase
     const rows = batch.map((chunk, j) => ({
@@ -163,17 +194,13 @@ async function main() {
       process.stdout.write(`  Progress: ${stored}/${allChunks.length} chunks (${pct}%)\r`);
     }
 
-    // Small delay to avoid rate limits
-    await new Promise((r) => setTimeout(r, 200));
+    // Throttle to stay within Voyage rate limits
+    await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
   }
 
   console.log(`\n\nDone! Stored ${stored} chunks in Supabase.`);
   console.log("You can now delete the local PDFs — they're no longer needed.");
 }
-
-// Load .env.local
-import { config } from "dotenv";
-config({ path: ".env.local" });
 
 main().catch((err) => {
   console.error("Fatal error:", err);

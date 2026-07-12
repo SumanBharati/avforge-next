@@ -11,7 +11,7 @@ const ROW_WIDTHS = [
 
 export default function ProjectsPageSkeleton() {
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       {/* ── Top bar ── */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-2">

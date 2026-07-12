@@ -17,15 +17,16 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 512,
+      model: "claude-sonnet-5",
+      max_tokens: 2048,
       messages: [{
         role: "user",
         content: `You are an AV systems integrator writing a site survey scope of work. Based on the room survey data below, write a concise scope of work paragraph (3-5 sentences). Describe what AV systems will be installed or upgraded, key technical requirements, and any notable constraints or special considerations. Write in plain prose, no bullet points.\n\nRoom data:\n${fields}`,
       }],
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+    const textBlock = response.content.find((b) => b.type === "text");
+    const text = textBlock && textBlock.type === "text" ? textBlock.text.trim() : "";
     return NextResponse.json({ scope_of_work: text });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Failed to generate" }, { status: 500 });

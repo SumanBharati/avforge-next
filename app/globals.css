@@ -27,7 +27,7 @@
   --scrollbar-thumb: #1e293b;
   --scrollbar-hover: #334155;
   /* Accents */
-  --accent-blue: #93c5fd;
+  --accent-blue: #c4b5fd;
   --color-scheme: dark;
   /* Chart / SVG */
   --chart-center: #0c1220;
@@ -69,7 +69,7 @@
   --scrollbar-thumb: #cbd5e1;
   --scrollbar-hover: #94a3b8;
   /* Accents */
-  --accent-blue: #2563eb;
+  --accent-blue: #7c3aed;
   --color-scheme: light;
   /* Chart / SVG */
   --chart-center: #f8fafc;
@@ -153,10 +153,10 @@
 
   /* Gradient card background (hero cards) */
   .forge-gradient-card {
-    background: linear-gradient(170deg, rgba(59,130,246,0.06) 0%, var(--card-gradient-end) 60%);
+    background: linear-gradient(170deg, rgba(139,92,246,0.06) 0%, var(--card-gradient-end) 60%);
   }
   .forge-gradient-card-subtle {
-    background: linear-gradient(170deg, rgba(59,130,246,0.04) 0%, var(--card-gradient-end-strong) 40%);
+    background: linear-gradient(170deg, rgba(139,92,246,0.04) 0%, var(--card-gradient-end-strong) 40%);
   }
 }
 

@@ -168,7 +168,7 @@ export default function OrgMembersPage() {
   const isOwnerOrAdmin = activeOrg.role === "owner" || activeOrg.role === "admin";
 
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-heading">Organization Settings</h2>
         <p className="mt-1 text-sm text-muted">Manage your organization&apos;s details and members.</p>

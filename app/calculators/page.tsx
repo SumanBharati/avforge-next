@@ -3,15 +3,15 @@ import React from 'react';
 
 const VideoWallIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
-    <rect x="0"    y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="0"    width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="0"    y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="10.5" width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="0"    y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="10.5" y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
-    <rect x="21"   y="21"   width="9" height="9" rx="1" fill="#3b82f6" />
+    <rect x="0"    y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="0"    width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="0"    y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="10.5" width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="0"    y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="10.5" y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
+    <rect x="21"   y="21"   width="9" height="9" rx="1" fill="#8b5cf6" />
   </svg>
 );
 
@@ -37,6 +37,20 @@ const DisplaySizingIcon = () => (
   </svg>
 );
 
+const ConnectorIcon = () => (
+  <svg width="30" height="30" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+    {/* HDMI-style connector body */}
+    <path d="M4 10 h24 v7 l-4 5 H8 l-4 -5 Z" fill="#1a2035" />
+    <path d="M6.5 12.5 h19 v4.5 l-3 3.5 H9.5 l-3 -3.5 Z" fill="#8b5cf6" />
+    {/* Pins */}
+    {[9.5, 12.5, 15.5, 18.5, 21.5].map(x => (
+      <rect key={x} x={x} y={13.5} width={1.6} height={4} rx={0.6} fill="#ede9fe" />
+    ))}
+    {/* Cable */}
+    <rect x="14" y="4" width="4" height="6" rx="1.5" fill="#1a2035" />
+  </svg>
+);
+
 export default function CalculatorsPage() {
   const calculators: { id: string; name: string; icon: React.ReactNode; desc: string }[] = [
     { id: 'display-sizing',   name: 'Display Sizing',     icon: <DisplaySizingIcon />, desc: 'Image height and viewer distance' },
@@ -52,6 +66,7 @@ export default function CalculatorsPage() {
     { id: 'conduit-fill',     name: 'Conduit Fill',       icon: '🔌', desc: 'NEC conduit fill with jam ratio check' },
     { id: 'rack-heat',        name: 'Rack Heat Load',     icon: '🌡️', desc: 'BTU/hr thermal calculation' },
     { id: 'unit-converter',   name: 'Unit Converter',     icon: '🔄', desc: 'AV-specific unit conversions' },
+    { id: 'connectors',       name: 'Connectors & Cables', icon: <ConnectorIcon />, desc: 'Pinouts, versions & resolution reference' },
     { id: 'standards',        name: 'Formula Sheet',      icon: '📐', desc: 'AVIXA / CTS-D engineering formulas with examples' },
     { id: 'poe-database',     name: 'PoE Device Database', icon: '📦', desc: 'Per-device PoE class and draw reference' },
     { id: 'poe-budget',       name: 'PoE Budget',         icon: '🔋', desc: 'IEEE af/at/bt power budgeting' },
@@ -59,18 +74,18 @@ export default function CalculatorsPage() {
   ];
 
   return (
-    <div className="animate-fade-in p-8">
+    <div className="animate-fade-in p-4 sm:p-6 lg:p-8">
       <h2 style={{ fontSize: 22, marginBottom: 4, fontWeight: 600 }} className="text-heading">Calculators</h2>
       <p style={{ fontSize: 14, marginBottom: 28 }} className="text-subtle">
         Interactive tools with live results and INFOCOMM standard references
       </p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center' }}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
         {calculators.map((calc) => (
           <Link
             key={calc.id}
             href={`/calculators/${calc.id}`}
             className="forge-card text-left"
-            style={{ width: 'calc(20% - 13px)', minHeight: 130, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}
+            style={{ minHeight: 130, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}
           >
             <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, fontSize: 30 }}>{calc.icon}</div>
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }} className="text-body">

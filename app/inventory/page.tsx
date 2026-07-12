@@ -145,13 +145,13 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
 
 function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-8">
         <h2 className="text-xl font-bold text-heading">Library</h2>
         <p className="mt-1 text-[13px] text-muted">Browse equipment catalogs and manage your organization's stock.</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map(({ key, label, description, icon, stat }) => (
           <button
             key={key}
@@ -171,7 +171,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
       </div>
 
       {/* ── News + Old Inventory ─────────────────────────────────────────────── */}
-      <div className="mt-6 grid grid-cols-2 gap-5">
+      <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
 
         {/* New Products on AVForge */}
         <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/20">
@@ -225,7 +225,8 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
             <h3 className="text-[13px] font-bold text-heading">Old Inventory Review</h3>
             <button className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
           </div>
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px]">
             <thead>
               <tr className="border-b border-border bg-forge-surface/40">
                 <th className="px-5 py-2.5 text-left text-[11px] font-semibold text-muted">Item</th>
@@ -265,6 +266,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
       </div>
@@ -324,9 +326,9 @@ function InventoryView({ onBack }: { onBack: () => void }) {
   const labelCls = "mb-1 block text-[11px] font-medium text-muted";
 
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -351,7 +353,7 @@ function InventoryView({ onBack }: { onBack: () => void }) {
       </div>
 
       {/* Summary cards */}
-      <div className="mb-6 grid grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="rounded-xl border border-border bg-forge-surface/40 p-4">
           <div className="text-[11px] font-medium text-muted">Total Items</div>
           <div className="mt-1 text-2xl font-bold text-heading">{totalItems}</div>
@@ -367,7 +369,7 @@ function InventoryView({ onBack }: { onBack: () => void }) {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -398,7 +400,8 @@ function InventoryView({ onBack }: { onBack: () => void }) {
 
       {/* Table */}
       <div className="rounded-xl border border-border bg-forge-surface/20 overflow-hidden">
-        <table className="w-full">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px]">
           <thead>
             <tr className="border-b border-border bg-forge-surface/60">
               <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Item</th>
@@ -467,11 +470,12 @@ function InventoryView({ onBack }: { onBack: () => void }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Add / Edit Modal */}
       {showModal && editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-2xl border border-border bg-forge-bg shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="text-[15px] font-bold text-heading">
@@ -553,7 +557,7 @@ function PlaceholderView({ label, description, icon, iconBg, iconColor, onBack }
   iconBg: string; iconColor: string; onBack: () => void;
 }) {
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center gap-3">
         <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors">
           <ArrowLeftIcon />

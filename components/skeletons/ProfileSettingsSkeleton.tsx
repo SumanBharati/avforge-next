@@ -4,7 +4,7 @@ const cardCls = "rounded-2xl border border-border bg-forge-surface/40 p-6";
 
 export default function ProfileSettingsSkeleton() {
   return (
-    <div className="animate-fade-in px-8 py-6">
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       {/* Page title */}
       <div className="mb-6">
         <Shimmer className="mb-2 h-6 w-36" />

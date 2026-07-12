@@ -157,7 +157,7 @@ export default function TimeTrackingPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-heading">Time Tracking</h1>
         </div>
@@ -201,7 +201,7 @@ export default function TimeTrackingPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-6">
+      <div className="flex-1 overflow-auto px-4 py-6 sm:px-6 lg:px-8">
         {!person ? (
           <div className="py-20 text-center text-sm text-subtle">Add a person first</div>
         ) : (
@@ -324,7 +324,7 @@ export default function TimeTrackingPage() {
       </div>
 
       {showPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPicker(false)} />
           <div className="relative w-full max-w-[440px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">

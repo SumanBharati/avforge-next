@@ -164,8 +164,8 @@ export async function POST(request: NextRequest) {
 
     // Call Claude
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+      model: "claude-sonnet-5",
+      max_tokens: 4096,
       system: fullSystemPrompt,
       messages: messages.map((m: any) => ({
         role: m.role,
@@ -173,8 +173,8 @@ export async function POST(request: NextRequest) {
       })),
     });
 
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    const textBlock = response.content.find((b) => b.type === "text");
+    const text = textBlock && textBlock.type === "text" ? textBlock.text : "";
 
     return NextResponse.json({ text });
   } catch (err: any) {

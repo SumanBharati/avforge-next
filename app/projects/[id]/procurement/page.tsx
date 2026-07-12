@@ -66,9 +66,9 @@ const CONDITIONS: ReceivingLog["lineItems"][0]["condition"][] = ["good", "damage
 
 const statusColor = (s: string) => {
   const map: Record<string, string> = {
-    pending: "#f59e0b", ordered: "#3b82f6", partial: "#f97316", received: "#22c55e",
+    pending: "#f59e0b", ordered: "#8b5cf6", partial: "#f97316", received: "#22c55e",
     backordered: "#ef4444", cancelled: "#94a3b8",
-    draft: "#94a3b8", submitted: "#3b82f6", acknowledged: "#8b5cf6", shipped: "#06b6d4",
+    draft: "#94a3b8", submitted: "#8b5cf6", acknowledged: "#8b5cf6", shipped: "#06b6d4",
     closed: "#22c55e",
     good: "#22c55e", damaged: "#ef4444", wrong_item: "#f97316",
   };
@@ -258,7 +258,7 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
 
   if (!project) {
     return (
-      <div className="animate-fade-in px-8 py-6">
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
         <Link href="/projects" className="mb-4 inline-flex items-center gap-1.5 text-sm text-subtle hover:text-secondary">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           Back to Projects
@@ -331,7 +331,7 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
         <h2 className="mb-6 text-lg font-bold text-heading">Procurement Dashboard</h2>
 
         <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <MetricCard label="Total Equipment Cost" value={fmt$(totalNeeded)} sub={`${data.lines.length} line items`} color="#3b82f6" />
+          <MetricCard label="Total Equipment Cost" value={fmt$(totalNeeded)} sub={`${data.lines.length} line items`} color="#8b5cf6" />
           <MetricCard label="Ordered" value={fmt$(totalOrdered)} sub={`${data.lines.filter((l) => l.qtyOrdered > 0).length} items ordered`} color="#8b5cf6" />
           <MetricCard label="Received" value={fmt$(totalReceived)} sub={`${data.lines.filter((l) => l.status === "received").length} fully received`} color="#22c55e" />
           <MetricCard label="Pending Order" value={pendingLines.length} sub={pendingLines.length > 0 ? fmt$(pendingLines.reduce((s, l) => s + l.qtyNeeded * l.unitCost, 0)) + " value" : "All ordered"} color={pendingLines.length > 0 ? "#f59e0b" : "#22c55e"} />
@@ -817,9 +817,9 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
                   {/* Progress bar */}
                   <div className="flex items-center gap-3">
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-forge-panel/60">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: pct === 100 ? "#22c55e" : "#3b82f6" }} />
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: pct === 100 ? "#22c55e" : "#8b5cf6" }} />
                     </div>
-                    <span className="text-[12px] font-semibold" style={{ color: pct === 100 ? "#22c55e" : "#3b82f6" }}>{pct}%</span>
+                    <span className="text-[12px] font-semibold" style={{ color: pct === 100 ? "#22c55e" : "#8b5cf6" }}>{pct}%</span>
                     <span className="text-[11px] text-subtle">{receivedCount}/{poLines.length} items received</span>
                   </div>
                 </div>
@@ -843,7 +843,7 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
   return (
     <div className="animate-fade-in">
       {/* ── Top header ────────────────────────────────── */}
-      <div className="border-b border-border bg-forge-panel/50 px-8 py-4">
+      <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
@@ -906,7 +906,7 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
 
       {/* ── Import from Proposal Modal ────────────── */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
           <div className="relative w-full max-w-md rounded-xl border border-border bg-forge-bg p-6 shadow-2xl">
             <h3 className="mb-2 text-[15px] font-bold text-heading">Import from Proposal</h3>
