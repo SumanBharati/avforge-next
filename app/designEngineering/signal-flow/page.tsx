@@ -105,6 +105,10 @@ export default function SignalFlowPage() {
   viewRef.current = view;
   // Marquee multi-select (AutoCAD-style): L→R drag = window (fully inside), R→L = crossing (touches)
   const [selectedIds, setSelectedIds] = useState<Set<any>>(new Set());
+  // Marquee selection of non-device items: annotations (text/shapes/drawings) and locations
+  const [selectedAnnIds, setSelectedAnnIds] = useState<Set<any>>(new Set());
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<any>>(new Set());
+  const clearMarqueeSel = () => { setSelectedIds(new Set()); setSelectedAnnIds(new Set()); setSelectedRoomIds(new Set()); };
   const [marquee, setMarquee] = useState<{sx:number;sy:number;cx:number;cy:number}|null>(null);
   const canvasLockedRef = useRef(canvasLocked);
   canvasLockedRef.current = canvasLocked;
@@ -144,8 +148,38 @@ export default function SignalFlowPage() {
   const [hlColor, setHlColor] = useState("#fbbf24");
   const [hlSubtype, setHlSubtype] = useState<"rect"|"freehand">("rect");
   const [eraserSize, setEraserSize] = useState(15);
+  const [eraserCursor, setEraserCursor] = useState<{x:number;y:number}|null>(null);
   const [strokeW, setStrokeW] = useState(2);
   const [annotations, setAnnotations] = useState<any[]>([]);
+
+  // ── Undo (Ctrl+Z): snapshot the four content slices before each mutation ──
+  const connectionsRef = useRef<any[]>([]);
+  connectionsRef.current = connections;
+  const roomsRef = useRef<any[]>([]);
+  roomsRef.current = rooms;
+  const annotationsRef = useRef<any[]>([]);
+  annotationsRef.current = annotations;
+  const undoStackRef = useRef<{devices:any[];connections:any[];rooms:any[];annotations:any[]}[]>([]);
+  const pushUndo = () => {
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-49),
+      { devices: devicesRef.current, connections: connectionsRef.current, rooms: roomsRef.current, annotations: annotationsRef.current },
+    ];
+  };
+  const undo = () => {
+    const stack = undoStackRef.current;
+    if (!stack.length) return;
+    const snap = stack[stack.length - 1];
+    undoStackRef.current = stack.slice(0, -1);
+    setDevices(snap.devices);
+    setConnections(snap.connections);
+    setRooms(snap.rooms);
+    setAnnotations(snap.annotations);
+    // Selections may point at items that no longer exist after the restore
+    setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+  };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
   const [liveAnnot, setLiveAnnot] = useState<any>(null);
   const [textInput, setTextInput] = useState<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
   const [textValue, setTextValue] = useState("");
@@ -363,6 +397,7 @@ export default function SignalFlowPage() {
   };
 
   const addDevice = (template: any) => {
+    pushUndo();
     const id = nextId.current++;
     const ports = expandPortGroups(template.ports).map((p:any,i:number)=>({...p,id:`${id}-p${i}`}));
     // Spawn within the currently visible portion of the canvas
@@ -374,6 +409,7 @@ export default function SignalFlowPage() {
 
   const roomColors = ["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
   const addRoom = () => {
+    pushUndo();
     const id = "room-"+(Date.now());
     const v = viewRef.current;
     setRooms(prev=>[...prev,{id,label:"Location "+(prev.length+1),x:(80+Math.random()*100-v.x)/v.zoom,y:(80+Math.random()*100-v.y)/v.zoom,w:400,h:300,color:"#4b5563"}]);
@@ -384,11 +420,15 @@ export default function SignalFlowPage() {
     e.stopPropagation();
     // While routing a connection, clicks over a location drop a bend instead of dragging it
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
+    // With an annotation tool active, draw over the location instead of moving it
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
     setSelectedRoom(room.id); setSelected(null); setSelectedConn(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z - room.x - panOffset.x;
     const startY = e.clientY/z - room.y - panOffset.y;
+    let undoPushed = false;
     const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
       const nx = me.clientX/z - startX - panOffset.x;
       const ny = me.clientY/z - startY - panOffset.y;
       setRooms(prev=>prev.map(r=>r.id===room.id?{...r,x:nx,y:ny}:r));
@@ -398,6 +438,24 @@ export default function SignalFlowPage() {
     window.addEventListener("mouseup",onUp);
   };
 
+  // Location body: left-drag marquee-selects devices inside it (same as empty canvas),
+  // a plain click selects the location. Moving a location is done by its title bar.
+  const handleRoomBodyMouseDown = (e: React.MouseEvent, room: any) => {
+    e.stopPropagation();
+    if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
+    // With an annotation tool active, draw over the location instead of selecting it
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
+    if (e.button !== 0) { setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); return; }
+    setSelectedRoom(null); setSelected(null); setSelectedConn(null); setSelectedAnnotId(null); clearMarqueeSel();
+    const sx = e.clientX, sy = e.clientY;
+    startMarquee(e);
+    const onUp = (me: MouseEvent) => {
+      window.removeEventListener("mouseup", onUp);
+      if (Math.abs(me.clientX - sx) < 4 && Math.abs(me.clientY - sy) < 4) setSelectedRoom(room.id);
+    };
+    window.addEventListener("mouseup", onUp);
+  };
+
   const handleRoomResize = (e: React.MouseEvent, room: any, handle: string) => {
     e.stopPropagation();
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
@@ -405,7 +463,9 @@ export default function SignalFlowPage() {
     const startX = e.clientX, startY = e.clientY;
     const origX = room.x, origY = room.y, origW = room.w, origH = room.h;
     const z = viewRef.current.zoom;
+    let undoPushed = false;
     const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
       const dx = (me.clientX - startX)/z, dy = (me.clientY - startY)/z;
       setRooms(prev=>prev.map(r=>{
         if(r.id!==room.id) return r;
@@ -437,15 +497,18 @@ export default function SignalFlowPage() {
   };
 
   const finishRoomEdit = (roomId: string, newLabel: string) => {
+    if (roomsRef.current.some(r=>r.id===roomId && r.label!==newLabel)) pushUndo();
     setRooms(prev=>prev.map(r=>r.id===roomId?{...r,label:newLabel}:r));
     setEditingRoom(null);
   };
-  const deleteRoom = (roomId: string) => { setRooms(prev=>prev.filter(r=>r.id!==roomId)); if(selectedRoom===roomId) setSelectedRoom(null); };
+  const deleteRoom = (roomId: string) => { pushUndo(); setRooms(prev=>prev.filter(r=>r.id!==roomId)); if(selectedRoom===roomId) setSelectedRoom(null); };
   const setRoomColor = (roomId: string, color: string) => {
+    pushUndo();
     setRooms(prev=>prev.map(r=>r.id===roomId?{...r,color}:r));
   };
 
   const cycleRoomColor = (roomId: string) => {
+    pushUndo();
     setRooms(prev=>prev.map(r=>{
       if(r.id!==roomId) return r;
       const idx = roomColors.indexOf(r.color);
@@ -479,6 +542,44 @@ export default function SignalFlowPage() {
     window.addEventListener("mouseup",onUp);
   };
 
+  // Axis-aligned bbox of an annotation in world coords (null = not selectable)
+  const annBBox = (a: any): {x1:number;y1:number;x2:number;y2:number}|null => {
+    if (a.type === "text") {
+      const size = a.size || 14;
+      const wTxt = String(a.text||"").length * size * 0.55;
+      const x0 = a.align === "center" ? a.x - wTxt/2 : a.align === "right" ? a.x - wTxt : a.x;
+      return { x1: x0, y1: a.y - size, x2: x0 + wTxt, y2: a.y + 4 };
+    }
+    if (a.type === "pencil" || (a.type === "highlight" && a.sub === "freehand")) {
+      const pts = [...String(a.d||"").matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map((m:any)=>({x:+m[1],y:+m[2]}));
+      if (!pts.length) return null;
+      const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+      return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+    }
+    if (a.type === "highlight") return { x1: a.x, y1: a.y, x2: a.x + (a.w||0), y2: a.y + (a.h||0) };
+    if (a.type === "shape") {
+      if (a.sub === "polyline" && a.pts?.length) {
+        const xs = a.pts.map((p:any)=>p.x), ys = a.pts.map((p:any)=>p.y);
+        return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
+      }
+      return { x1: Math.min(a.x1,a.x2), y1: Math.min(a.y1,a.y2), x2: Math.max(a.x1,a.x2), y2: Math.max(a.y1,a.y2) };
+    }
+    return null;
+  };
+
+  // Shift an annotation by a delta, whatever its geometry type
+  const translateAnnotation = (a: any, dx: number, dy: number) => {
+    if (a.type === "text") return { ...a, x: a.x + dx, y: a.y + dy };
+    if (a.type === "pencil" || (a.type === "highlight" && a.sub === "freehand"))
+      return { ...a, d: String(a.d||"").replace(/([ML])(-?\d+\.?\d*),(-?\d+\.?\d*)/g, (_m,c,x,y)=>`${c}${(parseFloat(x)+dx).toFixed(1)},${(parseFloat(y)+dy).toFixed(1)}`) };
+    if (a.type === "highlight") return { ...a, x: a.x + dx, y: a.y + dy };
+    if (a.type === "shape") {
+      if (a.sub === "polyline") return { ...a, pts: (a.pts||[]).map((p:any)=>({x:p.x+dx,y:p.y+dy})) };
+      return { ...a, x1: a.x1+dx, y1: a.y1+dy, x2: a.x2+dx, y2: a.y2+dy };
+    }
+    return a;
+  };
+
   // Marquee select on empty-canvas left drag. Direction picks the mode, same as the
   // room designer: left-to-right = window (fully inside), right-to-left = crossing (intersects).
   const startMarquee = (e: React.MouseEvent) => {
@@ -500,15 +601,30 @@ export default function SignalFlowPage() {
         const isWindow = cur.x >= start.x;
         const x1 = Math.min(start.x, cur.x), x2 = Math.max(start.x, cur.x);
         const y1 = Math.min(start.y, cur.y), y2 = Math.max(start.y, cur.y);
+        const boxHit = (b: {x1:number;y1:number;x2:number;y2:number}) => isWindow
+          ? b.x1 >= x1 && b.x2 <= x2 && b.y1 >= y1 && b.y2 <= y2
+          : !(b.x2 < x1 || b.x1 > x2 || b.y2 < y1 || b.y1 > y2);
         const hits = new Set<any>();
-        devicesRef.current.forEach((d: any) => {
-          const dX1 = d.x, dY1 = d.y, dX2 = d.x + d.w, dY2 = d.y + d.h;
-          const hit = isWindow
-            ? dX1 >= x1 && dX2 <= x2 && dY1 >= y1 && dY2 <= y2
-            : !(dX2 < x1 || dX1 > x2 || dY2 < y1 || dY1 > y2);
-          if (hit) hits.add(d.id);
+        devicesRef.current.forEach((dRaw: any) => {
+          const d = sizeDevice(dRaw); // raw d.w/d.h may be unset — use the rendered box size
+          if (boxHit({ x1: d.x, y1: d.y, x2: d.x + d.w, y2: d.y + d.h })) hits.add(d.id);
+        });
+        const annHits = new Set<any>();
+        annotations.forEach((a: any) => {
+          const b = annBBox(a);
+          if (b && boxHit(b)) annHits.add(a.id);
+        });
+        const roomHits = new Set<any>();
+        rooms.forEach((r: any) => {
+          const b = { x1: r.x, y1: r.y, x2: r.x + r.w, y2: r.y + r.h };
+          // Crossing mode: ignore a location the box is entirely inside of — dragging
+          // within a location to grab its contents shouldn't select the location itself
+          const boxInsideRoom = x1 >= b.x1 && x2 <= b.x2 && y1 >= b.y1 && y2 <= b.y2;
+          if (boxHit(b) && !(!isWindow && boxInsideRoom)) roomHits.add(r.id);
         });
         setSelectedIds(hits);
+        setSelectedAnnIds(annHits);
+        setSelectedRoomIds(roomHits);
       }
       setMarquee(null);
     };
@@ -527,7 +643,7 @@ export default function SignalFlowPage() {
       return;
     }
     if(isEmpty){
-      setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); setSelectedIds(new Set());
+      setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
       if (e.button === 0) startMarquee(e); // pan via middle-drag or scroll wheel
     }
   };
@@ -560,21 +676,36 @@ export default function SignalFlowPage() {
 
   const handleDeviceMouseDown = (e: React.MouseEvent, dev: any) => {
     e.stopPropagation();
+    // With an annotation tool active, draw over the device instead of dragging it
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
     // Dragging a marquee-selected device moves the whole selection; otherwise single-select
     const inGroup = selectedIds.has(dev.id);
     if (inGroup) { setSelected(null); }
-    else { setSelected(dev.id); setSelectedIds(new Set()); }
+    else { setSelected(dev.id); clearMarqueeSel(); }
     setSelectedConn(null); setSelectedRoom(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z, startY = e.clientY/z;
     const ids = inGroup ? new Set(selectedIds) : new Set([dev.id]);
     const origins = new Map<any,{x:number;y:number}>(devicesRef.current.filter((d:any)=>ids.has(d.id)).map((d:any)=>[d.id,{x:d.x,y:d.y}]));
+    // Selected annotations and locations ride along with a group drag
+    const origAnns = new Map<any,any>(inGroup ? annotations.filter((a:any)=>selectedAnnIds.has(a.id)).map((a:any)=>[a.id,a]) : []);
+    const origRooms = new Map<any,{x:number;y:number}>(inGroup ? rooms.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
+    let undoPushed = false;
     const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
       const dx = me.clientX/z - startX;
       const dy = me.clientY/z - startY;
       setDevices(prev=>prev.map((d:any)=>{
         const o = origins.get(d.id);
         return o ? {...d, x: o.x + dx, y: o.y + dy} : d;
+      }));
+      if (origAnns.size) setAnnotations(prev=>prev.map((a:any)=>{
+        const o = origAnns.get(a.id);
+        return o ? translateAnnotation(o, dx, dy) : a;
+      }));
+      if (origRooms.size) setRooms(prev=>prev.map((r:any)=>{
+        const o = origRooms.get(r.id);
+        return o ? {...r, x: o.x + dx, y: o.y + dy} : r;
       }));
     };
     const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
@@ -589,6 +720,7 @@ export default function SignalFlowPage() {
       setConnectCursor(null);
     } else {
       if(connecting.deviceId!==device.id){
+        pushUndo();
         const sig = SIGNAL_TYPES.find(s=>s.id===connecting.signal) || SIGNAL_TYPES.find(s=>s.id===port.signal) || SIGNAL_TYPES[0];
         setConnections(prev=>[...prev,{id:Date.now(),from:{deviceId:connecting.deviceId,portId:connecting.portId},to:{deviceId:device.id,portId:port.id},signal:sig.id,waypoints:connecting.waypoints?.length?connecting.waypoints:undefined}]);
       }
@@ -624,24 +756,32 @@ export default function SignalFlowPage() {
   };
 
   const deleteSelected = useCallback(() => {
-    if(selectedIds.size>0){
-      setConnections(prev=>prev.filter((c:any)=>!selectedIds.has(c.from.deviceId)&&!selectedIds.has(c.to.deviceId)));
-      setDevices(prev=>prev.filter((d:any)=>!selectedIds.has(d.id)));
-      setSelectedIds(new Set());
+    if(selectedIds.size>0 || selectedAnnIds.size>0 || selectedRoomIds.size>0){
+      pushUndo();
+      if(selectedIds.size>0){
+        setConnections(prev=>prev.filter((c:any)=>!selectedIds.has(c.from.deviceId)&&!selectedIds.has(c.to.deviceId)));
+        setDevices(prev=>prev.filter((d:any)=>!selectedIds.has(d.id)));
+      }
+      if(selectedAnnIds.size>0) setAnnotations(prev=>prev.filter((a:any)=>!selectedAnnIds.has(a.id)));
+      if(selectedRoomIds.size>0) setRooms(prev=>prev.filter((r:any)=>!selectedRoomIds.has(r.id)));
+      setSelectedIds(new Set()); setSelectedAnnIds(new Set()); setSelectedRoomIds(new Set());
     } else if(selectedAnnotId!==null){
+      pushUndo();
       setAnnotations(prev=>prev.filter((a:any)=>a.id!==selectedAnnotId));
       setSelectedAnnotId(null);
     } else if(selectedRoom!==null){
-      deleteRoom(selectedRoom);
+      deleteRoom(selectedRoom); // deleteRoom pushes its own undo snapshot
     } else if(selectedConn!==null){
+      pushUndo();
       setConnections(prev=>prev.filter((c:any)=>c.id!==selectedConn));
       setSelectedConn(null);
     } else if(selected!==null){
+      pushUndo();
       setConnections(prev=>prev.filter((c:any)=>c.from.deviceId!==selected&&c.to.deviceId!==selected));
       setDevices(prev=>prev.filter((d:any)=>d.id!==selected));
       setSelected(null);
     }
-  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds]);
+  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds]);
 
   const getSVGCoords = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -649,49 +789,112 @@ export default function SignalFlowPage() {
     return { x: (e.clientX - rect.left - v.x) / v.zoom, y: (e.clientY - rect.top - v.y) / v.zoom };
   };
 
+  // Split a point chain into the runs that survive removing everything within R of (x,y).
+  // Segments are densely resampled so cuts land mid-segment, not only at recorded points.
+  const cutChain = (ptsIn: {x:number;y:number}[], x: number, y: number, R: number, closed = false): {touched:boolean; runs:{x:number;y:number}[][]} => {
+    const pts = closed && ptsIn.length > 1 ? [...ptsIn, ptsIn[0]] : ptsIn;
+    const step = Math.max(2, R / 4);
+    const dense: {x:number;y:number}[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      if (i === 0) { dense.push(pts[0]); continue; }
+      const q = pts[i-1], p = pts[i];
+      const n = Math.max(1, Math.ceil(Math.hypot(p.x-q.x, p.y-q.y) / step));
+      for (let k = 1; k <= n; k++) dense.push({ x: q.x + (p.x-q.x)*k/n, y: q.y + (p.y-q.y)*k/n });
+    }
+    const runs: {x:number;y:number}[][] = [];
+    let cur: {x:number;y:number}[] = [];
+    let touched = false;
+    for (const p of dense) {
+      if ((p.x-x)*(p.x-x) + (p.y-y)*(p.y-y) <= R*R) { touched = true; if (cur.length >= 2) runs.push(cur); cur = []; }
+      else cur.push(p);
+    }
+    if (cur.length >= 2) runs.push(cur);
+    // A cut closed outline splits at its seam too — rejoin the two seam runs
+    if (closed && touched && runs.length > 1 && cur.length >= 2 && runs[0][0] === dense[0]) {
+      const tail = runs.pop()!;
+      runs[0] = [...tail, ...runs[0]];
+    }
+    return { touched, runs };
+  };
+
+  // Erase only what the eraser circle touches: whole-object for text and filled
+  // highlights, true partial cuts for strokes and outlines.
   const eraseAtPoint = (x: number, y: number) => {
     const R = eraserSize;
-    setAnnotations(prev => prev.filter((a: any) => {
-      if (a.type === "pencil") {
-        const pts = [...a.d.matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)];
-        return !pts.some((m: any) => {
-          const dx = parseFloat(m[1]) - x, dy = parseFloat(m[2]) - y;
-          return dx*dx + dy*dy < R*R;
-        });
-      }
-      if (a.type === "highlight") {
-        if (a.sub === "freehand") {
-          const pts = [...a.d.matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)];
-          return !pts.some((m:any) => { const dx=parseFloat(m[1])-x,dy=parseFloat(m[2])-y; return dx*dx+dy*dy<R*R*16; });
+    const pathPts = (d: any) => [...String(d||"").matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map((m:any)=>({x:+m[1],y:+m[2]}));
+    const toD = (pts: {x:number;y:number}[]) => pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+    setAnnotations(prev => {
+      const out: any[] = [];
+      let changed = false;
+      for (const a of prev) {
+        if (a.type === "pencil" || (a.type === "highlight" && a.sub === "freehand")) {
+          // highlight strokes render 16px wide — pad the eraser accordingly
+          const { touched, runs } = cutChain(pathPts(a.d), x, y, R + (a.type === "highlight" ? 8 : (a.sw||2)/2));
+          if (!touched) { out.push(a); continue; }
+          changed = true;
+          runs.forEach(r => out.push({ ...a, id: `a${annotIdRef.current++}`, d: toD(r) }));
+          continue;
         }
-        return !(x >= a.x - R && x <= a.x + a.w + R && y >= a.y - R && y <= a.y + a.h + R);
-      }
-      if (a.type === "shape") {
-        if (a.sub === "polyline" && a.pts?.length) {
-          const xs = a.pts.map((p:any)=>p.x), ys = a.pts.map((p:any)=>p.y);
-          return !(x >= Math.min(...xs) - R && x <= Math.max(...xs) + R && y >= Math.min(...ys) - R && y <= Math.max(...ys) + R);
+        if (a.type === "highlight") { // filled area — no meaningful partial cut, remove whole
+          if (x >= a.x - R && x <= a.x + (a.w||0) + R && y >= a.y - R && y <= a.y + (a.h||0) + R) { changed = true; continue; }
+          out.push(a); continue;
         }
-        const minX = Math.min(a.x1, a.x2), maxX = Math.max(a.x1, a.x2);
-        const minY = Math.min(a.y1, a.y2), maxY = Math.max(a.y1, a.y2);
-        return !(x >= minX - R && x <= maxX + R && y >= minY - R && y <= maxY + R);
+        if (a.type === "text") {
+          const size = a.size || 14;
+          const wTxt = String(a.text||"").length * size * 0.55;
+          const x0 = a.align === "center" ? a.x - wTxt/2 : a.align === "right" ? a.x - wTxt : a.x;
+          if (x >= x0 - R && x <= x0 + wTxt + R && y >= a.y - size - R && y <= a.y + R) { changed = true; continue; }
+          out.push(a); continue;
+        }
+        if (a.type === "shape") {
+          let chain: {x:number;y:number}[]; let closed = false;
+          if (a.sub === "polyline") chain = a.pts || [];
+          else if (a.sub === "rect") {
+            const x1=Math.min(a.x1,a.x2), x2=Math.max(a.x1,a.x2), y1=Math.min(a.y1,a.y2), y2=Math.max(a.y1,a.y2);
+            chain = [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}]; closed = true;
+          } else if (a.sub === "circle") {
+            const cx=(a.x1+a.x2)/2, cy=(a.y1+a.y2)/2, rx=Math.abs(a.x2-a.x1)/2, ry=Math.abs(a.y2-a.y1)/2;
+            chain = Array.from({length:49},(_,i)=>{const t=i/48*2*Math.PI; return {x:cx+rx*Math.cos(t), y:cy+ry*Math.sin(t)};});
+          } else if (a.sub === "triangle") {
+            const minX=Math.min(a.x1,a.x2), maxX=Math.max(a.x1,a.x2), minY=Math.min(a.y1,a.y2), maxY=Math.max(a.y1,a.y2);
+            chain = [{x:(minX+maxX)/2,y:minY},{x:maxX,y:maxY},{x:minX,y:maxY}]; closed = true;
+          } else chain = [{x:a.x1,y:a.y1},{x:a.x2,y:a.y2}]; // line / arrow
+          const { touched, runs } = cutChain(chain, x, y, R + (a.sw||2)/2, closed);
+          if (!touched) { out.push(a); continue; }
+          changed = true;
+          if (a.sub === "line" || a.sub === "arrow") {
+            // straight segments survive as straight sub-segments; the piece still
+            // ending at the original tip keeps its arrowhead
+            runs.forEach(r => {
+              const p1 = r[0], p2 = r[r.length-1];
+              const keepsHead = a.sub === "arrow" && Math.hypot(p2.x-a.x2, p2.y-a.y2) < 0.5;
+              out.push({ ...a, id: `a${annotIdRef.current++}`, sub: keepsHead ? "arrow" : "line", x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y });
+            });
+          } else {
+            runs.forEach(r => out.push({ type:"shape", sub:"polyline", pts:r, color:a.color, sw:a.sw, id:`a${annotIdRef.current++}` }));
+          }
+          continue;
+        }
+        out.push(a);
       }
-      if (a.type === "text") {
-        const dx = a.x - x, dy = a.y - y;
-        return dx*dx + dy*dy >= R*R*9;
-      }
-      return true;
-    }));
+      return changed ? out : prev;
+    });
   };
 
   const handleToolDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     const {x, y} = getSVGCoords(e);
     if (activeTool === "eraser") {
+      pushUndo(); // one snapshot per eraser stroke
       eraseAtPoint(x, y);
       drawRef.current = {sx: x, sy: y};
       return;
     }
     if (activeTool === "text") {
+      // Commit any in-progress text before opening a new editor — this runs before
+      // the document-level outside-click handler, which would otherwise see the
+      // refs already reset and silently drop the typed text
+      if (textInputRef.current) commitTextRef.current();
       const rect = canvasRef.current!.getBoundingClientRect();
       const ti = {cssX: e.clientX - rect.left, cssY: e.clientY - rect.top, svgX: x, svgY: y, clientX: e.clientX, clientY: e.clientY};
       textInputRef.current = ti;
@@ -715,13 +918,16 @@ export default function SignalFlowPage() {
   };
 
   const handleToolMove = (e: React.MouseEvent) => {
+    if (activeTool === "eraser") {
+      // circle cursor follows the pointer even when not erasing
+      const p = getSVGCoords(e);
+      setEraserCursor(p);
+      if (drawRef.current) eraseAtPoint(p.x, p.y);
+      return;
+    }
     if (!drawRef.current) return;
     const {x, y} = getSVGCoords(e);
     const {sx, sy} = drawRef.current;
-    if (activeTool === "eraser") {
-      eraseAtPoint(x, y);
-      return;
-    }
     if (activeTool === "pencil") {
       drawRef.current.pts!.push({x, y});
       const d = drawRef.current.pts!.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
@@ -764,6 +970,7 @@ export default function SignalFlowPage() {
     // polylines accumulate points across clicks; they commit on double-click
     if (activeTool === "shape" && shapeSubtype === "polyline") return;
     if (liveAnnot) {
+      pushUndo();
       setAnnotations(prev=>[...prev, {...liveAnnot, id:`a${annotIdRef.current++}`}]);
       setLiveAnnot(null);
     }
@@ -779,6 +986,7 @@ export default function SignalFlowPage() {
       if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 3) clean.push(p);
     }
     if (clean.length >= 2) {
+      pushUndo();
       setAnnotations(prev=>[...prev, {type:"shape", sub:"polyline", pts:clean, color:toolColor, sw:strokeW, id:`a${annotIdRef.current++}`}]);
     }
     setLiveAnnot(null);
@@ -824,6 +1032,7 @@ export default function SignalFlowPage() {
     const val = textValueRef.current;
     const ti = textInputRef.current;
     if (ti && val.trim()) {
+      pushUndo();
       if (editId) {
         setAnnotations(prev => prev.map((a:any) => a.id === editId
           ? {...a, text:val, color:toolColor, size:textFontSize, bold:textBold, italic:textItalic, align:textAlign}
@@ -840,23 +1049,23 @@ export default function SignalFlowPage() {
 
   const renderAnnotation = (a: any, isLive = false) => {
     const key = isLive ? "live" : a.id;
-    const isSel = !isLive && selectedAnnotId === a.id;
+    const isSel = !isLive && (selectedAnnotId === a.id || selectedAnnIds.has(a.id));
     const selRing = isSel ? {filter:"drop-shadow(0 0 3px #8b5cf6)"} : {};
     if (a.type === "pencil") return (
-      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
     );
     if (a.type === "highlight") {
       if (a.sub === "freehand") return (
-        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
       );
       return (
-        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
       );
     }
     if (a.type === "shape") {
       const {sub,x1,y1,x2,y2,color,sw} = a;
       const stroke = color||"#374151"; const sw2 = sw||2;
-      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}};
+      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}};
       if (sub==="rect") return <rect key={key} x={Math.min(x1,x2)} y={Math.min(y1,y2)} width={Math.abs(x2-x1)} height={Math.abs(y2-y1)} rx={3} {...props}/>;
       if (sub==="circle") { const cx=(x1+x2)/2,cy=(y1+y2)/2,rx2=Math.abs(x2-x1)/2,ry=Math.abs(y2-y1)/2; return <ellipse key={key} cx={cx} cy={cy} rx={rx2} ry={ry} {...props}/>; }
       if (sub==="triangle") {
@@ -868,14 +1077,14 @@ export default function SignalFlowPage() {
       if (sub==="arrow") {
         const ang=Math.atan2(y2-y1,x2-x1), hl=14, ha=Math.PI/6;
         const ax1=x2-hl*Math.cos(ang-ha), ay1=y2-hl*Math.sin(ang-ha), ax2=x2-hl*Math.cos(ang+ha), ay2=y2-hl*Math.sin(ang+ha);
-        return <g key={key} style={{cursor:"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}>
+        return <g key={key} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}>
           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw2} strokeLinecap="round"/>
           <polygon points={`${x2},${y2} ${ax1},${ay1} ${ax2},${ay2}`} fill={stroke}/>
         </g>;
       }
     }
     if (a.type === "text") return (
-      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:"pointer",...selRing}}
+      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}}
         onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}
         onDoubleClick={e=>{
           e.stopPropagation();
@@ -903,11 +1112,17 @@ export default function SignalFlowPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
+      if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "z" && !isTyping) {
+        e.preventDefault();
+        undoRef.current();
+        return;
+      }
       if(e.key === "Escape") {
         // finish (not discard) an in-progress polyline — the drawn segments stay
         if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
-        setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedIds(new Set()); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
-        textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null;
+        setSelected(null); setSelectedConn(null); setSelectedRoom(null); clearMarqueeSel(); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
+        // Escape keeps (commits) any in-progress text rather than discarding it
+        if (textInputRef.current) commitTextRef.current();
         return;
       }
       if(e.key === "Enter" && !isTyping && polylineKeyRef.current.active && drawRef.current?.pts) {
@@ -926,7 +1141,7 @@ export default function SignalFlowPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteSelected]);
 
-  const clearAll = () => { setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); setSelectedIds(new Set()); nextId.current=1; annotIdRef.current=1; };
+  const clearAll = () => { pushUndo(); setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel(); nextId.current=1; annotIdRef.current=1; };
 
   // Expand endpoint + waypoints into an axis-aligned point list, inserting
   // elbows where consecutive points aren't aligned (e.g. after a device moves)
@@ -1294,6 +1509,12 @@ export default function SignalFlowPage() {
             Click to add points — hold Shift for straight lines, Enter or double-click to finish
           </div>
         )}
+        {/* Multi-selection status */}
+        {(selectedIds.size + selectedAnnIds.size + selectedRoomIds.size) > 0 && !connecting && (
+          <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
+            {(() => { const n = selectedIds.size + selectedAnnIds.size + selectedRoomIds.size; return `${n} item${n > 1 ? "s" : ""} selected — drag a device to move all, Delete to remove`; })()}
+          </div>
+        )}
         {/* Connection status */}
         {connecting && (
           <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
@@ -1306,8 +1527,9 @@ export default function SignalFlowPage() {
         <svg ref={canvasRef} width="100%" height="100%" onMouseDown={handleCanvasMouseDown}
           onMouseMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
           onMouseUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
-          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);setSelectedIds(new Set());}}}
-          style={{cursor:activeTool==="text"?"text":activeTool?"crosshair":marquee?"crosshair":"default"}}>
+          onMouseLeave={activeTool==="eraser"?()=>setEraserCursor(null):undefined}
+          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);clearMarqueeSel();}}}
+          style={{cursor:activeTool==="text"?"text":activeTool==="eraser"?"none":activeTool?"crosshair":marquee?"crosshair":"default"}}>
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgb(var(--border))" strokeWidth="0.5" opacity="0.4"/>
@@ -1328,13 +1550,13 @@ export default function SignalFlowPage() {
 
           {/* Room Boundaries */}
           {rooms.map((room:any)=>{
-            const isSel = selectedRoom===room.id;
+            const isSel = selectedRoom===room.id || selectedRoomIds.has(room.id);
             const rx = room.x+panOffset.x, ry = room.y+panOffset.y;
             const handleSize = 8;
             return (
               <g key={room.id}>
-                <rect x={rx} y={ry} width={room.w} height={room.h} rx={3} fill={room.color+"08"} stroke={room.color+(isSel?"88":"44")} strokeWidth={isSel?2.5:1.5} strokeDasharray={isSel?"8 4":"6 4"} onMouseDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:"move"}} />
-                <rect x={rx} y={ry-1} width={Math.min(room.w,Math.max(100,room.label.length*9+24))} height={24} rx={3} fill={room.color+"22"} stroke={room.color+"55"} strokeWidth={1} onMouseDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:"move"}} />
+                <rect x={rx} y={ry} width={room.w} height={room.h} rx={3} fill={room.color+"08"} stroke={room.color+(isSel?"88":"44")} strokeWidth={isSel?2.5:1.5} strokeDasharray={isSel?"8 4":"6 4"} onMouseDown={(e)=>handleRoomBodyMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default"}} />
+                <rect x={rx} y={ry-1} width={Math.min(room.w,Math.max(100,room.label.length*9+24))} height={24} rx={3} fill={room.color+"22"} stroke={room.color+"55"} strokeWidth={1} onMouseDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"move"}} />
                 {editingRoom===room.id ? (
                   <foreignObject x={rx+4} y={ry+1} width={Math.max(160,room.label.length*9+30)} height={22}>
                     <input autoFocus defaultValue={room.label} onBlur={(e)=>finishRoomEdit(room.id,(e.target as HTMLInputElement).value)} onKeyDown={(e)=>{if(e.key==="Enter")finishRoomEdit(room.id,(e.target as HTMLInputElement).value);}} style={{width:"100%",padding:"2px 6px",background:"rgb(var(--forge-surface))",border:"1px solid "+room.color,borderRadius:3,color:"rgb(var(--text-body))",fontSize:11,fontWeight:600,fontFamily:"Inter, sans-serif",outline:"none",boxSizing:"border-box",height:"20px"}} />
@@ -1382,7 +1604,8 @@ export default function SignalFlowPage() {
             const leftPorts = dev.ports.filter((p:any)=>p.side==="left");
             const rightPorts = dev.ports.filter((p:any)=>p.side==="right");
             return (
-              <g key={dev.id} onMouseDown={(e)=>handleDeviceMouseDown(e,dev)} onContextMenu={(e)=>handleDeviceContextMenu(e,dev)} style={{cursor:"grab"}}>
+              <g key={dev.id} onMouseDown={(e)=>handleDeviceMouseDown(e,dev)} onContextMenu={(e)=>handleDeviceContextMenu(e,dev)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"grab"}}>
+                {isSel && <rect x={dev.x+panOffset.x-4} y={dev.y+panOffset.y-4} width={dev.w+8} height={dev.h+8} rx={9} fill="rgba(139,92,246,0.06)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="5 3" />}
                 <rect x={dev.x+panOffset.x+2} y={dev.y+panOffset.y+2} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--text-faint))" opacity={0.15} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#8b5cf6":"#4b5563"} strokeWidth={isSel?2:1.5} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={4} height={dev.h} rx={2} fill="#4b5563" opacity={0.8} />
@@ -1421,6 +1644,11 @@ export default function SignalFlowPage() {
           {/* Pencil / Shape / Text annotations (above devices) */}
           {annotations.filter((a:any)=>a.type!=="highlight"&&a.id!==editingAnnotId).map(a=>renderAnnotation(a))}
           {liveAnnot && liveAnnot.type!=="highlight" && renderAnnotation(liveAnnot, true)}
+
+          {/* Eraser cursor — circle sized to the active eraser */}
+          {activeTool === "eraser" && eraserCursor && (
+            <circle cx={eraserCursor.x} cy={eraserCursor.y} r={eraserSize} fill="rgba(59,130,246,0.05)" stroke="#2563eb" strokeWidth={2/view.zoom} pointerEvents="none"/>
+          )}
 
           {/* Marquee selection rectangle — blue solid = window, green dashed = crossing */}
           {marquee && (()=>{
@@ -1477,7 +1705,7 @@ export default function SignalFlowPage() {
                 rows={1}
                 value={textValue}
                 onChange={e=>{textValueRef.current=e.target.value;setTextValue(e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
-                onKeyDown={e=>{e.stopPropagation();if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitText();}if(e.key==="Escape"){textInputRef.current=null;setTextInput(null);setTextValue("");setEditingAnnotId(null);editingAnnotIdRef.current=null;}}}
+                onKeyDown={e=>{e.stopPropagation();if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();commitText();}if(e.key==="Escape"){commitText();}}}
                 style={{background:"rgb(var(--forge-panel))",border:"2px solid #8b5cf6",borderRadius:6,outline:"none",fontSize:textFontSize,fontWeight:textBold?"700":"400",fontStyle:textItalic?"italic":"normal",textAlign,color:"rgb(var(--text-body))",fontFamily:"Inter,sans-serif",padding:"6px 10px",minWidth:140,resize:"none",overflow:"hidden",caretColor:"#8b5cf6",boxShadow:"0 2px 12px rgba(139,92,246,0.2)",lineHeight:1.4}}
                 placeholder="Type here…"
               />
@@ -1554,6 +1782,7 @@ export default function SignalFlowPage() {
           </button>
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
           <button onClick={()=>{
+            pushUndo();
             setConnections((prev:any[])=>prev.filter((c:any)=>c.from.deviceId!==deviceContextMenu.deviceId&&c.to.deviceId!==deviceContextMenu.deviceId));
             setDevices((prev:any[])=>prev.filter((d:any)=>d.id!==deviceContextMenu.deviceId));
             if(selected===deviceContextMenu.deviceId) setSelected(null);
@@ -1694,6 +1923,7 @@ export default function SignalFlowPage() {
             <button
               disabled={!editDeviceName.trim()}
               onClick={()=>{
+                pushUndo();
                 const removedIds = new Set(editingDevice.ports.map((p:any)=>p.id).filter((id:string)=>!editDevicePorts.find((p:any)=>p.id===id)));
                 if(removedIds.size>0) setConnections((prev:any[])=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
                 setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,w:0,h:0}):d));

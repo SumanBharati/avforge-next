@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
+import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 
 export default function RackPlannerPage() {
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
@@ -25,24 +26,37 @@ export default function RackPlannerPage() {
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const { updateSlice } = useBOM();
 
+  // Annotations (Text / Shape / Pencil / Highlight / Eraser) — drawn on an
+  // overlay in the rack container's pixel space
+  const rackAreaRef = useRef<HTMLDivElement>(null);
+  const annotate = useCanvasAnnotations({
+    getPoint: (e) => {
+      const el = rackAreaRef.current; if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    },
+  });
+
   // Load
   useEffect(() => {
     loadToolData("rack-planner").then((data) => {
       if (data?.items) setItems(data.items as typeof items);
+      if (data?.annotations) annotate.setAnnotations(data.annotations as any[]);
       setLoaded(true);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-save
-  const doSave = useCallback((list: typeof items) => {
-    saveToolData("rack-planner", { items: list });
+  const doSave = useCallback((list: typeof items, anns: any[]) => {
+    saveToolData("rack-planner", { items: list, annotations: anns });
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => doSave(items), 1000);
-  }, [items, loaded, doSave]);
+    saveTimer.current = setTimeout(() => doSave(items, annotate.annotations), 1000);
+  }, [items, annotate.annotations, loaded, doSave]);
 
   // Sync rack items to shared BOM
   useEffect(() => {
@@ -194,8 +208,16 @@ export default function RackPlannerPage() {
         </div>
 
         {/* Right: Rack Visualization */}
-        <div className="flex flex-1 justify-center overflow-x-auto">
-          <div style={{position:"relative"}}>
+        <div className="flex flex-1 flex-col items-center overflow-x-auto">
+          {/* Annotate toolbar */}
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"stretch",gap:2,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:8,padding:"3px 8px"}}>
+              {annotate.toolbarButtons}
+              <span style={{alignSelf:"center",marginLeft:6,fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em"}}>Annotate</span>
+            </div>
+            {annotate.optionsBar}
+          </div>
+          <div ref={rackAreaRef} style={{position:"relative"}}>
             {/* Rack frame */}
             <div style={{width:rackW+60,background:"rgb(var(--forge-surface))",borderRadius:6,border:"2px solid rgb(var(--border))",padding:"6px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.15),inset 0 0 30px rgba(0,0,0,0.05)"}}>
               {/* Top plate */}
@@ -302,10 +324,24 @@ export default function RackPlannerPage() {
             <div style={{textAlign:"center",marginTop:8,fontSize:10,color:"rgb(var(--text-subtle))"}}>
               {totalRU>maxRU && <div style={{color:"#ef4444",fontWeight:600,fontSize:11}}>⚠ Over capacity by {totalRU-maxRU} RU</div>}
             </div>
+
+            {/* Annotation overlay — interactive only while a tool is active */}
+            <svg
+              onMouseDown={annotate.handleDown}
+              onMouseMove={annotate.handleMove}
+              onMouseUp={annotate.handleUp}
+              onMouseLeave={annotate.handleLeave}
+              onDoubleClick={annotate.handleDoubleClick}
+              style={{position:"absolute",inset:0,width:"100%",height:"100%",zIndex:4,overflow:"visible",pointerEvents:annotate.activeTool?"auto":"none",cursor:annotate.cursor||undefined}}>
+              {annotate.layer}
+            </svg>
           </div>
         </div>
       </div>
       </div>{/* end main content */}
+
+      {/* Annotation text editor overlay */}
+      {annotate.overlay}
 
       {/* Shared BOM Panel */}
       <BOMPanel

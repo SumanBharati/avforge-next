@@ -7,6 +7,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { searchProducts } from "@/lib/av-products";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
+import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 
 /* Theme-aware canvas colors */
 const canvasColors = {
@@ -180,6 +181,9 @@ export default function RoomDesignerPage() {
   const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
   const clearSelection = () => { setSelected(new Set()); setSelectedUids(new Set()); };
   const dragStartedRef = useRef(false);
+  // Set when a ctrl+click toggle or group drag just happened, so the click that
+  // follows on mouseup doesn't wipe the multi-selection via the canvas handler
+  const suppressClickClear = useRef(false);
 
   const [deletedChairs, setDeletedChairs] = useState<Set<number>>(new Set());
   const [tableDeleted,  setTableDeleted]  = useState(false);
@@ -191,8 +195,8 @@ export default function RoomDesignerPage() {
   const [doorDragId, setDoorDragId] = useState<number|null>(null);
   const [doorDragStart, setDoorDragStart] = useState<{svgX:number;svgY:number;origWall:string;origPos:number}|null>(null);
   const [tableCenterX,  setTableCenterX]  = useState<number|null>(null);
-  const [dragNewTable,  setDragNewTable]  = useState<{active:boolean;worldX:number;worldY:number}|null>(null);
-  const [dragNewChair,  setDragNewChair]  = useState<{active:boolean;worldX:number;worldY:number}|null>(null);
+  const [dragNewTable,  setDragNewTable]  = useState<{active:boolean;worldX:number;worldY:number;alignRef?:{x:number;y:number}|null}|null>(null);
+  const [dragNewChair,  setDragNewChair]  = useState<{active:boolean;worldX:number;worldY:number;alignRef?:{x:number;y:number}|null}|null>(null);
   const [dragNewDevice, setDragNewDevice] = useState<{active:boolean;item:DeviceCatalogItem;worldX:number;worldY:number;wall:"north"|"south"|"east"|"west"|null}|null>(null);
   // Free-angle rotation drag
   const [rotDragUid, setRotDragUid] = useState<number|null>(null);
@@ -256,6 +260,24 @@ export default function RoomDesignerPage() {
   // Per-canvas lock: keys are "plan" | "ceil" | "mic" | "wallSpk" | "wallMic".
   // A locked canvas ignores panning and zooming until unlocked.
   const [lockedViews,   setLockedViews]   = useState<Record<string, boolean>>({});
+  // Per-canvas collapse: same keys — a collapsed canvas hides its body, leaving just the title bar
+  const [collapsedCanvases, setCollapsedCanvases] = useState<Set<string>>(new Set());
+  const toggleCanvasCollapsed = (key: string) => setCollapsedCanvases(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const collapseToggle = (key: string) => (
+    <button
+      onClick={() => toggleCanvasCollapsed(key)}
+      title={collapsedCanvases.has(key) ? "Expand canvas" : "Collapse canvas"}
+      style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",display:"flex",alignItems:"center",justifyContent:"center",width:24,height:24,borderRadius:5,border:"1px solid rgb(var(--border))",background:"rgb(var(--forge-surface) / 0.4)",color:"rgb(var(--text-muted))",cursor:"pointer",padding:0}}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{transform:collapsedCanvases.has(key)?"rotate(-90deg)":"none",transition:"transform 0.15s"}}>
+        <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
+  );
   const [moveMode,      setMoveMode]      = useState(false);
   const [moveDragStart, setMoveDragStart] = useState<{x:number;y:number}|null>(null);
   const [marquee, setMarquee] = useState<{startSvgX:number;startSvgY:number;curSvgX:number;curSvgY:number}|null>(null);
@@ -289,6 +311,18 @@ export default function RoomDesignerPage() {
   const wallMicSvgRef = useRef<SVGSVGElement>(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Annotations (Text / Shape / Pencil / Highlight / Eraser) on the floor plan
+  // canvas — stored in the plan SVG's user space so they pan/zoom with the view
+  const annotate = useCanvasAnnotations({
+    getPoint: (e) => {
+      const svg = svgRef.current; if (!svg) return null;
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+      return { x: p.x, y: p.y };
+    },
+    getZoom: () => zoom,
+  });
 
   // Wheel pan/zoom for all five canvases (same gestures as Signal Flow):
   // wheel pans, shift+wheel pans horizontally, ctrl/cmd+wheel zooms.
@@ -353,6 +387,7 @@ export default function RoomDesignerPage() {
   const [isDrawingWall,   setIsDrawingWall]   = useState(false);
   const [wallPoints,      setWallPoints]      = useState<{x:number;y:number}[]>([]);
   const [wallMousePos,    setWallMousePos]    = useState<{x:number;y:number}|null>(null);
+  const [wallSnapPoint,   setWallSnapPoint]   = useState<{x:number;y:number}|null>(null);
   const [wallLengthInput, setWallLengthInput] = useState("");
   const [cursorScreenPos, setCursorScreenPos] = useState<{x:number;y:number}|null>(null);
   const [orthoMode,       setOrthoMode]       = useState(false);
@@ -360,6 +395,7 @@ export default function RoomDesignerPage() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const WALL_SNAP_DIST = 1; // feet — snap to first point to close polygon
   const TRACK_SNAP_DIST = 0.4; // feet — object-snap-tracking alignment tolerance
+  const ENDPOINT_SNAP_DIST = 0.8; // feet — snap cursor onto existing wall endpoints / room corners
   const [trackGuides, setTrackGuides] = useState<{from:{x:number;y:number};to:{x:number;y:number}}[]>([]);
   // Dragging one endpoint of a drawn wall to stretch/shorten it (end 0 = start, 1 = end)
   const [wallStretchDrag, setWallStretchDrag] = useState<{uid:number; end:0|1}|null>(null);
@@ -406,14 +442,15 @@ export default function RoomDesignerPage() {
     saveTimerRef.current = setTimeout(() => {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+        annotations: annotate.annotations,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
 
   // Auto-save on changes (after step 2 is active)
   React.useEffect(() => {
     if (step === 2) triggerAutoSave();
-  }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, step, triggerAutoSave]);
+  }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, step, triggerAutoSave]);
 
   // Sync placed AV devices to shared BOM
   const { updateSlice } = useBOM();
@@ -518,11 +555,12 @@ export default function RoomDesignerPage() {
     const handler = () => {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+        annotations: annotate.annotations,
       });
     };
     window.addEventListener("avforge-save", handler);
     return () => window.removeEventListener("avforge-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
 
   // Load room dimensions from site survey + saved design
   React.useEffect(() => {
@@ -586,6 +624,7 @@ export default function RoomDesignerPage() {
           if (saved.config.showTable !== undefined) setShowTable(saved.config.showTable as boolean);
           if (saved.config.selectedWall) setSelectedWall(saved.config.selectedWall as string);
           if (saved.config.placedDoors) setPlacedDoors(saved.config.placedDoors as PlacedDoor[]);
+          if (saved.config.annotations) annotate.setAnnotations(saved.config.annotations as any[]);
           setStep(2);
         }
       });
@@ -790,10 +829,25 @@ export default function RoomDesignerPage() {
 
   const handleDeviceMouseDown = (e: React.MouseEvent, uid: number) => {
     if (isDrawingWall) return; // Don't drag devices while drawing walls
+    if (annotate.activeTool) { annotate.handleDown(e); return; } // Annotation tools draw over devices
     if (dragNewChair?.active || dragNewTable?.active || dragNewDoor?.active) return; // Don't drag while placement tool is active
     e.stopPropagation();
+    suppressClickClear.current = false;
+    // Ctrl/Cmd+click: toggle this device in the multi-selection instead of starting a drag
+    if (e.ctrlKey || e.metaKey) {
+      suppressClickClear.current = true;
+      setSelectedUids(prev => {
+        const next = new Set(prev);
+        if (selectedUid !== null) next.add(selectedUid);
+        if (next.has(uid)) next.delete(uid); else next.add(uid);
+        return next;
+      });
+      setSelectedUid(null);
+      return;
+    }
     const dev0 = placedDevices.find(d => d.uid === uid);
     freeDragPos.current = dev0 ? { x: dev0.x, y: dev0.y } : null;
+    if (selectedUids.has(uid)) pushUndo(); // grabbing a multi-selected device drags the whole group
     setDragUid(uid); setSelectedUid(uid); setShowHfov(false);
     const svg = svgRef.current; if (!svg) return;
     const pt = svg.createSVGPoint();
@@ -812,6 +866,27 @@ export default function RoomDesignerPage() {
     const dyPx = svgP.y - dragStart.y;
     const dev = placedDevices.find(d => d.uid === dragUid);
     if (!dev) return;
+    // Dragging a device that's part of a multi-selection — translate the whole
+    // selection together (other devices, plus any selected chairs/table)
+    if (viewMode === "plan" && selectedUids.has(dragUid)) {
+      suppressClickClear.current = true;
+      const dxW = dxPx / planScale, dyW = dyPx / planScale;
+      setPlacedDevices(prev => prev.map(d => selectedUids.has(d.uid)
+        ? { ...d, x: Math.max(cMinX, Math.min(cMaxX, d.x + dxW)), y: Math.max(cMinY, Math.min(cMaxY, d.y + dyW)) }
+        : d));
+      if (selected.has("table")) {
+        setTableCenterX(prev => (prev ?? roomW / 2) + dxW);
+        setTableWallDist(prev => prev + dyW);
+      }
+      selected.forEach(id => {
+        if (id.startsWith("chair:")) {
+          const idx = parseInt(id.split(":")[1]);
+          setChairOffsets(prev => ({ ...prev, [idx]: { dx: (prev[idx]?.dx ?? 0) + dxW, dy: (prev[idx]?.dy ?? 0) + dyW } }));
+        }
+      });
+      setDragStart({ x: svgP.x, y: svgP.y });
+      return;
+    }
     if (viewMode === "plan") {
       const dxW = dxPx / planScale, dyW = dyPx / planScale;
       if (dev.type === "display") {
@@ -876,7 +951,7 @@ export default function RoomDesignerPage() {
       wallEdgeClicked.current = true;
     }
     if (dragNewDevice?.active) handleNewDeviceDrop();
-    if (wallStretchDrag) { setWallStretchDrag(null); setTrackGuides([]); }
+    if (wallStretchDrag) { setWallStretchDrag(null); setTrackGuides([]); setWallSnapPoint(null); }
     setDragUid(null); setDragStart(null); setWallDragEdge(null); setWallDragStart(null); setWallDragged(false); setMultiDrag(null); setTableResizeDrag(null); setDoorDragId(null); setDoorDragStart(null); setRotDragUid(null); setRotDragCenter(null); setRotatingTable(false); setTableRotCenter(null);
   };
 
@@ -1147,6 +1222,21 @@ export default function RoomDesignerPage() {
     }
   };
 
+  // Shift-aligned placement: lock the ghost onto a horizontal or vertical line through
+  // the most recently placed item of the same kind (whichever axis the cursor is closer to),
+  // so repeated drops line up in straight rows or columns.
+  const alignToLastPlaced = (wx: number, wy: number, itemId: string, shift: boolean): {x:number;y:number;ref:{x:number;y:number}|null} => {
+    if (!shift) return { x: wx, y: wy, ref: null };
+    let ref: PlacedDevice|undefined;
+    for (let i = placedDevices.length - 1; i >= 0; i--) {
+      if (placedDevices[i].id === itemId) { ref = placedDevices[i]; break; }
+    }
+    if (!ref) return { x: wx, y: wy, ref: null };
+    return Math.abs(wx - ref.x) >= Math.abs(wy - ref.y)
+      ? { x: wx, y: ref.y, ref: { x: ref.x, y: ref.y } }
+      : { x: ref.x, y: wy, ref: { x: ref.x, y: ref.y } };
+  };
+
   // New table drag from sidebar
   const handleNewTableDrag = (e: React.MouseEvent) => {
     if (!dragNewTable?.active) return;
@@ -1155,7 +1245,8 @@ export default function RoomDesignerPage() {
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
     const wx = Math.max(cMinX, Math.min(cMaxX, (svgP.x - planOffX) / planScale));
     const wy = Math.max(cMinY, Math.min(cMaxY, (svgP.y - planOffY) / planScale));
-    setDragNewTable({ active: true, worldX: wx, worldY: wy });
+    const aligned = alignToLastPlaced(wx, wy, "conf-table", e.shiftKey);
+    setDragNewTable({ active: true, worldX: aligned.x, worldY: aligned.y, alignRef: aligned.ref });
   };
   const handleNewTableDrop = () => {
     if (!dragNewTable?.active) return;
@@ -1173,7 +1264,8 @@ export default function RoomDesignerPage() {
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
     const wx = Math.max(cMinX, Math.min(cMaxX, (svgP.x - planOffX) / planScale));
     const wy = Math.max(cMinY, Math.min(cMaxY, (svgP.y - planOffY) / planScale));
-    setDragNewChair({ active: true, worldX: wx, worldY: wy });
+    const aligned = alignToLastPlaced(wx, wy, "side-chair", e.shiftKey);
+    setDragNewChair({ active: true, worldX: aligned.x, worldY: aligned.y, alignRef: aligned.ref });
   };
   const handleNewChairDrop = () => {
     if (!dragNewChair?.active) return;
@@ -1271,6 +1363,7 @@ export default function RoomDesignerPage() {
   // Multi-item drag handler — moves all selected items together
   const handleMultiDragStart = (triggerId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (annotate.activeTool) { annotate.handleDown(e); return; } // Annotation tools draw over table/chairs
     const svg = svgRef.current; if (!svg) return;
     const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
@@ -1387,6 +1480,7 @@ export default function RoomDesignerPage() {
         createWallSegments(closed);
         setWallPoints([]);
         setWallMousePos(null);
+        setWallSnapPoint(null);
         setTrackGuides([]);
         setIsDrawingWall(false);
         return;
@@ -1432,6 +1526,7 @@ export default function RoomDesignerPage() {
     setIsDrawingWall(false);
     setWallPoints([]);
     setWallMousePos(null);
+    setWallSnapPoint(null);
     setWallLengthInput("");
     setTrackGuides([]);
   };
@@ -1475,19 +1570,41 @@ export default function RoomDesignerPage() {
     return { x: from.x + Math.cos(snapped) * dist, y: from.y + Math.sin(snapped) * dist };
   };
 
-  // Object snap tracking (AutoCAD-style): reference points the cursor can align with —
-  // vertices of the polyline being drawn plus endpoints of already-drawn wall segments
-  const getTrackingRefs = (): {x:number;y:number}[] => {
-    const refs: {x:number;y:number}[] = [...wallPoints];
+  // Endpoints of every drawn wall segment plus the room's perimeter corners —
+  // the points the cursor can snap onto or track against.
+  const getWallEndpointRefs = (excludeUid?: number): {x:number;y:number}[] => {
+    const refs: {x:number;y:number}[] = [];
     placedDevices.forEach(d => {
-      if (d.id === "wall-partition" && d.wallAngle !== undefined) {
+      if (d.uid !== excludeUid && d.id === "wall-partition" && d.wallAngle !== undefined) {
         const hx = Math.cos(d.wallAngle) * d.w / 2;
         const hy = Math.sin(d.wallAngle) * d.w / 2;
         refs.push({ x: d.x - hx, y: d.y - hy }, { x: d.x + hx, y: d.y + hy });
       }
     });
+    if (!isCustomBlank) {
+      refs.push({ x: 0, y: 0 }, { x: roomW, y: 0 }, { x: 0, y: roomL }, { x: roomW, y: roomL });
+    }
     return refs;
   };
+
+  // Endpoint snap (AutoCAD-style osnap): lock the cursor onto the nearest wall
+  // endpoint / room corner within tolerance. Overrides grid snap, ortho and tracking.
+  const findEndpointSnap = (pos: {x:number;y:number}, excludeUid?: number): {x:number;y:number}|null => {
+    const last = wallPoints.length > 0 ? wallPoints[wallPoints.length - 1] : null;
+    let best: {x:number;y:number}|null = null;
+    let bestDist = ENDPOINT_SNAP_DIST;
+    for (const r of [...getWallEndpointRefs(excludeUid), ...wallPoints.slice(0, -1)]) {
+      // Never snap back onto the segment's own start point — it would make a zero-length wall
+      if (last && Math.abs(r.x - last.x) < 1e-9 && Math.abs(r.y - last.y) < 1e-9) continue;
+      const d = Math.hypot(pos.x - r.x, pos.y - r.y);
+      if (d < bestDist) { bestDist = d; best = r; }
+    }
+    return best;
+  };
+
+  // Object snap tracking (AutoCAD-style): reference points the cursor can align with —
+  // vertices of the polyline being drawn plus endpoints of already-drawn wall segments
+  const getTrackingRefs = (): {x:number;y:number}[] => [...wallPoints, ...getWallEndpointRefs()];
 
   // Snap pos onto the X and/or Y of the nearest aligned reference point.
   // lockX/lockY exclude an axis already fixed by ortho mode.
@@ -1511,9 +1628,11 @@ export default function RoomDesignerPage() {
 
   // Resolve the effective wall-drawing cursor position: grid snap → ortho constraint →
   // object snap tracking. Shared by mouse-move (preview) and click (commit) so they agree.
-  const computeWallCursorPos = (e: React.MouseEvent): { pos: {x:number;y:number}; guides: {from:{x:number;y:number};to:{x:number;y:number}}[] } | null => {
+  const computeWallCursorPos = (e: React.MouseEvent): { pos: {x:number;y:number}; guides: {from:{x:number;y:number};to:{x:number;y:number}}[]; endpointSnap?: boolean } | null => {
     let pos = screenToWorld(e);
     if (!pos) return null;
+    const endpoint = findEndpointSnap(pos);
+    if (endpoint) return { pos: endpoint, guides: [], endpointSnap: true };
     pos = snapToGrid(pos);
     let lockX = false, lockY = false, skipTracking = false;
     if (wallPoints.length > 0 && (orthoMode || e.shiftKey)) {
@@ -1549,11 +1668,25 @@ export default function RoomDesignerPage() {
     if (!dev || dev.wallAngle === undefined) return;
     let pos = screenToWorld(e);
     if (!pos) return;
-    pos = snapToGrid(pos);
     const half = dev.w / 2;
     const e0 = { x: dev.x - Math.cos(dev.wallAngle) * half, y: dev.y - Math.sin(dev.wallAngle) * half };
     const e1 = { x: dev.x + Math.cos(dev.wallAngle) * half, y: dev.y + Math.sin(dev.wallAngle) * half };
     const fixed = wallStretchDrag.end === 0 ? e1 : e0;
+    const endpoint = findEndpointSnap(pos, dev.uid);
+    if (endpoint) {
+      setWallSnapPoint(endpoint);
+      setTrackGuides([]);
+      const sdx = endpoint.x - fixed.x, sdy = endpoint.y - fixed.y;
+      const slen = Math.sqrt(sdx*sdx + sdy*sdy);
+      if (slen < 0.1) return;
+      const sAngle = wallStretchDrag.end === 0
+        ? Math.atan2(fixed.y - endpoint.y, fixed.x - endpoint.x)
+        : Math.atan2(endpoint.y - fixed.y, endpoint.x - fixed.x);
+      setPlacedDevices(prev => prev.map(d => d.uid === dev.uid ? { ...d, x: (endpoint.x + fixed.x) / 2, y: (endpoint.y + fixed.y) / 2, w: slen, wallAngle: sAngle } : d));
+      return;
+    }
+    setWallSnapPoint(null);
+    pos = snapToGrid(pos);
     let lockX = false, lockY = false, skipTracking = false;
     if (e.shiftKey) {
       pos = snapToGrid(snapToAxis(fixed, pos));
@@ -1595,9 +1728,11 @@ export default function RoomDesignerPage() {
       const rect = canvasContainerRef.current.getBoundingClientRect();
       setCursorScreenPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     }
-    if (!isDrawingWall || wallPoints.length === 0) return;
+    if (!isDrawingWall || isScalingFloorPlan) return;
     const resolved = computeWallCursorPos(e);
     if (!resolved) return;
+    setWallSnapPoint(resolved.endpointSnap ? resolved.pos : null);
+    if (wallPoints.length === 0) return;
     setWallMousePos(resolved.pos);
     setTrackGuides(resolved.guides);
   };
@@ -2475,6 +2610,17 @@ export default function RoomDesignerPage() {
               <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Navigate</span>
             </div>
 
+            {/* Divider */}
+            <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
+
+            {/* Annotate group */}
+            <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+              <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+                {annotate.toolbarButtons}
+              </div>
+              <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
+            </div>
+
             {/* Spacer pushes export button to far right */}
             <div style={{flex:1}}/>
             <div style={{display:"flex",alignItems:"center",paddingRight:4}}>
@@ -2497,18 +2643,19 @@ export default function RoomDesignerPage() {
         <>
         {/* Row 1: Video Calculations */}
         <div style={{flexShrink:0}}>
-          <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations</div>
+          <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations{collapseToggle("plan")}</div>
         </div>
-        <div style={{display:"flex",height:"50vh",minHeight:400}}>
+        <div style={{display:collapsedCanvases.has("plan")?"none":"flex",height:"50vh",minHeight:400}}>
         {/* Floor Plan */}
         <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
-          style={{background:cc.card,userSelect:"none",cursor:isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default"}}
-          onMouseMove={e=>{if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
-          onMouseUp={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
-          onMouseLeave={()=>{if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
-          onMouseDown={e=>{if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
-          onClick={e=>{if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();}}}>
+          style={{background:cc.card,userSelect:"none",cursor:(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
+          onMouseMove={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
+          onMouseUp={()=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseLeave={()=>{annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onDoubleClick={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleDoubleClick(e);}}}
+          onMouseDown={e=>{if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
+          onClick={e=>{if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();}}}>
 
           {viewMode==="plan" ? (
             <g>
@@ -2703,6 +2850,13 @@ export default function RoomDesignerPage() {
                   </g>
                 );
               })()}
+              {/* Endpoint snap marker — square over the endpoint the cursor is locked onto */}
+              {(isDrawingWall || wallStretchDrag) && !isScalingFloorPlan && wallSnapPoint && (
+                <g pointerEvents="none">
+                  <rect x={pX(wallSnapPoint.x)-5} y={pY(wallSnapPoint.y)-5} width={10} height={10} fill="none" stroke="#22c55e" strokeWidth={2} />
+                  <circle cx={pX(wallSnapPoint.x)} cy={pY(wallSnapPoint.y)} r={1.5} fill="#22c55e" />
+                </g>
+              )}
               {!isCustomBlank && (
                 <>
                   <text x={pX(roomW/2)} y={Math.max(10, pY(0)-20)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
@@ -2803,6 +2957,9 @@ export default function RoomDesignerPage() {
                 const ph = 8 * planScale;
                 return (
                   <g opacity={0.5}>
+                    {dragNewTable.alignRef && (
+                      <line x1={pX(dragNewTable.alignRef.x)} y1={pY(dragNewTable.alignRef.y)} x2={pX(dragNewTable.worldX)} y2={pY(dragNewTable.worldY)} stroke="#22c55e" strokeWidth={1} strokeDasharray="2 4" />
+                    )}
                     <rect x={pX(dragNewTable.worldX) - pw/2} y={pY(dragNewTable.worldY) - ph/2} width={pw} height={ph} rx={3} fill="#cbd5e1" fillOpacity={0.3} stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 3" />
                     <text x={pX(dragNewTable.worldX)} y={pY(dragNewTable.worldY)} textAnchor="middle" dominantBaseline="central" fontSize={9} fill="#8b5cf6">Table</text>
                   </g>
@@ -2858,6 +3015,9 @@ export default function RoomDesignerPage() {
                 const cy2 = pY(dragNewChair.worldY);
                 return (
                   <g opacity={0.5}>
+                    {dragNewChair.alignRef && (
+                      <line x1={pX(dragNewChair.alignRef.x)} y1={pY(dragNewChair.alignRef.y)} x2={cx2} y2={cy2} stroke="#22c55e" strokeWidth={1} strokeDasharray="2 4" />
+                    )}
                     <rect x={cx2-cW2/2} y={cy2-cW2/2} width={cW2} height={cW2} rx={rx2} fill="#d1d5db" stroke="#8b5cf6" strokeWidth={1} />
                   </g>
                 );
@@ -2878,7 +3038,7 @@ export default function RoomDesignerPage() {
                   <g key={dev.uid}
                     style={{cursor:isDrawingWall?"crosshair":"grab",pointerEvents:isDrawingWall?"none":"auto"}}
                     onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)}
-                    onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}}
+                    onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}}
                   >
                     {(() => {
                       const wallThickPx = (dev.h ?? 0.15) * planScale;
@@ -3200,7 +3360,7 @@ export default function RoomDesignerPage() {
                   const fpx = devPx, fpy = pY(dev.y);
                   const rot = dev.rotation || 0;
                   if (isChair) {
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
                       {isSelected && <rect x={fpx-cW2/2-3} y={fpy-cW2/2-3} width={cW2+6} height={cW2+6} rx={3} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       <rect x={fpx-cW2/2} y={fpy-cW2/2} width={cW2} height={cW2} rx={rx2} fill="#d1d5db" stroke={isSelected?"#8b5cf6":"#b0b5be"} strokeWidth={isSelected?1.2:0.8}/>
                       {isSelected && (
@@ -3211,7 +3371,7 @@ export default function RoomDesignerPage() {
                       )}
                     </g>);
                   }
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
                     {isSelected && <rect x={fpx-fw/2-3} y={fpy-fh/2-3} width={fw+6} height={fh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                     <g transform={`rotate(${rot},${fpx},${fpy})`}>
                       <rect x={fpx-fw/2} y={fpy-fh/2} width={fw} height={fh} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke={isSelected?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1}/>
@@ -3915,7 +4075,13 @@ export default function RoomDesignerPage() {
               )}
             </g>
           )}
+          {/* Annotations layer — drawn above the plan content */}
+          {viewMode==="plan" && annotate.layer}
         </svg>
+        {/* Annotation tool options (shape/stroke/color/eraser size) */}
+        {annotate.optionsBar && (
+          <div style={{position:"absolute",top:8,left:"50%",transform:"translateX(-50%)",zIndex:30}}>{annotate.optionsBar}</div>
+        )}
 
         {/* AutoCAD-style length input — appears at cursor when drawing walls */}
         {isDrawingWall && wallPoints.length > 0 && cursorScreenPos && (
@@ -4047,9 +4213,9 @@ export default function RoomDesignerPage() {
 
       {/* Row: Ceiling Speakers */}
       <div style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers</div>
+        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers{collapseToggle("ceil")}</div>
       </div>
-      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div style={{display:collapsedCanvases.has("ceil")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
           style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4106,6 +4272,24 @@ export default function RoomDesignerPage() {
                   const c = getDoorCoords(door);
                   const color = door.type === "window" ? "#a78bfa" : "#475569";
                   return <g key={"cd"+door.id}><line x1={cpX(c.x1)} y1={cpY(c.y1)} x2={cpX(c.x2)} y2={cpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={cpX(c.labelX)} y={cpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
+                })}
+                {/* Table from floor plan */}
+                {showTable && !tableDeleted && (() => {
+                  const tcx = tableCenterX ?? roomW/2;
+                  const tcy = tableWallDist + tL/2;
+                  const tw2 = tW/2 * cScale;
+                  const tl2 = tL/2 * cScale;
+                  return <rect x={cpX(tcx)-tw2} y={cpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${cpX(tcx)},${cpY(tcy)})`}/>;
+                })()}
+                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
+                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
+                  const fw = dev.w * cScale, fl = dev.h * cScale;
+                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
+                    const cW2 = Math.max(6, fw);
+                    return <rect key={"csf"+dev.uid} x={cpX(dev.x)-cW2/2} y={cpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
+                  }
+                  if (dev.id === "round-table") return <ellipse key={"csf"+dev.uid} cx={cpX(dev.x)} cy={cpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
+                  return <rect key={"csf"+dev.uid} x={cpX(dev.x)-fw/2} y={cpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${cpX(dev.x)},${cpY(dev.y)})`}/>;
                 })}
                 {/* Ceiling-mounted devices */}
                 {ceilingDevices.map(dev => {
@@ -4174,9 +4358,9 @@ export default function RoomDesignerPage() {
 
       {/* Row 2: Ceiling Microphones */}
       <div style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones</div>
+        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones{collapseToggle("mic")}</div>
       </div>
-      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div style={{display:collapsedCanvases.has("mic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={micSvgRef} data-rd-canvas="mic" width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
           style={{background:cc.card,cursor:isMicPanning?"grabbing":micDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4231,6 +4415,24 @@ export default function RoomDesignerPage() {
                   const color = door.type === "window" ? "#a78bfa" : "#475569";
                   return <g key={"md"+door.id}><line x1={mpX(c.x1)} y1={mpY(c.y1)} x2={mpX(c.x2)} y2={mpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={mpX(c.labelX)} y={mpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
                 })}
+                {/* Table from floor plan */}
+                {showTable && !tableDeleted && (() => {
+                  const tcx = tableCenterX ?? roomW/2;
+                  const tcy = tableWallDist + tL/2;
+                  const tw2 = tW/2 * mScale;
+                  const tl2 = tL/2 * mScale;
+                  return <rect x={mpX(tcx)-tw2} y={mpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${mpX(tcx)},${mpY(tcy)})`}/>;
+                })()}
+                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
+                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
+                  const fw = dev.w * mScale, fl = dev.h * mScale;
+                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
+                    const cW2 = Math.max(6, fw);
+                    return <rect key={"msf"+dev.uid} x={mpX(dev.x)-cW2/2} y={mpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
+                  }
+                  if (dev.id === "round-table") return <ellipse key={"msf"+dev.uid} cx={mpX(dev.x)} cy={mpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
+                  return <rect key={"msf"+dev.uid} x={mpX(dev.x)-fw/2} y={mpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${mpX(dev.x)},${mpY(dev.y)})`}/>;
+                })}
                 {/* Mic devices */}
                 {micDevices.map(dev => {
                   const dx = mpX(dev.x);
@@ -4264,9 +4466,9 @@ export default function RoomDesignerPage() {
 
       {/* Row 3: Wall Speakers */}
       <div style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers</div>
+        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers{collapseToggle("wallSpk")}</div>
       </div>
-      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div style={{display:collapsedCanvases.has("wallSpk")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={wallSpkSvgRef} data-rd-canvas="wallSpk" width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
           style={{background:cc.card,cursor:isWallSpkPanning?"grabbing":wallSpkDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4388,9 +4590,9 @@ export default function RoomDesignerPage() {
 
       {/* Row 4: Wall Microphones */}
       <div style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones</div>
+        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones{collapseToggle("wallMic")}</div>
       </div>
-      <div style={{height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div style={{display:collapsedCanvases.has("wallMic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={wallMicSvgRef} data-rd-canvas="wallMic" width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
           style={{background:cc.card,cursor:isWallMicPanning?"grabbing":wallMicDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4510,6 +4712,9 @@ export default function RoomDesignerPage() {
       </div>
       </>
       </div>{/* end scrollable canvas */}
+
+      {/* Annotation text editor overlay */}
+      {annotate.overlay}
 
       {/* ── Right Panel: Shared BOM + Device Properties ──────── */}
       <BOMPanel

@@ -679,7 +679,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
               <div className="mb-6 flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-400">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 21V5l7-3 7 3v16" /><path d="M10 21V11h4v10" />
+                    <path d="M3 21V5l7-3 7 3v16H3z" /><path d="M10 21V11h4v10" />
                   </svg>
                 </div>
                 <div>
