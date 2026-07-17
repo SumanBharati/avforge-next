@@ -399,6 +399,9 @@ export default function RoomDesignerPage() {
   const [trackGuides, setTrackGuides] = useState<{from:{x:number;y:number};to:{x:number;y:number}}[]>([]);
   // Dragging one endpoint of a drawn wall to stretch/shorten it (end 0 = start, 1 = end)
   const [wallStretchDrag, setWallStretchDrag] = useState<{uid:number; end:0|1}|null>(null);
+  const [editingWallUid, setEditingWallUid] = useState<number|null>(null);
+  const [editWallLength, setEditWallLength] = useState("");
+  const editWallInputRef = useRef<HTMLInputElement>(null);
   // Legacy compat
   const wallStart = wallPoints.length > 0 ? wallPoints[wallPoints.length - 1] : null;
 
@@ -640,6 +643,15 @@ export default function RoomDesignerPage() {
     return `${f}′ ${wholeIn}${frac}″`;
   };
   const toDisplay = (feet: number) => toFtIn(feet);
+  const toEditableLength = (feet: number) => {
+    const totalQ = Math.round(feet * 12 * 4);
+    const wholeFeet = Math.floor(totalQ / 48);
+    const remainingQ = totalQ % 48;
+    const wholeInches = Math.floor(remainingQ / 4);
+    const quarter = remainingQ % 4;
+    const fraction = quarter === 0 ? "" : quarter === 1 ? " 1/4" : quarter === 2 ? " 1/2" : " 3/4";
+    return `${wholeFeet}' ${wholeInches}${fraction}"`;
+  };
 
   const parseFtIn = (str: string): number | null => {
     const s = str.trim().replace(/'\s*-\s*/g, "' ");
@@ -808,6 +820,7 @@ export default function RoomDesignerPage() {
           if (!(dX2 < mX1 || dX1 > mX2 || dY2 < mY1 || dY1 > mY2)) hits.add(dev.uid);
         }
       });
+      annotate.selectInRect(mX1,mY1,mX2,mY2,isWindow);
       setSelectedUids(hits);
       setSelectedUid(null);
       didMarqueeDrag.current = true;
@@ -889,7 +902,38 @@ export default function RoomDesignerPage() {
     }
     if (viewMode === "plan") {
       const dxW = dxPx / planScale, dyW = dyPx / planScale;
-      if (dev.type === "display") {
+      if (dev.id === "wall-partition" && dev.wallAngle !== undefined) {
+        // Move the complete wall while allowing either of its endpoints to
+        // snap onto any other wall endpoint. Keep a separate unsnapped cursor
+        // position so dragging away can break the snap instead of sticking.
+        const freePosition = freeDragPos.current ?? { x: dev.x, y: dev.y };
+        let newX = freePosition.x + dxW;
+        let newY = freePosition.y + dyW;
+        freeDragPos.current = { x:newX, y:newY };
+        const halfX = Math.cos(dev.wallAngle) * dev.w / 2;
+        const halfY = Math.sin(dev.wallAngle) * dev.w / 2;
+        const movingEndpoints = [
+          { x: newX - halfX, y: newY - halfY },
+          { x: newX + halfX, y: newY + halfY },
+        ];
+        const targets = getWallEndpointRefs(dev.uid);
+        let best: { target:{x:number;y:number}; moving:{x:number;y:number}; distance:number } | null = null;
+        movingEndpoints.forEach(moving => targets.forEach(target => {
+          const distance = Math.hypot(target.x - moving.x, target.y - moving.y);
+          if (distance <= ENDPOINT_SNAP_DIST && (!best || distance < best.distance)) {
+            best = { target, moving, distance };
+          }
+        }));
+        if (best) {
+          const snap = best as { target:{x:number;y:number}; moving:{x:number;y:number}; distance:number };
+          newX += snap.target.x - snap.moving.x;
+          newY += snap.target.y - snap.moving.y;
+          setWallSnapPoint(snap.target);
+        } else {
+          setWallSnapPoint(null);
+        }
+        setPlacedDevices(prev => prev.map(d => d.uid === dragUid ? { ...d, x:newX, y:newY } : d));
+      } else if (dev.type === "display") {
         // Displays move freely and stick flush to the nearest wall — boundary
         // or drawn — when within snapping distance. The free (unsnapped)
         // position follows the cursor so dragging away from a wall un-sticks.
@@ -951,7 +995,9 @@ export default function RoomDesignerPage() {
       wallEdgeClicked.current = true;
     }
     if (dragNewDevice?.active) handleNewDeviceDrop();
-    if (wallStretchDrag) { setWallStretchDrag(null); setTrackGuides([]); setWallSnapPoint(null); }
+    if (wallStretchDrag) setWallStretchDrag(null);
+    setTrackGuides([]); setWallSnapPoint(null);
+    freeDragPos.current = null;
     setDragUid(null); setDragStart(null); setWallDragEdge(null); setWallDragStart(null); setWallDragged(false); setMultiDrag(null); setTableResizeDrag(null); setDoorDragId(null); setDoorDragStart(null); setRotDragUid(null); setRotDragCenter(null); setRotatingTable(false); setTableRotCenter(null);
   };
 
@@ -962,6 +1008,8 @@ export default function RoomDesignerPage() {
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
     const dxW = (svgP.x - moveDragStart.x) / planScale;
     const dyW = (svgP.y - moveDragStart.y) / planScale;
+    const dxSvg = svgP.x - moveDragStart.x;
+    const dySvg = svgP.y - moveDragStart.y;
     if (selectedUid !== null || selectedUids.size > 0) {
       setPlacedDevices(prev => prev.map(d => {
         const hit = selectedUid !== null ? d.uid === selectedUid : selectedUids.has(d.uid);
@@ -979,6 +1027,7 @@ export default function RoomDesignerPage() {
         setChairOffsets(prev => ({ ...prev, [idx]: { dx: (prev[idx]?.dx ?? 0) + dxW, dy: (prev[idx]?.dy ?? 0) + dyW } }));
       }
     });
+    if (annotate.hasSelection) annotate.translateSelected(dxSvg,dySvg);
     setMoveDragStart({ x: svgP.x, y: svgP.y });
   };
 
@@ -1723,6 +1772,39 @@ export default function RoomDesignerPage() {
     setPlacedDevices(prev => prev.map(d => d.uid === dev.uid ? { ...d, x: cx, y: cy, w: len, wallAngle: angle } : d));
   };
 
+  // Set an exact wall length while keeping the wall's original start point fixed.
+  // The end point therefore moves in the direction the wall was originally drawn.
+  const commitWallLengthEdit = (closeOnInvalid = false) => {
+    if (editingWallUid === null) return;
+    const newLength = parseFtIn(editWallLength);
+    const dev = placedDevices.find(d => d.uid === editingWallUid);
+    if (!dev || dev.wallAngle === undefined || newLength === null || newLength < 0.1) {
+      if (closeOnInvalid) {
+        setEditingWallUid(null);
+        setEditWallLength("");
+      }
+      return;
+    }
+    const startX = dev.x - Math.cos(dev.wallAngle) * dev.w / 2;
+    const startY = dev.y - Math.sin(dev.wallAngle) * dev.w / 2;
+    const endX = startX + Math.cos(dev.wallAngle) * newLength;
+    const endY = startY + Math.sin(dev.wallAngle) * newLength;
+    pushUndo();
+    setPlacedDevices(prev => prev.map(d => d.uid === editingWallUid
+      ? { ...d, x: (startX + endX) / 2, y: (startY + endY) / 2, w: newLength }
+      : d));
+    setEditingWallUid(null);
+    setEditWallLength("");
+  };
+
+  useEffect(() => {
+    if (editingWallUid === null) return;
+    requestAnimationFrame(() => {
+      editWallInputRef.current?.focus();
+      editWallInputRef.current?.select();
+    });
+  }, [editingWallUid]);
+
   const handleWallMouseMove = (e: React.MouseEvent) => {
     if (isDrawingWall && canvasContainerRef.current) {
       const rect = canvasContainerRef.current.getBoundingClientRect();
@@ -2388,7 +2470,7 @@ export default function RoomDesignerPage() {
         <div style={{flex:1,overflowY:"auto",overflowX:"hidden",minHeight:0}}>
           {/* Room Configuration */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
-            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Room Configuration</div>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Create Room</div>
             {/* Draw Walls */}
             <div style={{marginTop:12,opacity:1}}>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -2509,7 +2591,8 @@ export default function RoomDesignerPage() {
 
           {/* Display Size Guide */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Display Size Guide</div>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:3}}>Display Size Guide</div>
+            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:10}}>Assuming North Wall As Display Wall</div>
             <div style={{padding:10,background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveWidth) : "—"}</span>
@@ -2536,7 +2619,8 @@ export default function RoomDesignerPage() {
 
           {/* Camera Guide */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Camera Guide</div>
+            <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:3}}>Camera Guide</div>
+            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:10}}>Assuming North Wall As Display Wall</div>
             <div style={{padding:10,background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Seating width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(seatingWidth) : "—"}</span>
@@ -2650,12 +2734,12 @@ export default function RoomDesignerPage() {
         <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
           style={{background:cc.card,userSelect:"none",cursor:(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
-          onMouseMove={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
-          onMouseUp={()=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
-          onMouseLeave={()=>{annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseMove={e=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
+          onMouseUp={()=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseLeave={()=>{if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
           onDoubleClick={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleDoubleClick(e);}}}
-          onMouseDown={e=>{if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0)){e.preventDefault();pushUndo();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
-          onClick={e=>{if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();}}}>
+          onMouseDown={e=>{if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0||annotate.hasSelection)){e.preventDefault();pushUndo();if(annotate.hasSelection)annotate.beginChange();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
+          onClick={e=>{if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();annotate.clearSelection();}}}>
 
           {viewMode==="plan" ? (
             <g>
@@ -2851,7 +2935,7 @@ export default function RoomDesignerPage() {
                 );
               })()}
               {/* Endpoint snap marker — square over the endpoint the cursor is locked onto */}
-              {(isDrawingWall || wallStretchDrag) && !isScalingFloorPlan && wallSnapPoint && (
+              {(isDrawingWall || wallStretchDrag || (dragUid !== null && placedDevices.some(d => d.uid === dragUid && d.id === "wall-partition"))) && !isScalingFloorPlan && wallSnapPoint && (
                 <g pointerEvents="none">
                   <rect x={pX(wallSnapPoint.x)-5} y={pY(wallSnapPoint.y)-5} width={10} height={10} fill="none" stroke="#22c55e" strokeWidth={2} />
                   <circle cx={pX(wallSnapPoint.x)} cy={pY(wallSnapPoint.y)} r={1.5} fill="#22c55e" />
@@ -3034,11 +3118,20 @@ export default function RoomDesignerPage() {
                 const isSelected = selectedUid === dev.uid || selectedUids.has(dev.uid);
                 const midX = pX(dev.x);
                 const midY = pY(dev.y);
+                const isVerticalWall = Math.abs(Math.sin(angle)) > Math.abs(Math.cos(angle));
+                // Keep wall actions away from the dimension label: vertical-wall
+                // dimensions sit to the left, horizontal-wall dimensions sit above.
+                const pencilX = isVerticalWall ? midX + 14 : midX - 9;
+                const pencilY = isVerticalWall ? midY : midY + 14;
+                const deleteX = isVerticalWall ? midX + 32 : midX + 9;
+                const deleteY = pencilY;
+                const lengthInputX = isVerticalWall ? midX + 10 : midX - 46;
+                const lengthInputY = isVerticalWall ? midY - 13 : midY + 10;
                 return (
                   <g key={dev.uid}
                     style={{cursor:isDrawingWall?"crosshair":"grab",pointerEvents:isDrawingWall?"none":"auto"}}
                     onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)}
-                    onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}}
+                    onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setEditingWallUid(null);setEditWallLength("");setSelectedUid(dev.uid);clearSelection();}}
                   >
                     {(() => {
                       const wallThickPx = (dev.h ?? 0.15) * planScale;
@@ -3061,11 +3154,38 @@ export default function RoomDesignerPage() {
                         </>
                       );
                     })()}
-                    {isSelected && (
-                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setPlacedDoors(prev=>prev.filter(d=>d.wallUid!==dev.uid));setSelectedUid(null);}}>
-                        <circle cx={midX} cy={midY-12} r={7} fill="#ef4444"/>
-                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${midX},${midY-12})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
-                      </g>
+                    {isSelected && editingWallUid !== dev.uid && (
+                      <>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setEditingWallUid(dev.uid);setEditWallLength(toEditableLength(dev.w));}}>
+                          <title>Edit exact wall length</title>
+                          <circle cx={pencilX} cy={pencilY} r={7} fill="#8b5cf6"/>
+                          <path d="M-2.8,2.8 L-2.1,-0.2 L1.7,-4 L4,-1.7 L0.2,2.1 Z M1.7,-4 L4,-1.7" transform={`translate(${pencilX},${pencilY})`} fill="none" stroke="#fff" strokeWidth={1.1} strokeLinejoin="round"/>
+                        </g>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setPlacedDoors(prev=>prev.filter(d=>d.wallUid!==dev.uid));setSelectedUid(null);setEditingWallUid(null);}}>
+                          <title>Delete wall</title>
+                          <circle cx={deleteX} cy={deleteY} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${deleteX},${deleteY})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      </>
+                    )}
+                    {isSelected && editingWallUid === dev.uid && (
+                      <foreignObject x={lengthInputX} y={lengthInputY} width={92} height={30}
+                        onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
+                        <input
+                          ref={editWallInputRef}
+                          value={editWallLength}
+                          onChange={e=>setEditWallLength(e.target.value)}
+                          onBlur={()=>commitWallLengthEdit(true)}
+                          onKeyDown={e=>{
+                            e.stopPropagation();
+                            if(e.key==="Enter"){e.preventDefault();commitWallLengthEdit();}
+                            if(e.key==="Escape"){e.preventDefault();setEditingWallUid(null);setEditWallLength("");}
+                          }}
+                          aria-label="Exact wall length"
+                          title={'Enter a length, for example 13\' 4"'}
+                          style={{width:"100%",height:26,boxSizing:"border-box",border:"1px solid #8b5cf6",borderRadius:4,background:"rgb(var(--forge-bg))",color:"rgb(var(--text-heading))",fontFamily:"'JetBrains Mono',monospace",fontSize:10,fontWeight:600,textAlign:"center",outline:"none",padding:"2px 4px"}}
+                        />
+                      </foreignObject>
                     )}
                     {/* Endpoint grips — drag to stretch the wall; other end stays anchored */}
                     {isSelected && ([{px:x1,py:y1,end:0},{px:x2,py:y2,end:1}] as {px:number;py:number;end:0|1}[]).map(h => (
@@ -3123,6 +3243,7 @@ export default function RoomDesignerPage() {
 
                 // Architectural door symbol: jambs + panel + quarter-circle arc
                 const wdx = (px2-px1)/segLen, wdy = (py2-py1)/segLen;
+                const wallScreenAngle = Math.atan2(wdy, wdx) * 180 / Math.PI;
                 // Hinge end: flipped swaps which endpoint is the hinge
                 const hx = door.flipped ? px2 : px1, hy = door.flipped ? py2 : py1;
                 const ox = door.flipped ? px1 : px2, oy = door.flipped ? py1 : py2;
@@ -3157,13 +3278,13 @@ export default function RoomDesignerPage() {
                         <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.map(d => d.id === door.id ? {...d, flipped: !d.flipped} : d)); }}>
                           <title>Flip hinge side</title>
                           <circle cx={midX - 10} cy={midY - 14} r={7} fill="#8b5cf6"/>
-                          <path d="M-3,0 L0,-2.5 L0,-1 L3,-1 L3,1 L0,1 L0,2.5 Z" transform={`translate(${midX-10},${midY-14})`} fill="#fff"/>
+                          <path d="M-3,0 L0,-2.5 L0,-1 L3,-1 L3,1 L0,1 L0,2.5 Z" transform={`translate(${midX-10},${midY-14}) rotate(${wallScreenAngle})`} fill="#fff"/>
                         </g>
                         {/* Flip swing direction (to the other side of the wall) */}
                         <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.map(d => d.id === door.id ? {...d, swingFlipped: !d.swingFlipped} : d)); }}>
                           <title>Flip swing direction</title>
                           <circle cx={midX + 10} cy={midY - 14} r={7} fill="#8b5cf6"/>
-                          <path d="M-3,0 L0,-2.5 L0,-1 L3,-1 L3,1 L0,1 L0,2.5 Z" transform={`translate(${midX+10},${midY-14}) rotate(90)`} fill="#fff"/>
+                          <path d="M-3,0 L0,-2.5 L0,-1 L3,-1 L3,1 L0,1 L0,2.5 Z" transform={`translate(${midX+10},${midY-14}) rotate(${wallScreenAngle+90})`} fill="#fff"/>
                         </g>
                         {/* Delete button */}
                         <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setPlacedDoors(prev => prev.filter(d => d.id !== door.id)); clearSelection(); }}>

@@ -24,6 +24,8 @@ export function useCanvasAnnotations(opts: {
   const getZoom = opts.getZoom ?? (() => 1);
 
   const [annotations, setAnnotations] = useState<any[]>([]);
+  const annotationsRef = useRef<any[]>([]);
+  annotationsRef.current = annotations;
   const [liveAnnot, setLiveAnnot] = useState<any>(null);
   const [activeTool, setActiveTool] = useState<AnnTool | null>(null);
   const [shapeSubtype, setShapeSubtype] = useState("rect");
@@ -34,17 +36,51 @@ export function useCanvasAnnotations(opts: {
   const [eraserSize, setEraserSize] = useState(15);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
   const [selectedAnnotId, setSelectedAnnotId] = useState<string | null>(null);
+  const [selectedAnnotIds, setSelectedAnnotIds] = useState<Set<string>>(new Set());
+  const annotationUndo = useRef<any[][]>([]);
+  const annotationRedo = useRef<any[][]>([]);
+
+  const annotationBounds = (a: any) => {
+    if (a.type === "text") {
+      const size = a.size || 14, w = String(a.text || "").length * size * 0.55;
+      const x1 = a.align === "center" ? a.x-w/2 : a.align === "right" ? a.x-w : a.x;
+      return {x1,y1:a.y-size,x2:x1+w,y2:a.y};
+    }
+    if (a.type === "highlight" && a.sub !== "freehand") return {x1:a.x,y1:a.y,x2:a.x+(a.w||0),y2:a.y+(a.h||0)};
+    const pts = a.pts || (a.d ? [...String(a.d).matchAll(/[ML](-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map((m:any)=>({x:+m[1],y:+m[2]})) : null);
+    if (pts?.length) return {x1:Math.min(...pts.map((p:any)=>p.x)),y1:Math.min(...pts.map((p:any)=>p.y)),x2:Math.max(...pts.map((p:any)=>p.x)),y2:Math.max(...pts.map((p:any)=>p.y))};
+    return {x1:Math.min(a.x1,a.x2),y1:Math.min(a.y1,a.y2),x2:Math.max(a.x1,a.x2),y2:Math.max(a.y1,a.y2)};
+  };
+  const beginAnnotationChange = () => { annotationUndo.current.push(annotationsRef.current.map(a=>({...a,pts:a.pts?.map((p:any)=>({...p}))}))); annotationUndo.current=annotationUndo.current.slice(-30); annotationRedo.current=[]; };
+  const undoAnnotations = () => { const snap=annotationUndo.current.pop(); if(!snap)return false; annotationRedo.current.push(annotationsRef.current); setAnnotations(snap); return true; };
+  const redoAnnotations = () => { const snap=annotationRedo.current.pop(); if(!snap)return false; annotationUndo.current.push(annotationsRef.current); setAnnotations(snap); return true; };
+  const selectInRect = (x1:number,y1:number,x2:number,y2:number,isWindow:boolean) => {
+    const ids = new Set<string>();
+    annotations.forEach(a=>{const b=annotationBounds(a);const hit=isWindow?(b.x1>=x1&&b.x2<=x2&&b.y1>=y1&&b.y2<=y2):!(b.x2<x1||b.x1>x2||b.y2<y1||b.y1>y2);if(hit)ids.add(a.id);});
+    setSelectedAnnotIds(ids); setSelectedAnnotId(ids.size===1?[...ids][0]:null);
+  };
+  const translateSelected = (dx:number,dy:number) => setAnnotations(prev=>prev.map(a=>{
+    if(!selectedAnnotIds.has(a.id))return a;
+    if(a.type==="text")return {...a,x:a.x+dx,y:a.y+dy};
+    if(a.type==="highlight"&&a.sub!=="freehand")return {...a,x:a.x+dx,y:a.y+dy};
+    if(a.pts)return {...a,pts:a.pts.map((p:any)=>({x:p.x+dx,y:p.y+dy}))};
+    if(a.d)return {...a,d:String(a.d).replace(/([ML])(-?\d+\.?\d*),(-?\d+\.?\d*)/g,(_:string,c:string,x:string,y:string)=>`${c}${(+x+dx).toFixed(1)},${(+y+dy).toFixed(1)}`)};
+    return {...a,x1:a.x1+dx,y1:a.y1+dy,x2:a.x2+dx,y2:a.y2+dy};
+  }));
+  const clearAnnotationSelection = () => { setSelectedAnnotIds(new Set()); setSelectedAnnotId(null); };
 
   // Text editor state
   const [textInput, setTextInput] = useState<{ x: number; y: number; clientX: number; clientY: number } | null>(null);
   const [textValue, setTextValue] = useState("");
-  const [textFontSize, setTextFontSize] = useState(14);
+  const [textFontSize, setTextFontSize] = useState(10);
   const [textBold, setTextBold] = useState(false);
   const [textItalic, setTextItalic] = useState(false);
   const [textAlign, setTextAlign] = useState<"left" | "center" | "right">("left");
   const [editingAnnotId, setEditingAnnotId] = useState<string | null>(null);
 
   const drawRef = useRef<{ sx: number; sy: number; pts?: { x: number; y: number }[] } | null>(null);
+  const annotDragRef = useRef<{x:number;y:number;ids:Set<string>}|null>(null);
+  const annotDragMoved = useRef(false);
   const annotIdRef = useRef(1);
   const textValueRef = useRef("");
   const textInputRef = useRef<{ x: number; y: number } | null>(null);
@@ -67,6 +103,7 @@ export function useCanvasAnnotations(opts: {
     const val = textValueRef.current;
     const ti = textInputRef.current;
     if (ti && val.trim()) {
+      beginAnnotationChange();
       if (editId) {
         setAnnotations(prev => prev.map((a: any) => a.id === editId
           ? { ...a, text: val, color: toolColor, size: textFontSize, bold: textBold, italic: textItalic, align: textAlign }
@@ -201,6 +238,7 @@ export function useCanvasAnnotations(opts: {
       if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 3) clean.push(p);
     }
     if (clean.length >= 2) {
+      beginAnnotationChange();
       setAnnotations(prev => [...prev, { type: "shape", sub: "polyline", pts: clean, color: toolColor, sw: strokeW, id: `a${annotIdRef.current++}` }]);
     }
     setLiveAnnot(null);
@@ -213,7 +251,7 @@ export function useCanvasAnnotations(opts: {
     const p = getPoint(e); if (!p) return;
     const { x, y } = p;
     if (activeTool === "eraser") {
-      eraseAtPoint(x, y);
+      beginAnnotationChange();
       drawRef.current = { sx: x, sy: y };
       return;
     }
@@ -239,11 +277,29 @@ export function useCanvasAnnotations(opts: {
   };
 
   const handleMove = (e: React.MouseEvent) => {
+    if (annotDragRef.current && !activeTool) {
+      const p=getPoint(e); if(!p)return;
+      const dx=p.x-annotDragRef.current.x, dy=p.y-annotDragRef.current.y;
+      if(Math.hypot(dx,dy)>0.1) annotDragMoved.current=true;
+      const ids=annotDragRef.current.ids;
+      setAnnotations(prev=>prev.map(a=>{
+        if(!ids.has(a.id))return a;
+        if(a.type==="text")return {...a,x:a.x+dx,y:a.y+dy};
+        if(a.type==="highlight"&&a.sub!=="freehand")return {...a,x:a.x+dx,y:a.y+dy};
+        if(a.pts)return {...a,pts:a.pts.map((q:any)=>({x:q.x+dx,y:q.y+dy}))};
+        if(a.d)return {...a,d:String(a.d).replace(/([ML])(-?\d+\.?\d*),(-?\d+\.?\d*)/g,(_:string,c:string,x:string,y:string)=>`${c}${(+x+dx).toFixed(1)},${(+y+dy).toFixed(1)}`)};
+        return {...a,x1:a.x1+dx,y1:a.y1+dy,x2:a.x2+dx,y2:a.y2+dy};
+      }));
+      annotDragRef.current={...annotDragRef.current,x:p.x,y:p.y};
+      return;
+    }
     if (!activeTool) return;
     if (activeTool === "eraser") {
       const p = getPoint(e); if (!p) return;
       setEraserCursor(p);
-      if (drawRef.current) eraseAtPoint(p.x, p.y);
+      // A click only positions the eraser. Require a real drag before cutting,
+      // which prevents an entire small annotation disappearing on pointer-down.
+      if (drawRef.current && Math.hypot(p.x-drawRef.current.sx,p.y-drawRef.current.sy) > 1) eraseAtPoint(p.x, p.y);
       return;
     }
     if (!drawRef.current) return;
@@ -277,9 +333,11 @@ export function useCanvasAnnotations(opts: {
   };
 
   const handleUp = () => {
+    if(annotDragRef.current){annotDragRef.current=null;return;}
     if (!activeTool || !drawRef.current) return;
     if (activeTool === "shape" && shapeSubtype === "polyline") return;
     if (liveAnnot) {
+      beginAnnotationChange();
       setAnnotations(prev => [...prev, { ...liveAnnot, id: `a${annotIdRef.current++}` }]);
       setLiveAnnot(null);
     }
@@ -293,17 +351,19 @@ export function useCanvasAnnotations(opts: {
     }
   };
 
-  const handleLeave = () => { if (activeTool === "eraser") setEraserCursor(null); };
+  const handleLeave = () => { if (activeTool === "eraser") setEraserCursor(null); annotDragRef.current=null; };
 
   // ── Keyboard: Escape / Delete / Enter (capture phase so the host page's own
   // handlers don't double-act on the same key) ──────────────────
   const keyRef = useRef<any>({});
-  keyRef.current = { activeTool, selectedAnnotId, textInput, finishPolyline, shapeSubtype };
+  keyRef.current = { activeTool, selectedAnnotId, selectedAnnotIds, textInput, finishPolyline, shapeSubtype };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = keyRef.current;
       const tag = (e.target as HTMLElement).tagName;
       const isTyping = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
+      if (!isTyping && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { if ((e.shiftKey ? redoAnnotations() : undoAnnotations())) { e.preventDefault(); e.stopPropagation(); } return; }
+      if (!isTyping && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { if (redoAnnotations()) { e.preventDefault(); e.stopPropagation(); } return; }
       if (e.key === "Escape") {
         if (k.textInput) { commitTextRef.current(); e.stopPropagation(); return; }
         if (k.activeTool) {
@@ -319,10 +379,11 @@ export function useCanvasAnnotations(opts: {
         k.finishPolyline(); setActiveTool(null);
         return;
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping && k.selectedAnnotId) {
+      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping && (k.selectedAnnotId || k.selectedAnnotIds.size)) {
         e.preventDefault(); e.stopPropagation();
-        setAnnotations(prev => prev.filter((a: any) => a.id !== k.selectedAnnotId));
-        setSelectedAnnotId(null);
+        beginAnnotationChange();
+        setAnnotations(prev => prev.filter((a: any) => !k.selectedAnnotIds.has(a.id) && a.id !== k.selectedAnnotId));
+        clearAnnotationSelection();
       }
     };
     window.addEventListener("keydown", onKey, { capture: true });
@@ -334,27 +395,28 @@ export function useCanvasAnnotations(opts: {
 
   const renderAnnotation = (a: any, isLive = false) => {
     const key = isLive ? "live" : a.id;
-    const isSel = !isLive && selectedAnnotId === a.id;
+    const isSel = !isLive && (selectedAnnotId === a.id || selectedAnnotIds.has(a.id));
     const selRing: any = isSel ? { filter: "drop-shadow(0 0 3px #8b5cf6)" } : {};
     // visiblePainted keeps annotations clickable even inside a pointer-events:none overlay
     selRing.pointerEvents = "visiblePainted";
-    const cursor = activeTool ? (activeTool === "eraser" ? "none" : "crosshair") : "pointer";
-    const sel = (e: React.MouseEvent) => { e.stopPropagation(); if (!activeTool) setSelectedAnnotId(a.id); };
+    const cursor = activeTool ? (activeTool === "eraser" ? "none" : "crosshair") : "move";
+    const startDrag = (e:React.MouseEvent) => { if(activeTool||isLive||e.button!==0)return;e.stopPropagation();const p=getPoint(e);if(!p)return;const ids=selectedAnnotIds.has(a.id)?new Set(selectedAnnotIds):new Set([a.id]);setSelectedAnnotIds(ids);setSelectedAnnotId(ids.size===1?a.id:null);beginAnnotationChange();annotDragMoved.current=false;annotDragRef.current={x:p.x,y:p.y,ids}; };
+    const sel = (e: React.MouseEvent) => { e.stopPropagation(); if(annotDragMoved.current){annotDragMoved.current=false;return;} if (!activeTool) { setSelectedAnnotId(a.id); setSelectedAnnotIds(new Set([a.id])); } };
     if (a.type === "pencil") return (
-      <path key={key} d={a.d} fill="none" stroke={a.color || "#374151"} strokeWidth={a.sw || 2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{ cursor, ...selRing }} onClick={sel} />
+      <path key={key} d={a.d} fill="none" stroke={a.color || "#374151"} strokeWidth={a.sw || 2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{ cursor, ...selRing }} onMouseDown={startDrag} onClick={sel} />
     );
     if (a.type === "highlight") {
       if (a.sub === "freehand") return (
-        <path key={key} d={a.d} fill="none" stroke={a.color || "#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{ cursor, ...selRing }} onClick={sel} />
+        <path key={key} d={a.d} fill="none" stroke={a.color || "#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{ cursor, ...selRing }} onMouseDown={startDrag} onClick={sel} />
       );
       return (
-        <rect key={key} x={a.x} y={a.y} width={a.w || 0} height={a.h || 0} fill={a.color || "#fbbf24"} opacity={0.35} rx={3} style={{ cursor, ...selRing }} onClick={sel} />
+        <rect key={key} x={a.x} y={a.y} width={a.w || 0} height={a.h || 0} fill={a.color || "#fbbf24"} opacity={0.35} rx={3} style={{ cursor, ...selRing }} onMouseDown={startDrag} onClick={sel} />
       );
     }
     if (a.type === "shape") {
       const { sub, x1, y1, x2, y2, color, sw } = a;
       const stroke = color || "#374151"; const sw2 = sw || 2;
-      const props = { stroke, strokeWidth: sw2, fill: "none", style: { cursor, ...selRing }, onClick: sel };
+      const props = { stroke, strokeWidth: sw2, fill: "none", style: { cursor, ...selRing }, onMouseDown:startDrag, onClick: sel };
       if (sub === "rect") return <rect key={key} x={Math.min(x1, x2)} y={Math.min(y1, y2)} width={Math.abs(x2 - x1)} height={Math.abs(y2 - y1)} rx={3} {...props} />;
       if (sub === "circle") { const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, rx2 = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2; return <ellipse key={key} cx={cx} cy={cy} rx={rx2} ry={ry} {...props} />; }
       if (sub === "triangle") {
@@ -366,14 +428,14 @@ export function useCanvasAnnotations(opts: {
       if (sub === "arrow") {
         const ang = Math.atan2(y2 - y1, x2 - x1), hl = 14, ha = Math.PI / 6;
         const ax1 = x2 - hl * Math.cos(ang - ha), ay1 = y2 - hl * Math.sin(ang - ha), ax2 = x2 - hl * Math.cos(ang + ha), ay2 = y2 - hl * Math.sin(ang + ha);
-        return <g key={key} style={{ cursor, ...selRing }} onClick={sel}>
+        return <g key={key} style={{ cursor, ...selRing }} onMouseDown={startDrag} onClick={sel}>
           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw2} strokeLinecap="round" />
           <polygon points={`${x2},${y2} ${ax1},${ay1} ${ax2},${ay2}`} fill={stroke} />
         </g>;
       }
     }
     if (a.type === "text") return (
-      <text key={key} x={a.x} y={a.y} fontSize={a.size || 14} fill={a.color || "#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold ? "700" : "400"} fontStyle={a.italic ? "italic" : "normal"} textAnchor={a.align === "center" ? "middle" : a.align === "right" ? "end" : "start"} style={{ cursor, ...selRing }}
+      <text key={key} x={a.x} y={a.y} fontSize={a.size || 10} fill={a.color || "#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold ? "700" : "400"} fontStyle={a.italic ? "italic" : "normal"} textAnchor={a.align === "center" ? "middle" : a.align === "right" ? "end" : "start"} style={{ cursor, ...selRing }} onMouseDown={startDrag}
         onClick={sel}
         onDoubleClick={e => {
           e.stopPropagation();
@@ -425,7 +487,7 @@ export function useCanvasAnnotations(opts: {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("text")} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" /></svg>,
         "Text")}
       {toolBtn("shape", "Draw shapes",
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("shape")} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="8" rx="1" /><circle cx="17" cy="17" r="4" /><path d="M14 3l4 7h-8z" /></svg>,
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("shape")} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 3.5 2.5 9h6z"/><path d="M15 4h6m0 0-2.3-2.3M21 4l-2.3 2.3"/><circle cx="6" cy="17.5" r="3.5"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
         "Shape")}
       {toolBtn("pencil", "Freehand pencil",
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("pencil")} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" /></svg>,
@@ -533,5 +595,8 @@ export function useCanvasAnnotations(opts: {
     cursor: annCursorStyle,
     toolbarButtons, optionsBar, layer, overlay,
     handleDown, handleMove, handleUp, handleDoubleClick, handleLeave,
+    selectedAnnotIds, hasSelection:selectedAnnotIds.size>0, selectInRect, translateSelected,
+    clearSelection:clearAnnotationSelection, beginChange:beginAnnotationChange,
+    isDragging:()=>annotDragRef.current!==null,
   };
 }

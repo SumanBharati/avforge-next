@@ -1,6 +1,5 @@
 'use client';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
@@ -157,11 +156,33 @@ export default function RackPlannerPage() {
     <div className="animate-fade-in flex" style={{minHeight:"calc(100vh - 157px)"}}>
       {/* Main content */}
       <div style={{flex:1,padding:24,overflowY:"auto"}}>
-      <Link href="/designEngineering" className="mb-1 flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
-        ← Design Tools
-      </Link>
-      <h2 className="mb-0.5 text-lg font-semibold text-heading">Rack Builder</h2>
-      <p className="mb-5 text-[13px] text-subtle">Visual 42U rack elevation builder</p>
+      {/* Full-width command bar, matching Signal Flow and Room Designer */}
+      <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",margin:"-24px -24px 20px",paddingLeft:4,paddingRight:12,userSelect:"none"}}>
+        <div style={{display:"flex",alignItems:"stretch",height:82}}>
+          <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+            <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+              <button onClick={()=>setItems([...items,{name:"New Device",ru:1,color:rackColors[items.length%rackColors.length]}])} title="Add equipment to rack"
+                style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:58}}
+                onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="3" width="7" height="18" rx="1"/><rect x="13" y="7" width="7" height="14" rx="1"/><line x1="6.5" y1="7" x2="8.5" y2="7"/><line x1="15.5" y1="11" x2="17.5" y2="11"/>
+                </svg>
+                <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Equipment</span>
+              </button>
+            </div>
+            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Create</span>
+          </div>
+          <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
+          <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+            <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+              {annotate.toolbarButtons}
+            </div>
+            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
+          </div>
+        </div>
+      </div>
+      {annotate.optionsBar && <div style={{display:"flex",justifyContent:"center",marginTop:-12,marginBottom:12}}>{annotate.optionsBar}</div>}
 
       <div className="flex flex-col gap-5 lg:flex-row">
         {/* Left: Device Editor Panel */}
@@ -209,14 +230,6 @@ export default function RackPlannerPage() {
 
         {/* Right: Rack Visualization */}
         <div className="flex flex-1 flex-col items-center overflow-x-auto">
-          {/* Annotate toolbar */}
-          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,marginBottom:10}}>
-            <div style={{display:"flex",alignItems:"stretch",gap:2,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:8,padding:"3px 8px"}}>
-              {annotate.toolbarButtons}
-              <span style={{alignSelf:"center",marginLeft:6,fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em"}}>Annotate</span>
-            </div>
-            {annotate.optionsBar}
-          </div>
           <div ref={rackAreaRef} style={{position:"relative"}}>
             {/* Rack frame */}
             <div style={{width:rackW+60,background:"rgb(var(--forge-surface))",borderRadius:6,border:"2px solid rgb(var(--border))",padding:"6px 0",boxShadow:"0 4px 20px rgba(0,0,0,0.15),inset 0 0 30px rgba(0,0,0,0.05)"}}>
