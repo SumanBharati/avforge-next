@@ -131,6 +131,10 @@ export default function SignalFlowPage() {
   const [editDeviceMfr, setEditDeviceMfr] = useState("");
   const [editDeviceModel, setEditDeviceModel] = useState("");
   const [editDevicePorts, setEditDevicePorts] = useState<any[]>([]);
+  const [editDeviceVoltage, setEditDeviceVoltage] = useState("");
+  const [editDeviceAmps, setEditDeviceAmps] = useState("");
+  const [editDeviceWatts, setEditDeviceWatts] = useState("");
+  const [editDeviceBtu, setEditDeviceBtu] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
   const [modalResults, setModalResults] = useState<any[]>([]);
@@ -283,6 +287,10 @@ export default function SignalFlowPage() {
             cat: p.category,
             rack_mounted: p.rack_mounted,
             rack_units: p.rack_units,
+            amp_draw: p.amp_draw,
+            voltage: p.voltage,
+            power_watts: p.power_watts,
+            btu_hr: p.btu_hr,
             w: Math.max(120, p.type.length * 7 + 30),
             h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
           })),
@@ -312,6 +320,7 @@ export default function SignalFlowPage() {
             type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
             color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
             rack_mounted: p.rack_mounted, rack_units: p.rack_units,
+            amp_draw: p.amp_draw, voltage: p.voltage, power_watts: p.power_watts, btu_hr: p.btu_hr,
             w: Math.max(120, p.type.length * 7 + 30),
             h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
           })),
@@ -1816,7 +1825,7 @@ export default function SignalFlowPage() {
         <div style={{position:"fixed",left:deviceContextMenu.x,top:deviceContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:190,overflow:"hidden",padding:"4px 0"}}>
           <button onClick={()=>{
             const dev = devices.find((d:any)=>d.id===deviceContextMenu.deviceId);
-            if(dev){setEditingDevice(dev);setEditDeviceName(dev.type||"");setEditDeviceMfr(dev.mfr||"");setEditDeviceModel(dev.model||"");setEditDevicePorts(dev.ports?dev.ports.map((p:any)=>({...p})):[]);}
+            if(dev){setEditingDevice(dev);setEditDeviceName(dev.type||"");setEditDeviceMfr(dev.mfr||"");setEditDeviceModel(dev.model||"");setEditDevicePorts(dev.ports?dev.ports.map((p:any)=>({...p})):[]);setEditDeviceVoltage(dev.voltage==null?"":String(dev.voltage));setEditDeviceAmps(dev.amp_draw==null?"":String(dev.amp_draw));setEditDeviceWatts(dev.power_watts==null?"":String(dev.power_watts));setEditDeviceBtu(dev.btu_hr==null?"":String(dev.btu_hr));}
             setDeviceContextMenu(null);
           }}
             style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
@@ -1884,6 +1893,18 @@ export default function SignalFlowPage() {
                   onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
                 />
               </label>
+            </div>
+            {/* Electrical specifications */}
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Equipment Specifications</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+                {[
+                  {label:"Voltage",unit:"V",value:editDeviceVoltage,set:setEditDeviceVoltage},
+                  {label:"Current Draw",unit:"A",value:editDeviceAmps,set:setEditDeviceAmps},
+                  {label:"Power",unit:"W",value:editDeviceWatts,set:setEditDeviceWatts},
+                  {label:"Heat Output",unit:"BTU/hr",value:editDeviceBtu,set:setEditDeviceBtu},
+                ].map(field=><label key={field.label} style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={0} step="any" value={field.value} onChange={e=>field.set(e.target.value)} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}/><span style={{minWidth:38,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}
+              </div>
             </div>
             {/* Ports */}
             <div>
@@ -1970,7 +1991,8 @@ export default function SignalFlowPage() {
                 pushUndo();
                 const removedIds = new Set(editingDevice.ports.map((p:any)=>p.id).filter((id:string)=>!editDevicePorts.find((p:any)=>p.id===id)));
                 if(removedIds.size>0) setConnections((prev:any[])=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
-                setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,w:0,h:0}):d));
+                const specValue=(text:string)=>text.trim()===""?null:Number(text);
+                setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,voltage:specValue(editDeviceVoltage),amp_draw:specValue(editDeviceAmps),power_watts:specValue(editDeviceWatts),btu_hr:specValue(editDeviceBtu),w:0,h:0}):d));
                 setEditingDevice(null);
               }}
               style={{padding:"8px 18px",background:editDeviceName.trim()?"#8b5cf6":"rgb(var(--forge-surface))",border:"1px solid "+(editDeviceName.trim()?"#8b5cf6":"rgb(var(--border))"),borderRadius:6,color:editDeviceName.trim()?"#fff":"rgb(var(--text-subtle))",fontSize:12,cursor:editDeviceName.trim()?"pointer":"not-allowed",fontWeight:600,transition:"all 0.15s"}}>

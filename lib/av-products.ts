@@ -7,6 +7,11 @@ export interface AVProduct {
   category: string;
   type: string;
   price: number;
+  part_number: string | null;
+  msrp: number | null;
+  cost: number | null;
+  margin: number | null;
+  markup: number | null;
   color: string;
   ports: Array<{ side: string; signal: string; dir: string; label: string }>;
   // Power & electrical
@@ -20,6 +25,17 @@ export interface AVProduct {
   width_in: number | null;
   height_in: number | null;
   depth_in: number | null;
+  diameter_in: number | null;
+  weight_lb: number | null;
+  rack_mountable_detail: string | null;
+  rack_ear_included: boolean | null;
+  rack_ear_detail: string | null;
+  shelf_required: boolean | null;
+  shelf_requirement: string | null;
+  voltage_detail: string | null;
+  current_detail: string | null;
+  power_supply_type: string | null;
+  notes: string | null;
   // Room Designer placement properties
   rd_type: string | null;       // display | camera | mic | speaker | control
   rd_wall: string | null;       // front | ceiling | floor | table | side

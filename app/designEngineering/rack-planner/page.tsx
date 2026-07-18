@@ -14,6 +14,10 @@ type RackItem = {
   rackOrder?: number;
   rackStartRU?: number;
   rackId?: number;
+  ampDraw?: number | null;
+  voltage?: number | null;
+  powerWatts?: number | null;
+  btuHr?: number | null;
   unrackedX?: number;
   unrackedY?: number;
   name: string;
@@ -39,7 +43,11 @@ export default function RackPlannerPage() {
   const [rackRUCapacity, setRackRUCapacity] = useState<number|null>(null);
   const [rackCount, setRackCount] = useState(1);
   const [additionalRackRUCapacities, setAdditionalRackRUCapacities] = useState<number[]>([]);
+  const [rackVoltages, setRackVoltages] = useState<number[]>([120]);
   const [hoveredRackNumber, setHoveredRackNumber] = useState<number|null>(null);
+  const [rackContextMenu, setRackContextMenu] = useState<{x:number;y:number;index:number}|null>(null);
+  const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
+  const [rackEditDraft, setRackEditDraft] = useState({name:"",ru:"1",voltage:"",ampDraw:"",powerWatts:"",btuHr:""});
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const { updateSlice } = useBOM();
 
@@ -56,7 +64,7 @@ export default function RackPlannerPage() {
 
   // Load
   useEffect(() => {
-    Promise.all([loadToolData("rack-planner"), loadToolData("signal-flow")]).then(([rackData, signalData]) => {
+    Promise.all([loadToolData("rack-planner"), loadToolData("signal-flow")]).then(async ([rackData, signalData]) => {
       const savedItems = Array.isArray(rackData?.items) ? rackData.items as RackItem[] : [];
       const savedBySourceId = new Map(
         savedItems
@@ -64,7 +72,19 @@ export default function RackPlannerPage() {
           .map(item => [String(item.sourceDeviceId), item])
       );
       const signalDevices = Array.isArray(signalData?.devices) ? signalData.devices as any[] : [];
-      const mountedItems = signalDevices
+      const enrichedSignalDevices=await Promise.all(signalDevices.map(async device=>{
+        if(device.power_watts||device.amp_draw||device.btu_hr)return device;
+        const query=(device.model&&device.model!=="—"?device.model:device.type)||"";
+        if(!query)return device;
+        try{
+          const results=await searchProducts(query,8);
+          const normalizedModel=String(device.model||"").toLowerCase();
+          const normalizedType=String(device.type||"").toLowerCase();
+          const product=results.find(result=>result.model_name.toLowerCase()===normalizedModel)||results.find(result=>result.type.toLowerCase()===normalizedType);
+          return product?{...device,product_id:product.id,amp_draw:product.amp_draw,voltage:product.voltage,power_watts:product.power_watts,btu_hr:product.btu_hr}:device;
+        }catch{return device;}
+      }));
+      const mountedItems = enrichedSignalDevices
         .filter(device => (device.rackMounted ?? device.rack_mounted ?? false) === true)
         .map((device, index): RackItem => {
           const saved = savedBySourceId.get(String(device.id));
@@ -74,10 +94,15 @@ export default function RackPlannerPage() {
           const sourceName = [manufacturer, modelName].filter(Boolean).join(" ") || device.type || "Rack Device";
           return {
             sourceDeviceId: device.id,
+            productId: saved?.productId ?? device.product_id,
             rackMounted: true,
             rackOrder: saved?.rackOrder,
             rackStartRU: saved?.rackStartRU,
             rackId: saved?.rackId ?? 1,
+            ampDraw: saved?.ampDraw ?? device.amp_draw ?? null,
+            voltage: saved?.voltage ?? device.voltage ?? null,
+            powerWatts: saved?.powerWatts ?? device.power_watts ?? null,
+            btuHr: saved?.btuHr ?? device.btu_hr ?? null,
             name: saved?.name || sourceName,
             ru: saved?.ru || (Number.isFinite(catalogRU) && catalogRU > 0 ? Math.max(1, Math.round(catalogRU)) : 1),
             color: saved?.color || device.color || rackColors[index % rackColors.length],
@@ -102,6 +127,11 @@ export default function RackPlannerPage() {
         const saved=Number(savedAdditionalCapacities[index]);
         return Number.isFinite(saved)&&saved>0?Math.floor(saved):defaultAdditionalCapacity;
       }));
+      const savedRackVoltages=Array.isArray(rackData?.rackVoltages)?rackData.rackVoltages:[];
+      setRackVoltages(Array.from({length:restoredRackCount},(_,index)=>{
+        const saved=Number(savedRackVoltages[index]);
+        return Number.isFinite(saved)&&saved>0?saved:120;
+      }));
       if (rackData?.annotations) annotate.setAnnotations(rackData.annotations as any[]);
       setLoaded(true);
     });
@@ -110,8 +140,8 @@ export default function RackPlannerPage() {
 
   // Auto-save
   const doSave = useCallback((list: RackItem[], anns: any[]) => {
-    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities });
-  }, [rackRUCapacity,rackCount,additionalRackRUCapacities]);
+    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities, rackVoltages });
+  }, [rackRUCapacity,rackCount,additionalRackRUCapacities,rackVoltages]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -152,7 +182,7 @@ export default function RackPlannerPage() {
     if (selectedProduct) {
       const ru = selectedProduct.rack_units && selectedProduct.rack_units > 0 ? Math.max(1, Math.round(selectedProduct.rack_units)) : 1;
       const name = [selectedProduct.manufacturer, selectedProduct.model_name].filter(Boolean).join(" ") || selectedProduct.type;
-      setPendingRackItem({manual:true,productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length]});
+      setPendingRackItem({manual:true,productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr});
       closeAddEquipment();
       return;
     }
@@ -340,6 +370,40 @@ export default function RackPlannerPage() {
     window.addEventListener("mouseup",onUp);
   };
 
+  const renderPowerPanel = (rackNumber:number,rackItems:RackItem[]) => {
+    const rackVoltage=Math.max(1,rackVoltages[rackNumber-1]??120);
+    let watts=0;
+    let amps=0;
+    let btu=0;
+    rackItems.forEach(item=>{
+      const specifiedWatts=Number(item.powerWatts);
+      const specifiedAmps=Number(item.ampDraw);
+      const deviceVoltage=Number(item.voltage)||rackVoltage;
+      const itemWatts=Number.isFinite(specifiedWatts)&&specifiedWatts>0?specifiedWatts:Number.isFinite(specifiedAmps)&&specifiedAmps>0?specifiedAmps*deviceVoltage:0;
+      const itemAmps=Number.isFinite(specifiedAmps)&&specifiedAmps>0?specifiedAmps:itemWatts/rackVoltage;
+      const specifiedBtu=Number(item.btuHr);
+      watts+=itemWatts;
+      amps+=itemAmps;
+      btu+=Number.isFinite(specifiedBtu)&&specifiedBtu>0?specifiedBtu:itemWatts*3.412;
+    });
+    const resultRow=(label:string,value:string,unit:string)=><div style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"baseline",gap:5,padding:"10px 0",borderTop:"1px solid rgb(var(--border))"}}><span style={{fontSize:11,color:"rgb(var(--text-muted))"}}>{label}</span><strong style={{fontSize:15,color:"rgb(var(--text-body))",fontFamily:"'JetBrains Mono',monospace"}}>{value}</strong><span style={{width:38,fontSize:9,color:"rgb(var(--text-subtle))"}}>{unit}</span></div>;
+    return <div style={{position:"absolute",right:"calc(100% + 28px)",top:38,width:210,padding:"14px 16px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.1)"}}>
+      <div style={{fontSize:13,fontWeight:700,color:"rgb(var(--text-body))",marginBottom:12}}>Power Calculations</div>
+      <label style={{display:"grid",gridTemplateColumns:"1fr 72px",alignItems:"center",gap:10,paddingBottom:10}}><span style={{fontSize:11,color:"rgb(var(--text-muted))"}}>Volts</span><div style={{display:"flex",alignItems:"center",gap:4}}><input type="number" min={1} max={1000} value={rackVoltage} aria-label={`Equipment Rack ${rackNumber} voltage`} onChange={e=>{const value=Math.max(1,Math.min(1000,Number(e.target.value)||1));setRackVoltages(values=>Array.from({length:rackCount},(_,index)=>index===rackNumber-1?value:values[index]??120));}} style={{width:50,height:28,padding:"0 5px",textAlign:"right",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none"}}/><span style={{fontSize:9,color:"rgb(var(--text-subtle))"}}>V</span></div></label>
+      {resultRow("Amps",amps.toFixed(2),"A")}
+      {resultRow("Watts",watts.toFixed(1),"W")}
+      {resultRow("BTU/Hr",Math.round(btu).toLocaleString(),"BTU/hr")}
+    </div>;
+  };
+
+  const openRackEquipmentEditor=(index:number)=>{
+    const item=items[index];
+    if(!item)return;
+    setRackEditDraft({name:item.name,ru:String(item.ru),voltage:item.voltage==null?"":String(item.voltage),ampDraw:item.ampDraw==null?"":String(item.ampDraw),powerWatts:item.powerWatts==null?"":String(item.powerWatts),btuHr:item.btuHr==null?"":String(item.btuHr)});
+    setRackEditingIndex(index);
+    setRackContextMenu(null);
+  };
+
   return (
     <div className="animate-fade-in flex" style={{minHeight:"calc(100vh - 157px)"}}>
       {/* Main content */}
@@ -358,7 +422,7 @@ export default function RackPlannerPage() {
                 </svg>
                 <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Equipment</span>
               </button>
-              <button onClick={()=>{setRackCount(count=>count+1);setAdditionalRackRUCapacities(capacities=>[...capacities,Math.max(1,rackRUCapacity??totalRU)]);}} title="Add another equipment rack"
+              <button onClick={()=>{setRackCount(count=>count+1);setAdditionalRackRUCapacities(capacities=>[...capacities,Math.max(1,rackRUCapacity??totalRU)]);setRackVoltages(voltages=>[...voltages,120]);}} title="Add another equipment rack"
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:58}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
@@ -383,8 +447,8 @@ export default function RackPlannerPage() {
 
       <div className="flex flex-col gap-5 lg:flex-row">
         {/* Rack Visualization */}
-        <div className="flex-1 overflow-x-auto" style={{position:"relative",left:120,width:"min(100%, 840px)",margin:"0 auto"}}>
-          <div ref={rackAreaRef} style={{position:"relative",width:rackW+60}}>
+        <div className="flex-1 overflow-x-auto" style={{position:"relative",width:"100%",minWidth:900,margin:"0 auto"}}>
+          <div ref={rackAreaRef} style={{position:"relative",width:rackW+60,margin:"0 auto"}}>
             <div style={{width:rackW+60,display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:10}}>
               <span style={{fontSize:11,fontWeight:600,color:"rgb(var(--text-muted))"}}>RUs</span>
               <input id="rack-ru-capacity" type="number" min={0} max={100} value={rackRUCapacity??totalRU}
@@ -429,6 +493,7 @@ export default function RackPlannerPage() {
                     elements.push(
                       <div key={"item-"+i}
                         draggable
+                        onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index:i});}}
                         onMouseDown={e=>e.stopPropagation()}
                         onMouseEnter={()=>setHoveredRackIndex(i)}
                         onMouseLeave={()=>setHoveredRackIndex(prev=>prev===i?null:prev)}
@@ -450,7 +515,7 @@ export default function RackPlannerPage() {
                             {item.ru>=2 && <div style={{fontSize:8,color:item.color,opacity:0.7,marginTop:1}}>{item.ru}U</div>}
                           </div>
 
-                          {hoveredRackIndex===i && (
+                          {false && hoveredRackIndex===i && (
                             <button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment"
                               onMouseDown={e=>{e.preventDefault();e.stopPropagation();}}
                               onClick={e=>{e.preventDefault();e.stopPropagation();setItems(prev=>prev.filter((_,index)=>index!==i));setHoveredRackIndex(null);setEditingIdx(null);setSelectedIdxs(new Set());}}
@@ -498,6 +563,7 @@ export default function RackPlannerPage() {
               <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em"}}>Equipment Rack 1</div>
               {totalRU>maxRU && <div style={{color:"#ef4444",fontWeight:600,fontSize:11}}>⚠ Over capacity by {totalRU-maxRU} RU</div>}
             </div>
+            {renderPowerPanel(1,mountedEntries.map(({item})=>item))}
 
             {/* Annotation overlay — interactive only while a tool is active */}
             <svg
@@ -516,9 +582,9 @@ export default function RackPlannerPage() {
             const rackEntries=items.map((item,index)=>({item,index})).filter(({item})=>item.rackMounted!==false&&(item.rackId??1)===rackNumber);
             const rackHighestRU=rackEntries.reduce((highest,{item})=>Math.max(highest,(item.rackStartRU??1)+item.ru-1),0);
             const rackDisplayRU=Math.max(emptyRackRU,rackHighestRU);
-            return <div key={`rack-${rackNumber}`} onMouseEnter={()=>setHoveredRackNumber(rackNumber)} onMouseLeave={()=>setHoveredRackNumber(prev=>prev===rackNumber?null:prev)} style={{position:"relative",width:rackW+60,marginTop:48}}>
+            return <div key={`rack-${rackNumber}`} onMouseEnter={()=>setHoveredRackNumber(rackNumber)} onMouseLeave={()=>setHoveredRackNumber(prev=>prev===rackNumber?null:prev)} style={{position:"relative",width:rackW+60,margin:"48px auto 0"}}>
               {hoveredRackNumber===rackNumber&&<button aria-label={`Delete Equipment Rack ${rackNumber}`} title={`Delete Equipment Rack ${rackNumber}`}
-                onClick={()=>{setItems(current=>current.map(item=>(item.rackId??1)===rackNumber?{...item,rackMounted:false,rackId:undefined}:item.rackId&&item.rackId>rackNumber?{...item,rackId:item.rackId-1}:item));setRackCount(count=>Math.max(1,count-1));setAdditionalRackRUCapacities(capacities=>capacities.filter((_,index)=>index!==rackOffset));setHoveredRackNumber(null);}}
+                onClick={()=>{setItems(current=>current.map(item=>(item.rackId??1)===rackNumber?{...item,rackMounted:false,rackId:undefined}:item.rackId&&item.rackId>rackNumber?{...item,rackId:item.rackId-1}:item));setRackCount(count=>Math.max(1,count-1));setAdditionalRackRUCapacities(capacities=>capacities.filter((_,index)=>index!==rackOffset));setRackVoltages(voltages=>voltages.filter((_,index)=>index!==rackNumber-1));setHoveredRackNumber(null);}}
                 style={{position:"absolute",right:8,top:42,zIndex:8,width:22,height:22,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.5)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:17,lineHeight:1,cursor:"pointer",boxShadow:"0 2px 6px rgba(0,0,0,0.2)"}}>×</button>}
               <div style={{width:rackW+60,height:28,display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:10}}>
                 <span style={{fontSize:11,fontWeight:600,color:"rgb(var(--text-muted))"}}>RUs</span>
@@ -537,30 +603,33 @@ export default function RackPlannerPage() {
                   <div style={{position:"absolute",left:26,right:26,top:0,bottom:0,border:"1px dashed rgb(var(--border))",background:`repeating-linear-gradient(to bottom,transparent 0,transparent ${ruH-1}px,rgb(var(--border) / 0.45) ${ruH-1}px,rgb(var(--border) / 0.45) ${ruH}px)`,opacity:0.4}} />
                   {rackEntries.length===0&&<span style={{position:"absolute",left:26,right:26,top:"45%",textAlign:"center",fontSize:10,color:"rgb(var(--text-faint))"}}>{rackDisplayRU} RU available</span>}
                   {rackEntries.map(({item,index})=><div key={`rack-${rackNumber}-item-${index}`} draggable
+                    onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index});}}
                     onMouseEnter={()=>setHoveredRackIndex(index)} onMouseLeave={()=>setHoveredRackIndex(previous=>previous===index?null:previous)}
                     onDragStart={e=>{const rect=e.currentTarget.getBoundingClientRect();rackDragOffsetY.current=e.clientY-rect.top;e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",String(index));setDraggedRackIndex(index);}}
                     onDragEnd={()=>setDraggedRackIndex(null)}
                     style={{position:"absolute",zIndex:4,left:26,right:26,bottom:((item.rackStartRU??1)-1)*ruH,height:item.ru*ruH,display:"flex",alignItems:"center",padding:"0 12px",background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",cursor:"grab",opacity:draggedRackIndex===index?0.45:1,overflow:"hidden"}}>
                     <div style={{flex:1,minWidth:0}}><div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>{item.ru>=2&&<div style={{fontSize:8,color:item.color,opacity:0.7}}>{item.ru}U</div>}</div>
-                    {hoveredRackIndex===index&&<button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment" onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={e=>{e.preventDefault();e.stopPropagation();setItems(current=>current.filter((_,itemIndex)=>itemIndex!==index));setHoveredRackIndex(null);}} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:5,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer"}}>×</button>}
+                    {false&&hoveredRackIndex===index&&<button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment" onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={e=>{e.preventDefault();e.stopPropagation();setItems(current=>current.filter((_,itemIndex)=>itemIndex!==index));setHoveredRackIndex(null);}} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:5,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer"}}>×</button>}
                   </div>)}
                 </div>
                 <div style={{height:8,margin:"4px 8px 0",background:"linear-gradient(0deg,rgb(var(--border)),rgb(var(--forge-surface)))",borderRadius:"0 0 3px 3px",border:"1px solid rgb(var(--border))"}} />
               </div>
               <div style={{textAlign:"center",marginTop:8,fontSize:14,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em"}}>Equipment Rack {rackNumber}</div>
+              {renderPowerPanel(rackNumber,rackEntries.map(({item})=>item))}
             </div>;
           })}
           {unrackedEntries.length > 0 && (
-            <div ref={unrackedAreaRef} style={{position:"absolute",left:rackW+80,top:38,width:420,minHeight:790}}>
+            <div ref={unrackedAreaRef} style={{position:"absolute",left:"calc(50% + 228px)",top:38,width:420,minHeight:790}}>
               {unrackedEntries.map(({item,index},unrackedIndex) => (
                 <div key={"unracked-"+index}
+                  onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index});}}
                   onMouseDown={e=>startUnrackedDrag(e,index,unrackedIndex*58)}
                   onMouseEnter={()=>setHoveredUnrackedIndex(index)}
                   onMouseLeave={()=>setHoveredUnrackedIndex(prev=>prev===index?null:prev)}
                   onClick={()=>{if(unrackedDidDrag.current){unrackedDidDrag.current=false;return;}setEditingIdx(editingIdx===index?null:index);}}
                   style={{position:"absolute",left:item.unrackedX??0,top:item.unrackedY??unrackedIndex*58,width:240,height:50,display:"flex",alignItems:"center",padding:"0 36px 0 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,cursor:"grab",userSelect:"none",outline:editingIdx===index?"2px solid #8b5cf6":undefined,outlineOffset:-1,zIndex:editingIdx===index?2:1,boxShadow:editingIdx===index?"0 4px 14px rgba(0,0,0,0.12)":undefined}}>
                   <span style={{display:"block",width:"100%",fontSize:11,fontWeight:600,color:"rgb(var(--text-body))",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</span>
-                  {hoveredUnrackedIndex===index && (
+                  {false && hoveredUnrackedIndex===index && (
                     <button aria-label={`Delete ${item.name}`} title="Delete equipment"
                       onMouseDown={e=>{e.preventDefault();e.stopPropagation();}}
                       onClick={e=>{e.preventDefault();e.stopPropagation();setItems(prev=>prev.filter((_,itemIndex)=>itemIndex!==index));setHoveredUnrackedIndex(null);setEditingIdx(null);}}
@@ -573,6 +642,22 @@ export default function RackPlannerPage() {
         </div>
       </div>
       </div>{/* end main content */}
+
+      {rackContextMenu&&<><div style={{position:"fixed",inset:0,zIndex:110}} onClick={()=>setRackContextMenu(null)} onContextMenu={e=>{e.preventDefault();setRackContextMenu(null);}}/><div style={{position:"fixed",left:rackContextMenu.x,top:rackContextMenu.y,zIndex:111,width:190,padding:"4px 0",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
+        <button onClick={()=>openRackEquipmentEditor(rackContextMenu.index)} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Edit equipment</button>
+        <div style={{height:1,background:"rgb(var(--border))",margin:"3px 0"}}/>
+        <button onClick={()=>{setItems(current=>current.filter((_,index)=>index!==rackContextMenu.index));setRackContextMenu(null);setEditingIdx(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Delete equipment</button>
+      </div></>}
+
+      {rackEditingIndex!==null&&<div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}} onClick={()=>setRackEditingIndex(null)}><div style={{width:500,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:10,boxShadow:"0 16px 48px rgba(0,0,0,0.5)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgb(var(--border))"}}><strong style={{fontSize:14,color:"rgb(var(--text-body))"}}>Edit Equipment</strong><button onClick={()=>setRackEditingIndex(null)} style={{background:"none",border:"none",fontSize:20,color:"rgb(var(--text-subtle))",cursor:"pointer"}}>×</button></div>
+        <div style={{padding:20}}>
+          <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))",marginBottom:14}}>Description<input autoFocus value={rackEditDraft.name} onChange={e=>setRackEditDraft(draft=>({...draft,name:e.target.value}))} style={{padding:"9px 10px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/></label>
+          <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:9}}>Equipment Specifications</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>{([{key:"ru",label:"Rack Units",unit:"RU"},{key:"voltage",label:"Voltage",unit:"V"},{key:"ampDraw",label:"Current Draw",unit:"A"},{key:"powerWatts",label:"Power",unit:"W"},{key:"btuHr",label:"Heat Output",unit:"BTU/hr"}] as const).map(field=><label key={field.key} style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={field.key==="ru"?1:0} step={field.key==="ru"?1:"any"} value={rackEditDraft[field.key]} onChange={e=>setRackEditDraft(draft=>({...draft,[field.key]:e.target.value}))} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/><span style={{minWidth:36,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}</div>
+        </div>
+        <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:9}}><button onClick={()=>setRackEditingIndex(null)} style={{padding:"8px 17px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",cursor:"pointer"}}>Cancel</button><button disabled={!rackEditDraft.name.trim()} onClick={()=>{const value=(text:string)=>text.trim()===""?null:Number(text);setItems(current=>current.map((item,index)=>index===rackEditingIndex?{...item,name:rackEditDraft.name.trim(),ru:Math.max(1,Math.floor(Number(rackEditDraft.ru)||1)),voltage:value(rackEditDraft.voltage),ampDraw:value(rackEditDraft.ampDraw),powerWatts:value(rackEditDraft.powerWatts),btuHr:value(rackEditDraft.btuHr)}:item));setRackEditingIndex(null);}} style={{padding:"8px 17px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:6,color:"white",fontWeight:600,cursor:"pointer"}}>Save</button></div>
+      </div></div>}
 
       {showAddEquipment && (
         <div onMouseDown={e=>{if(e.target===e.currentTarget)closeAddEquipment();}} style={{position:"fixed",inset:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(2,6,23,0.62)",padding:20}}>

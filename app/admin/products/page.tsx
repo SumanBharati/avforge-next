@@ -1,89 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import * as XLSX from "xlsx";
 import { searchProducts, upsertProducts, deleteProduct, getProductCount, type AVProduct } from "@/lib/av-products";
+import { parseProductRows } from "@/lib/product-import";
 
 // CSV columns (all optional except Type and Ports):
 // Category, Type, Manufacturer, Model, Price, Color, Ports,
 // Amp, Volt, Watts, BTU, RackMounted, RackUnits, WidthIn, HeightIn, DepthIn
-function parseCSV(csvText: string): { products: Omit<AVProduct, "id">[]; errors: string[] } {
-  const errors: string[] = [];
-  const products: Omit<AVProduct, "id">[] = [];
-  const lines = csvText.split("\n").map(l => l.trim()).filter(l => l);
-  if (lines.length < 2) return { products, errors: ["CSV has no data rows"] };
-
-  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").trim());
-  const col = (name: string) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
-
-  const catIdx    = col("category");
-  const typeIdx   = col("type");
-  const mfrIdx    = col("manufacturer");
-  const modelIdx  = col("model");
-  const priceIdx  = col("price");
-  const colorIdx  = col("color");
-  const portsIdx  = col("ports");
-  const ampIdx    = col("amp");
-  const voltIdx   = col("volt");
-  const wattsIdx  = col("watts");
-  const btuIdx    = col("btu");
-  const rackMtdIdx = col("rackmounted");
-  const rackUIdx  = col("rackunits");
-  const widthIdx  = col("widthin");
-  const heightIdx = col("heightin");
-  const depthIdx  = col("depthin");
-
-  if (typeIdx === -1) return { products, errors: ['Missing required "Type" column'] };
-  if (portsIdx === -1) return { products, errors: ['Missing required "Ports" column'] };
-
-  for (let i = 1; i < lines.length; i++) {
-    const row: string[] = [];
-    let cur = "", inQ = false;
-    for (const ch of lines[i]) {
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ""; }
-      else { cur += ch; }
-    }
-    row.push(cur.trim());
-
-    const type = typeIdx >= 0 ? row[typeIdx] : "";
-    if (!type) continue;
-
-    const get = (idx: number) => (idx >= 0 ? row[idx] || "" : "");
-    const num = (idx: number) => { const v = parseFloat(get(idx)); return isNaN(v) ? null : v; };
-    const bool = (idx: number) => { const v = get(idx).toLowerCase(); return v === "yes" || v === "true" || v === "1"; };
-
-    const portsStr = get(portsIdx);
-    const ports = portsStr.split("|").filter(p => p.trim()).map(p => {
-      const parts = p.split(":");
-      if (parts.length < 4) { errors.push(`Row ${i + 1}: invalid port "${p}"`); return null; }
-      return { side: parts[0], signal: parts[1], dir: parts[2], label: parts.slice(3).join(":") };
-    }).filter(Boolean) as AVProduct["ports"];
-
-    products.push({
-      manufacturer: get(mfrIdx) || "Generic",
-      model_name:   get(modelIdx) || type,
-      category:     get(catIdx) || "Other",
-      type,
-      price:        num(priceIdx) ?? 0,
-      color:        get(colorIdx) || "#64748b",
-      ports,
-      amp_draw:     num(ampIdx),
-      voltage:      num(voltIdx),
-      power_watts:  num(wattsIdx),
-      btu_hr:       num(btuIdx),
-      rack_mounted: rackMtdIdx >= 0 ? bool(rackMtdIdx) : false,
-      rack_units:   num(rackUIdx),
-      width_in:     num(widthIdx),
-      height_in:    num(heightIdx),
-      depth_in:     num(depthIdx),
-      rd_type:      null,
-      rd_wall:      null,
-      rd_width_ft:  null,
-      rd_height_ft: null,
-      rd_icon:      null,
-    });
-  }
-  return { products, errors };
+function parseCSV(csvText:string){
+  const workbook=XLSX.read(csvText,{type:"string"});
+  const sheet=workbook.Sheets[workbook.SheetNames[0]];
+  return parseProductRows(XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:"",blankrows:false}) as unknown[][]);
 }
 
 const TD: React.CSSProperties = { padding: "7px 10px", borderBottom: "1px solid rgb(var(--border))", color: "rgb(var(--text-muted))", fontFamily: "'JetBrains Mono', monospace", fontSize: 11 };
@@ -163,6 +91,18 @@ export default function AdminProductsPage() {
     setDeleting(null);
   }
 
+  async function handleWorkbookFile(file:File){
+    setImportResult("");
+    try{
+      const workbook=XLSX.read(await file.arrayBuffer(),{type:"array"});
+      const sheet=workbook.Sheets[workbook.SheetNames[0]];
+      setCsvText(XLSX.utils.sheet_to_csv(sheet));
+      const rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:"",blankrows:false}) as unknown[][];
+      const {products,errors}=parseProductRows(rows);
+      setImportResult(`Ready to import ${products.length} product${products.length===1?"":"s"}${errors.length?` · ${errors.length} warning(s)`:""}. Review, then click Import.`);
+    }catch(error){setImportResult(`Unable to read workbook: ${error instanceof Error?error.message:"Unknown error"}`);}
+  }
+
   const placeholder = [
     "Category,Type,Manufacturer,Model,Price,Color,Ports,Amp,Volt,Watts,BTU,RackMounted,RackUnits,WidthIn,HeightIn,DepthIn",
     "Sources,Laptop,Generic,,0,#8b5cf6,right:hdmi:out:HDMI|right:usb:out:USB,,,,,No,,,,,",
@@ -183,13 +123,18 @@ export default function AdminProductsPage() {
 
         {/* Import */}
         <div style={{ background: "rgb(var(--forge-panel))", border: "1px solid rgb(var(--border))", borderRadius: 10, padding: 20, marginBottom: 24 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600, color: "rgb(var(--text-body))", marginBottom: 6 }}>Import via CSV</h2>
+          <h2 style={{ fontSize: 14, fontWeight: 600, color: "rgb(var(--text-body))", marginBottom: 6 }}>Import Product Library</h2>
 
           <div style={{ fontSize: 11, color: "rgb(var(--text-subtle))", marginBottom: 12, lineHeight: 1.8 }}>
-            <div><strong style={{ color: "rgb(var(--text-muted))" }}>Required:</strong> <code style={{ background: "rgb(var(--forge-surface))", padding: "1px 5px", borderRadius: 3 }}>Type</code>, <code style={{ background: "rgb(var(--forge-surface))", padding: "1px 5px", borderRadius: 3 }}>Ports</code></div>
+            <div><strong style={{ color: "rgb(var(--text-muted))" }}>Required:</strong> <code style={{ background: "rgb(var(--forge-surface))", padding: "1px 5px", borderRadius: 3 }}>Type or Model</code>, <code style={{ background: "rgb(var(--forge-surface))", padding: "1px 5px", borderRadius: 3 }}>Ports</code></div>
             <div><strong style={{ color: "rgb(var(--text-muted))" }}>Optional:</strong> Category · Manufacturer · Model · Price · Color · Amp · Volt · Watts · BTU · RackMounted (Yes/No) · RackUnits · WidthIn · HeightIn · DepthIn</div>
             <div><strong style={{ color: "rgb(var(--text-muted))" }}>Ports:</strong> <code style={{ background: "rgb(var(--forge-surface))", padding: "1px 5px", borderRadius: 3 }}>side:signal:dir:label</code> — pipe-separated. Side: left/right · Signal: hdmi/dante/usb/cat6/analog/speaker/control/fiber/sdi · Dir: in/out</div>
           </div>
+
+          <label style={{display:"inline-flex",alignItems:"center",gap:7,padding:"8px 13px",marginBottom:10,background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer"}}>
+            Select Excel or CSV file
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={e=>{const file=e.target.files?.[0];if(file)void handleWorkbookFile(file);e.currentTarget.value="";}} style={{display:"none"}}/>
+          </label>
 
           <textarea
             value={csvText}
@@ -200,7 +145,7 @@ export default function AdminProductsPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={handleImport} disabled={importing}
               style={{ padding: "8px 18px", background: "#7c3aed", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: importing ? "not-allowed" : "pointer", opacity: importing ? 0.6 : 1 }}>
-              {importing ? "Importing…" : "Import CSV"}
+              {importing ? "Importing…" : "Import Products"}
             </button>
             {importResult && <span style={{ fontSize: 12, color: importResult.startsWith("✓") ? "#4ade80" : "#f87171" }}>{importResult}</span>}
           </div>
