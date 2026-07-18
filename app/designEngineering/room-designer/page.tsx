@@ -37,6 +37,35 @@ const SoundbarIcon = ({size,color}:{size:number,color:string}) => (
   </svg>
 );
 
+const WallTypeIcon = ({type,size=30}:{type:"drywall"|"glass"|"solid";size?:number}) => {
+  const stroke = "#64748b";
+  if (type === "glass") return (
+    <svg width={size} height={size*0.8} viewBox="0 0 32 24" fill="none" aria-hidden="true">
+      <rect x="1.5" y="2" width="29" height="2.4" rx="1.2" stroke={stroke} strokeWidth="1.2"/>
+      <rect x="1.5" y="19.6" width="29" height="2.4" rx="1.2" stroke={stroke} strokeWidth="1.2"/>
+      <path d="M3.5 4.4V19.6M16 4.4V19.6M28.5 4.4V19.6" stroke={stroke} strokeWidth="1.2"/>
+      <path d="M7.5 14L11 10.5M8.8 16L12.3 12.5M20 14L23.5 10.5M21.3 16L24.8 12.5" stroke={stroke} strokeWidth="0.8" strokeLinecap="round" opacity="0.8"/>
+    </svg>
+  );
+  if (type === "solid") return (
+    <svg width={size} height={size*0.8} viewBox="0 0 32 24" fill="none" aria-hidden="true">
+      <rect x="1.5" y="2" width="29" height="20" rx="0.6" stroke={stroke} strokeWidth="1.2"/>
+      <path d="M1.5 7H30.5M1.5 12H30.5M1.5 17H30.5" stroke={stroke} strokeWidth="1"/>
+      <path d="M12 2V7M23 2V7M7 7V12M18 7V12M27 7V12M12 12V17M23 12V17M7 17V22M18 17V22M27 17V22" stroke={stroke} strokeWidth="1"/>
+    </svg>
+  );
+  return (
+    <svg width={size} height={size*0.8} viewBox="0 0 32 24" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="24" height="20" rx="0.6" stroke={stroke} strokeWidth="1.2"/>
+      <path d="M26 2L30 5V22H26M26 6L30 10M26 11L30 15M26 16L30 20" stroke={stroke} strokeWidth="0.9" strokeLinejoin="round"/>
+      <circle cx="5.5" cy="5.5" r="0.9" stroke={stroke} strokeWidth="0.9"/>
+      <circle cx="22.5" cy="5.5" r="0.9" stroke={stroke} strokeWidth="0.9"/>
+      <circle cx="5.5" cy="18.5" r="0.9" stroke={stroke} strokeWidth="0.9"/>
+      <circle cx="22.5" cy="18.5" r="0.9" stroke={stroke} strokeWidth="0.9"/>
+    </svg>
+  );
+};
+
 interface RoomType {
   id: string; name: string; people: string; maxSeats: number;
   w: number; l: number; h: number; desc: string;
@@ -46,7 +75,7 @@ interface DeviceCatalogItem {
   wall: string; type: string; color: string;
 }
 interface PlacedDevice extends DeviceCatalogItem {
-  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; rotation?: number; wallUid?: number;
+  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; wallType?: "drywall"|"glass"|"solid"; rotation?: number; wallUid?: number;
 }
 
 const roomTypes: RoomType[] = [
@@ -385,6 +414,7 @@ export default function RoomDesignerPage() {
 
   // Wall drawing mode (polygonal — continuous click-to-draw)
   const [isDrawingWall,   setIsDrawingWall]   = useState(false);
+  const [drawingWallType, setDrawingWallType] = useState<"drywall"|"glass"|"solid">("drywall");
   const [wallPoints,      setWallPoints]      = useState<{x:number;y:number}[]>([]);
   const [wallMousePos,    setWallMousePos]    = useState<{x:number;y:number}|null>(null);
   const [wallSnapPoint,   setWallSnapPoint]   = useState<{x:number;y:number}|null>(null);
@@ -1555,10 +1585,10 @@ export default function RoomDesignerPage() {
     const angle = Math.atan2(dy, dx);
     const id = Date.now() + Math.random();
     setPlacedDevices(prev => [...prev, {
-      id: "wall-partition", name: "Wall", icon: "🧱",
-      w: len, h: 0.15, wall: "floor", type: "furniture", color: "rgb(var(--text-subtle))",
+      id: "wall-partition", name: drawingWallType === "glass" ? "Glass Wall" : drawingWallType === "solid" ? "Solid Wall" : "Drywall", icon: "🧱",
+      w: len, h: drawingWallType === "solid" ? 0.3 : 0.15, wall: "floor", type: "furniture", color: drawingWallType === "solid" ? "#475569" : "rgb(var(--text-subtle))",
       uid: id, x: cx, y: cy, z: 0, mountWall: "floor",
-      wallAngle: angle,
+      wallAngle: angle, wallType: drawingWallType,
     } as PlacedDevice]);
   };
 
@@ -1578,6 +1608,16 @@ export default function RoomDesignerPage() {
     setWallSnapPoint(null);
     setWallLengthInput("");
     setTrackGuides([]);
+  };
+
+  const startWallDrawing = (wallType: "drywall"|"glass"|"solid") => {
+    setDragNewDoor(null);
+    setDragNewTable(null);
+    setDragNewChair(null);
+    setDrawingWallType(wallType);
+    setIsDrawingWall(true);
+    setWallPoints([]);
+    setWallMousePos(null);
   };
 
   const handleWallInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -2471,16 +2511,25 @@ export default function RoomDesignerPage() {
           {/* Room Configuration */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))"}}>
             <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:10}}>Create Room</div>
-            {/* Draw Walls */}
+            {/* Wall types */}
             <div style={{marginTop:12,opacity:1}}>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                <button onClick={()=>{setDragNewDoor(null);setDragNewTable(null);setDragNewChair(null);setIsDrawingWall(true);setWallPoints([]);setWallMousePos(null);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:isDrawingWall && !isScalingFloorPlan ? "rgba(139,92,246,0.15)" : "rgb(var(--forge-surface) / 0.4)",border:"1px solid " + (isDrawingWall && !isScalingFloorPlan ? "rgba(139,92,246,0.4)" : "rgb(var(--border))"),borderRadius:5,cursor:"pointer",textAlign:"left"}}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                  <div>
-                    <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>Draw Walls</div>
-                    <div style={{fontSize:11,color:"#475569"}}>Click points on canvas to draw</div>
-                  </div>
-                </button>
+                {([
+                  {type:"drywall" as const,label:"Drywall",description:"Standard framed partition"},
+                  {type:"glass" as const,label:"Glass Wall",description:"Glazed partition"},
+                  {type:"solid" as const,label:"Solid Wall",description:"Concrete or masonry wall"},
+                ]).map(option => {
+                  const active = isDrawingWall && !isScalingFloorPlan && drawingWallType === option.type;
+                  return (
+                    <button key={option.type} onClick={()=>startWallDrawing(option.type)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",background:active?"rgba(139,92,246,0.15)":"rgb(var(--forge-surface) / 0.4)",border:"1px solid "+(active?"rgba(139,92,246,0.4)":"rgb(var(--border))"),borderRadius:5,cursor:"pointer",textAlign:"left"}}>
+                      <WallTypeIcon type={option.type}/>
+                      <div>
+                        <div style={{fontSize:13,color:"rgb(var(--text-body))",fontWeight:500}}>{option.label}</div>
+                        <div style={{fontSize:11,color:"#475569"}}>{option.description}</div>
+                      </div>
+                    </button>
+                  );
+                })}
                 {isDrawingWall && (
                   <button
                     onClick={() => setOrthoMode(v => !v)}
@@ -2872,7 +2921,7 @@ export default function RoomDesignerPage() {
                   )}
                   {/* Lines between placed points */}
                   {wallPoints.map((pt, i) => i > 0 ? (
-                    <line key={"wp"+i} x1={pX(wallPoints[i-1].x)} y1={pY(wallPoints[i-1].y)} x2={pX(pt.x)} y2={pY(pt.y)} stroke="#8b5cf6" strokeWidth={2} opacity={0.4} />
+                    <line key={"wp"+i} x1={pX(wallPoints[i-1].x)} y1={pY(wallPoints[i-1].y)} x2={pX(pt.x)} y2={pY(pt.y)} stroke={drawingWallType==="solid"?"#475569":"#8b5cf6"} strokeWidth={drawingWallType==="solid"?4:2} opacity={0.55} />
                   ) : null)}
                   {/* Line from last point to cursor + live dimension label */}
                   {wallMousePos && (() => {
@@ -2885,7 +2934,7 @@ export default function RoomDesignerPage() {
                     const label = toDisplay(len);
                     return (
                       <g>
-                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#8b5cf6" strokeWidth={2} strokeDasharray="4 3" opacity={0.6} />
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={drawingWallType==="solid"?"#475569":"#8b5cf6"} strokeWidth={drawingWallType==="solid"?4:2} strokeDasharray={drawingWallType==="solid"?undefined:"4 3"} opacity={0.7} />
                         <rect x={mx - 26} y={my - 9} width={52} height={16} rx={4} fill="rgb(var(--forge-bg))" stroke="#8b5cf6" strokeWidth={1} opacity={0.92} />
                         <text x={mx} y={my + 3} textAnchor="middle" fontSize={9} fontWeight={600} fill="#a78bfa" fontFamily="'JetBrains Mono',monospace">{label}</text>
                       </g>
@@ -3143,14 +3192,16 @@ export default function RoomDesignerPage() {
                       const extY = Math.sin(angle) * halfOff;
                       const ex1 = px1 - extX, ey1 = py1 - extY;
                       const ex2 = px2 + extX, ey2 = py2 + extY;
-                      const wallColor = isSelected ? "#8b5cf6" : "rgb(var(--text-muted))";
+                      const wallType = dev.wallType ?? "drywall";
+                      const wallColor = isSelected ? "#8b5cf6" : wallType === "solid" ? "#475569" : "rgb(var(--text-muted))";
                       const rectD = `M${ex1+perpX},${ey1+perpY} L${ex2+perpX},${ey2+perpY} L${ex2-perpX},${ey2-perpY} L${ex1-perpX},${ey1-perpY} Z`;
                       return (
                         <>
                           {isSelected && <path d={rectD} fill="#8b5cf6" fillOpacity={0.12} stroke="#8b5cf6" strokeWidth={2} strokeLinejoin="miter"/>}
-                          <path d={rectD} fill={cc.card} stroke="none"/>
-                          <line x1={ex1+perpX} y1={ey1+perpY} x2={ex2+perpX} y2={ey2+perpY} stroke={wallColor} strokeWidth={1} strokeLinecap="butt"/>
-                          <line x1={ex1-perpX} y1={ey1-perpY} x2={ex2-perpX} y2={ey2-perpY} stroke={wallColor} strokeWidth={1} strokeLinecap="butt"/>
+                          <path d={rectD} fill={wallType === "solid" ? wallColor : wallType === "glass" ? "rgb(var(--text-muted))" : cc.card} fillOpacity={wallType === "glass" ? 0.14 : 1} stroke="none"/>
+                          <line x1={ex1+perpX} y1={ey1+perpY} x2={ex2+perpX} y2={ey2+perpY} stroke={wallColor} strokeWidth={wallType === "solid" ? 1.5 : 1} strokeLinecap="butt"/>
+                          {wallType === "glass" && <line x1={ex1} y1={ey1} x2={ex2} y2={ey2} stroke={wallColor} strokeWidth={0.65} strokeLinecap="butt" opacity={0.7}/>}
+                          <line x1={ex1-perpX} y1={ey1-perpY} x2={ex2-perpX} y2={ey2-perpY} stroke={wallColor} strokeWidth={wallType === "solid" ? 1.5 : 1} strokeLinecap="butt"/>
                         </>
                       );
                     })()}
@@ -4386,7 +4437,7 @@ export default function RoomDesignerPage() {
                   const wy1 = dev.y - Math.sin(angle) * len / 2;
                   const wx2 = dev.x + Math.cos(angle) * len / 2;
                   const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"cw"+dev.uid} x1={cpX(wx1)} y1={cpY(wy1)} x2={cpX(wx2)} y2={cpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                  return <line key={"cw"+dev.uid} x1={cpX(wx1)} y1={cpY(wy1)} x2={cpX(wx2)} y2={cpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
                 })}
                 {/* Doors/windows from floor plan */}
                 {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
@@ -4528,7 +4579,7 @@ export default function RoomDesignerPage() {
                   const wy1 = dev.y - Math.sin(angle) * len / 2;
                   const wx2 = dev.x + Math.cos(angle) * len / 2;
                   const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"mw"+dev.uid} x1={mpX(wx1)} y1={mpY(wy1)} x2={mpX(wx2)} y2={mpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                  return <line key={"mw"+dev.uid} x1={mpX(wx1)} y1={mpY(wy1)} x2={mpX(wx2)} y2={mpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
                 })}
                 {/* Doors/windows from floor plan */}
                 {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
@@ -4644,7 +4695,7 @@ export default function RoomDesignerPage() {
                   const wy1 = dev.y - Math.sin(angle) * len / 2;
                   const wx2 = dev.x + Math.cos(angle) * len / 2;
                   const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"wsw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                  return <line key={"wsw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
                 })}
                 {/* Doors/windows from floor plan */}
                 {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
@@ -4768,7 +4819,7 @@ export default function RoomDesignerPage() {
                   const wy1 = dev.y - Math.sin(angle) * len / 2;
                   const wx2 = dev.x + Math.cos(angle) * len / 2;
                   const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"wmw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke="rgb(var(--text-muted))" strokeWidth={2} strokeLinecap="round" opacity={0.6}/>;
+                  return <line key={"wmw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
                 })}
                 {/* Doors/windows from floor plan */}
                 {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {

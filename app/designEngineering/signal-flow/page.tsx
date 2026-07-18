@@ -281,6 +281,8 @@ export default function SignalFlowPage() {
             color: p.color || "#64748b",
             ports: p.ports || [],
             cat: p.category,
+            rack_mounted: p.rack_mounted,
+            rack_units: p.rack_units,
             w: Math.max(120, p.type.length * 7 + 30),
             h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
           })),
@@ -309,6 +311,7 @@ export default function SignalFlowPage() {
           ...dbData.map((p: any) => ({
             type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
             color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
+            rack_mounted: p.rack_mounted, rack_units: p.rack_units,
             w: Math.max(120, p.type.length * 7 + 30),
             h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
           })),
@@ -345,7 +348,10 @@ export default function SignalFlowPage() {
     }).filter(Boolean);
   };
 
-  // Size a device box so all port rows fit and left/right labels can't collide.
+  const DEVICE_FOOTER_H = 22;
+
+  // Size a device box so all port rows fit, left/right labels can't collide,
+  // and the rack-mounted control has a dedicated footer.
   // Port labels are 8px monospace (~4.9px/char); each port row needs ~13px.
   const sizeDevice = (d: any) => {
     const left = (d.ports||[]).filter((p:any)=>p.side==="left");
@@ -355,7 +361,7 @@ export default function SignalFlowPage() {
     const maxR = right.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
     const title = [d.mfr&&d.mfr!=="Generic"?d.mfr:null, d.model&&d.model!=="—"?d.model:null].filter(Boolean).join(" · ");
     const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, title.length*7 + 24, (d.type||"").length*4.5 + 20);
-    const h = Math.max(56, d.h||0, 26 + 13*(rows+1));
+    const h = Math.max(78, d.h||0, 26 + 13*(rows+1) + DEVICE_FOOTER_H);
     return {...d, w, h};
   };
 
@@ -404,7 +410,8 @@ export default function SignalFlowPage() {
     const v = viewRef.current;
     const wx = (200 + Math.random()*300 - v.x) / v.zoom;
     const wy = (100 + Math.random()*200 - v.y) / v.zoom;
-    setDevices(prev=>[...prev,sizeDevice({...template,id,x:wx,y:wy,ports})]);
+    const rackMounted = template.rackMounted ?? template.rack_mounted ?? false;
+    setDevices(prev=>[...prev,sizeDevice({...template,id,x:wx,y:wy,ports,rackMounted})]);
   };
 
   const roomColors = ["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
@@ -523,7 +530,7 @@ export default function SignalFlowPage() {
     const isLeft = port.side==="left";
     const arr = isLeft?leftPorts:rightPorts;
     const idx = arr.indexOf(port);
-    const spacing = (device.h - PORT_TOP_PAD)/(arr.length+1);
+    const spacing = (device.h - PORT_TOP_PAD - DEVICE_FOOTER_H)/(arr.length+1);
     return {
       x: device.x + panOffset.x + (isLeft?0:device.w),
       y: device.y + panOffset.y + PORT_TOP_PAD + spacing*(idx+1)
@@ -1612,7 +1619,7 @@ export default function SignalFlowPage() {
                 {(dev.mfr||dev.model)&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={11} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={700}>{[dev.mfr&&dev.mfr!=="Generic"?dev.mfr:null,dev.model&&dev.model!=="—"?dev.model:null].filter(Boolean).join(" · ")}</text>}
                 <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(dev.mfr||dev.model?23:16)} textAnchor="middle" fontSize={8} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif">{dev.type}</text>
                 {leftPorts.map((port:any,pi:number)=>{
-                  const spacing = (dev.h-PORT_TOP_PAD)/(leftPorts.length+1);
+                  const spacing = (dev.h-PORT_TOP_PAD-DEVICE_FOOTER_H)/(leftPorts.length+1);
                   const py = dev.y+panOffset.y+PORT_TOP_PAD+spacing*(pi+1);
                   const px = dev.x+panOffset.x;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
@@ -1625,7 +1632,7 @@ export default function SignalFlowPage() {
                   );
                 })}
                 {rightPorts.map((port:any,pi:number)=>{
-                  const spacing = (dev.h-PORT_TOP_PAD)/(rightPorts.length+1);
+                  const spacing = (dev.h-PORT_TOP_PAD-DEVICE_FOOTER_H)/(rightPorts.length+1);
                   const py = dev.y+panOffset.y+PORT_TOP_PAD+spacing*(pi+1);
                   const px = dev.x+panOffset.x+dev.w;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
@@ -1637,6 +1644,43 @@ export default function SignalFlowPage() {
                     </g>
                   );
                 })}
+                {(() => {
+                  const rackMounted = dev.rackMounted ?? dev.rack_mounted ?? false;
+                  if (!rackMounted && !isSel) return null;
+                  const footerY = dev.y + panOffset.y + dev.h - DEVICE_FOOTER_H;
+                  const toggleX = dev.x + panOffset.x + dev.w - 43;
+                  return (
+                    <g
+                      onMouseDown={(e)=>e.stopPropagation()}
+                      onClick={(e)=>{
+                        e.stopPropagation();
+                        pushUndo();
+                        const nextDevices = devices.map((d:any)=>d.id===dev.id?{...d,rackMounted:!rackMounted}:d);
+                        setDevices(nextDevices);
+                        // Persist immediately so Rack Builder sees the new state even
+                        // when the user switches tools before the normal autosave runs.
+                        saveToolData("signal-flow", {
+                          devices: nextDevices,
+                          connections,
+                          rooms,
+                          nextId: nextId.current,
+                          annotations,
+                          annotNextId: annotIdRef.current,
+                        });
+                      }}
+                      role="switch"
+                      aria-checked={rackMounted}
+                      style={{cursor:"pointer"}}
+                    >
+                      <line x1={dev.x+panOffset.x+7} y1={footerY} x2={dev.x+panOffset.x+dev.w-7} y2={footerY} stroke="rgb(var(--border))" strokeWidth={1} opacity={0.7}/>
+                      <text x={dev.x+panOffset.x+10} y={footerY+14} fontSize={7} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif" fontWeight={600}>RACK MOUNTED</text>
+                      <rect x={toggleX} y={footerY+5} width={36} height={13} rx={6.5} fill="rgb(var(--forge-panel))" stroke="rgb(var(--border))" strokeWidth={1}/>
+                      <rect x={toggleX+(rackMounted?18:0)} y={footerY+5} width={18} height={13} rx={6.5} fill={rackMounted?"#8b5cf6":"#64748b"}/>
+                      <text x={toggleX+9} y={footerY+14} textAnchor="middle" fontSize={6.5} fill={rackMounted?"rgb(var(--text-subtle))":"#fff"} fontFamily="Inter, sans-serif" fontWeight={700}>NO</text>
+                      <text x={toggleX+27} y={footerY+14} textAnchor="middle" fontSize={6.5} fill={rackMounted?"#fff":"rgb(var(--text-subtle))"} fontFamily="Inter, sans-serif" fontWeight={700}>YES</text>
+                    </g>
+                  );
+                })()}
               </g>
             );
           })}
