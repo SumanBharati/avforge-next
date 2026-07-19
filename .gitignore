@@ -42,6 +42,8 @@ next-env.d.ts
 
 # Deploy logs
 deploy.log
+codex-dev.log
+codex-dev-error.log
 
 # AI knowledge-base source PDFs (ingested into Supabase, not committed)
 /data

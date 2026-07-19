@@ -3755,13 +3755,13 @@
         "side": "left",
         "signal": "hdmi",
         "dir": "in",
-        "label": "HDMI In 1-2"
+        "label": "HDMI In 1-4"
       },
       {
         "side": "left",
         "signal": "cat6",
         "dir": "in",
-        "label": "DTP In 3-8"
+        "label": "DTP In 5-8"
       },
       {
         "side": "left",
@@ -3779,13 +3779,13 @@
         "side": "right",
         "signal": "hdmi",
         "dir": "out",
-        "label": "HDMI Out 1-4"
+        "label": "HDMI Out 1-2"
       },
       {
         "side": "right",
         "signal": "cat6",
         "dir": "out",
-        "label": "DTP Out 1-6"
+        "label": "DTP Out 1-4"
       },
       {
         "side": "right",

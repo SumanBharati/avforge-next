@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
+import AudioReferenceTools from "@/components/AudioReferenceTools";
 
 /* ────────────────────────────────────────────────────────────────
    Connectors & Cables — AV connector reference
@@ -22,6 +24,8 @@ interface Connector {
   overview: string[];
   specs: { label: string; value: string }[];
   context?: string; // "why it matters" field note
+  image?: { src: string; alt: string };
+  detailImages?: { src: string; alt: string; caption: string }[];
   pinouts?: Pinout[];
   versions?: VersionTable;
 }
@@ -248,6 +252,135 @@ const CONNECTORS: Connector[] = [
     context:
       "At 12G rates impedance discipline is everything: true 75 Ω connectors, percision-matched cable, and no 50 Ω adapters in the path. A run that passed at HD can fail outright at 12G with the same sloppy terminations.",
   },
+  {
+    id: "xlr",
+    name: "XLR",
+    era: "current",
+    tagline: "Locking balanced audio for microphones, mixers, and professional equipment",
+    overview: [
+      "XLR is primarily used for professional audio, most commonly as a three-pin connector carrying one balanced mono signal. It is standard on microphones, mixers, audio interfaces, powered loudspeakers, amplifiers, and stage boxes.",
+      "The female connector is designed so pin 1 makes contact before the signal pins. This connects the cable shield first and helps reduce interference and unwanted noise while equipment is connected or disconnected.",
+    ],
+    specs: [
+      { label: "Standard audio", value: "3-pin XLR · balanced mono" },
+      { label: "Wiring", value: "Pin 1 = shield/ground · Pin 2 = hot (+) · Pin 3 = cold (−)" },
+      { label: "Phantom power", value: "Typically 48 V DC applied equally to pins 2 and 3 relative to pin 1" },
+      { label: "Other variants", value: "4-, 5-, and 7-pin XLR exist for intercom, lighting control, and specialized equipment" },
+    ],
+    context:
+      "Use microphone or balanced-audio cable with a twisted pair and shield. Pin 1 should terminate to the connector shell/shield strategy specified by the equipment manufacturer; incorrect grounding can create hum or compromise RF shielding.",
+    detailImages: [
+      {
+        src: "/connector-xlr-termination.png",
+        alt: "Three-pin male XLR connector with pins 1, 2, and 3 labeled alongside the solder-side pin arrangement",
+        caption: "3-pin XLR termination — pin 1 is ground/shield, pin 2 is hot (+), and pin 3 is cold (−).",
+      },
+    ],
+    pinouts: [
+      {
+        title: "3-pin XLR balanced audio",
+        note: "Pin numbering is viewed from the mating face; male and female physical layouts mirror each other.",
+        pins: [
+          { pin: "1", signal: "Shield / ground", note: "Makes contact first on the female connector" },
+          { pin: "2", signal: "Hot / positive (+)", note: "Audio polarity positive" },
+          { pin: "3", signal: "Cold / negative (−)", note: "Audio polarity inverted" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "terminal-block-audio",
+    name: "Terminal Block Audio",
+    era: "current",
+    tagline: "Pluggable balanced and unbalanced audio I/O for installed AV equipment",
+    overview: [
+      "Three-position pluggable terminal blocks are common on installed DSPs, amplifiers, switchers, and codecs. Balanced mono uses +, −, and shield/ground; unbalanced wiring uses signal and shield and may require a jumper depending on whether the port is an input or output.",
+      "Multi-channel blocks repeat the same contact group. Keep exposed conductor short, capture the conductor rather than insulation, and follow the equipment legend because connector orientation and contact order vary by manufacturer.",
+    ],
+    specs: [
+      { label: "Balanced", value: "+ = hot · − = cold · ground symbol = shield" },
+      { label: "Unbalanced input", value: "Signal to + · shield to ground · jumper − to ground when specified" },
+      { label: "Unbalanced output", value: "Signal from + · shield from ground; leave − open unless documentation says otherwise" },
+      { label: "Cable", value: "Shielded twisted pair for balanced audio" },
+    ],
+    context:
+      "Do not automatically short a balanced output's negative terminal to ground. Cross-coupled and actively balanced stages can be damaged or distorted; use the manufacturer's unbalanced-output diagram.",
+  },
+  {
+    id: "speakon",
+    name: "Speakon",
+    era: "current",
+    tagline: "Locking, touch-safe connector for amplifier-to-loudspeaker wiring",
+    overview: [
+      "Speakon-style connectors are used in professional sound systems between power amplifiers and passive loudspeakers. The twist-lock body resists accidental disconnection and keeps live contacts inaccessible while mating.",
+      "Two-, four-, and eight-pole versions exist. The common NL4 arrangement provides two independent speaker circuits, labeled 1+/1− and 2+/2−; many two-conductor speaker cables use only 1+ and 1−.",
+    ],
+    specs: [
+      { label: "Contacts", value: "2, 4, or 8 poles depending on connector family" },
+      { label: "Common NL4 use", value: "1+/1− = primary circuit · 2+/2− = secondary circuit" },
+      { label: "Signal", value: "High-current loudspeaker-level audio — not line level" },
+      { label: "Retention", value: "Insert, rotate, and lock; release latch before turning" },
+    ],
+    context:
+      "Verify both ends before using a four-pole cable: bi-amped cabinets and bridge-mode amplifiers can assign 2+/2− differently. Never assume unused-looking poles are inactive.",
+    pinouts: [
+      {
+        title: "Typical 4-pole termination",
+        note: "Assignments are conventional, but the equipment panel legend is authoritative.",
+        pins: [
+          { pin: "1+", signal: "Circuit 1 positive", note: "Primary speaker positive on most systems" },
+          { pin: "1−", signal: "Circuit 1 negative", note: "Primary speaker negative on most systems" },
+          { pin: "2+", signal: "Circuit 2 positive", note: "Second channel / bi-amp feed when used" },
+          { pin: "2−", signal: "Circuit 2 negative", note: "Second channel / bi-amp feed when used" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "ts-trs-audio",
+    name: "TS & TRS Audio",
+    era: "current",
+    tagline: "Analog audio connections for instruments, headphones, and line-level equipment",
+    overview: [
+      "TS and TRS plugs are used on equipment such as mobile devices, headphones, PCs, musical instruments, mixers, and audio interfaces. TS means Tip-Sleeve and has two conductors; TRS means Tip-Ring-Sleeve and has three.",
+      "A TS connection normally carries one unbalanced mono signal. TRS can carry unbalanced stereo audio, as with headphones, or one balanced mono signal, as commonly used between professional audio devices.",
+    ],
+    specs: [
+      { label: "TS", value: "Tip = signal · Sleeve = ground/shield" },
+      { label: "TRS stereo", value: "Tip = left · Ring = right · Sleeve = ground" },
+      { label: "TRS balanced", value: "Tip = hot (+) · Ring = cold (−) · Sleeve = shield" },
+      { label: "Common sizes", value: "1/4 in (6.35 mm) · 1/8 in (3.5 mm) · 3/32 in (2.5 mm)" },
+    ],
+    context:
+      "A TRS plug does not automatically mean stereo or balanced audio—the equipment at both ends determines the wiring. Confirm the jack's function before choosing a cable or adapter.",
+    image: {
+      src: "/connector-ts-trs-audio.png",
+      alt: "Rendered TRS audio plug showing the tip, two insulating rings, and sleeve",
+    },
+    detailImages: [
+      {
+        src: "/connector-ts-trs-termination.png",
+        alt: "Cutaway TS audio plug identifying its tip and sleeve termination contacts",
+        caption: "TS termination reference — tip carries the signal; sleeve is ground/shield.",
+      },
+      {
+        src: "/connector-trs-termination.png",
+        alt: "Cutaway TRS audio plug identifying its tip, ring, and sleeve termination contacts",
+        caption: "TRS stereo termination — tip is left, ring is right, and sleeve is ground/shield.",
+      },
+    ],
+    pinouts: [
+      {
+        title: "Typical contact assignments",
+        note: "TRS wiring depends on whether the connection is stereo or balanced mono.",
+        pins: [
+          { pin: "Tip", signal: "TS: mono signal · TRS stereo: left · TRS balanced: hot (+)" },
+          { pin: "Ring", signal: "TRS stereo: right · TRS balanced: cold (−)", note: "Not present on TS" },
+          { pin: "Sleeve", signal: "Ground / shield" },
+        ],
+      },
+    ],
+  },
   /* ── Legacy ─────────────────────────────────────────────── */
   {
     id: "vga",
@@ -308,7 +441,7 @@ const CONNECTORS: Connector[] = [
   {
     id: "rca",
     name: "RCA",
-    era: "legacy",
+    era: "current",
     tagline: "In 2026: unbalanced audio, sub lines, and S/PDIF — not video",
     overview: [
       "A two-conductor coaxial connector: signal on the centre pin, ground on the shell. Its composite (yellow) and component (YPbPr) video roles are dead in new work, but it remains everywhere as unbalanced line-level audio (red/white), subwoofer feeds, and 75 Ω coaxial S/PDIF digital audio (orange).",
@@ -364,50 +497,6 @@ const CONNECTORS: Connector[] = [
       "Despite the old myth, F never cabled early computer networks — that was BNC/N-type coax (10BASE2/10BASE5). F is and always was RF distribution.",
   },
 ];
-
-/* ── Resolution reference — derived columns COMPUTED, never typed ── */
-const RESOLUTIONS: { name: string; w: number; h: number }[] = [
-  { name: "VGA", w: 640, h: 480 },
-  { name: "SVGA", w: 800, h: 600 },
-  { name: "qHD", w: 960, h: 540 },
-  { name: "XGA", w: 1024, h: 768 },
-  { name: "HD", w: 1280, h: 720 },
-  { name: "WXGA", w: 1280, h: 800 },
-  { name: "SXGA", w: 1280, h: 1024 },
-  { name: "WXGA+", w: 1440, h: 900 },
-  { name: "HD+", w: 1600, h: 900 },
-  { name: "UXGA", w: 1600, h: 1200 },
-  { name: "WSXGA+", w: 1680, h: 1050 },
-  { name: "FHD (1080p)", w: 1920, h: 1080 },
-  { name: "WUXGA", w: 1920, h: 1200 },
-  { name: "UW-FHD", w: 2560, h: 1080 },
-  { name: "WQHD (1440p)", w: 2560, h: 1440 },
-  { name: "WQXGA", w: 2560, h: 1600 },
-  { name: "UWQHD", w: 3440, h: 1440 },
-  { name: "4K UHD", w: 3840, h: 2160 },
-  { name: "DCI 4K", w: 4096, h: 2160 },
-  { name: "5K", w: 5120, h: 2880 },
-  { name: "DQHD (32:9)", w: 5120, h: 1440 },
-  { name: "8K UHD", w: 7680, h: 4320 },
-];
-
-const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-
-// Reduce H:V and present the ratio the industry name for it when the exact
-// reduction is unfamiliar (8:5 → 16:10, 43:18 ≈ 21:9, 256:135 ≈ 17:9)
-function aspectLabel(w: number, h: number): string {
-  const g = gcd(w, h);
-  const key = `${w / g}:${h / g}`;
-  const friendly: Record<string, string> = {
-    "8:5": "16:10",
-    "43:18": "≈21:9 (43:18)",
-    "64:27": "21:9 (64:27)",
-    "256:135": "≈17:9 (256:135)",
-  };
-  return friendly[key] ?? key;
-}
-
-const megapixels = (w: number, h: number) => ((w * h) / 1_000_000).toFixed(2);
 
 /* ── Original connector artwork ───────────────────────────────
    Schematic mating-face views drawn from the public mechanical
@@ -510,6 +599,46 @@ function ConnectorArt({ id, size = 40 }: { id: string; size?: number }) {
           <circle cx={60} cy={40} r={24} fill={ART_SHELL} stroke={ART_STROKE} strokeWidth="2" />
           <circle cx={60} cy={40} r={13} fill={ART_SLOT} />
           <circle cx={60} cy={40} r={5} fill={ART_PIN} />
+        </svg>
+      );
+    case "terminal-block-audio":
+      return (
+        <svg {...common}>
+          <rect x={25} y={20} width={70} height={40} rx={4} fill="#65d12e" stroke={ART_STROKE} strokeWidth="2" />
+          {[39,60,81].map(x => <circle key={x} cx={x} cy={32} r={6} fill={ART_SLOT} />)}
+          <text x={39} y={53} textAnchor="middle" fontSize={11} fontWeight={700} fill={ART_SLOT}>+</text>
+          <text x={60} y={53} textAnchor="middle" fontSize={11} fontWeight={700} fill={ART_SLOT}>−</text>
+          <path d="M76 49 h10 M78 52 h6 M80 55 h2" stroke={ART_SLOT} strokeWidth="1.5" />
+        </svg>
+      );
+    case "speakon":
+      return (
+        <svg {...common}>
+          <circle cx={60} cy={40} r={27} fill={ART_SLOT} stroke={ART_STROKE} strokeWidth="2" />
+          <path d="M60 13 A27 27 0 0 1 86 34 L78 38 A19 19 0 0 0 60 21Z" fill="#2563eb" />
+          <rect x={55} y={10} width={18} height={7} rx={2} fill={ART_SHELL} stroke={ART_STROKE} />
+          {[{x:49,y:31},{x:71,y:31},{x:49,y:51},{x:71,y:51}].map((p,i) => <circle key={i} cx={p.x} cy={p.y} r={4} fill={ART_PIN_LT} />)}
+        </svg>
+      );
+    case "xlr":
+      return (
+        <svg {...common}>
+          <circle cx={60} cy={40} r={27} fill={ART_SHELL} stroke={ART_STROKE} strokeWidth="2" />
+          <circle cx={60} cy={40} r={20} fill={ART_SLOT} />
+          <circle cx={60} cy={53} r={4} fill={ART_PIN_LT} />
+          <circle cx={48} cy={33} r={4} fill={ART_PIN_LT} />
+          <circle cx={72} cy={33} r={4} fill={ART_PIN_LT} />
+          <rect x={55} y={10} width={10} height={5} rx={2} fill={ART_STROKE} />
+        </svg>
+      );
+    case "ts-trs-audio":
+      return (
+        <svg {...common}>
+          <path d="M14 40 h16 l8 -8 h45 l8 8 -8 8 H38 l-8 -8 Z" fill={ART_SHELL} stroke={ART_STROKE} strokeWidth="2" strokeLinejoin="round" />
+          <path d="M14 40 l9 -8 h7 v16 h-7 Z" fill={ART_PIN_LT} stroke={ART_STROKE} strokeWidth="1.5" strokeLinejoin="round" />
+          <rect x={39} y={32} width={5} height={16} fill={ART_SLOT} />
+          <rect x={57} y={32} width={5} height={16} fill={ART_SLOT} />
+          <rect x={91} y={27} width={18} height={26} rx={3} fill={ART_SHELL} stroke={ART_STROKE} strokeWidth="2" />
         </svg>
       );
     case "s-video":
@@ -691,15 +820,36 @@ export default function ConnectorsPage() {
         {open && (
           <div className="border-t border-border px-4 pb-4 pt-3.5">
             <div className="mb-1 flex gap-5">
-              <div className="hidden shrink-0 self-start rounded-lg border border-border bg-forge-surface/30 p-2 sm:block">
-                <ConnectorArt id={c.id} size={120} />
-              </div>
+              {c.image ? (
+                <div className="hidden w-48 shrink-0 self-start overflow-hidden rounded-lg border border-border bg-forge-surface/30 sm:block">
+                  <Image src={c.image.src} alt={c.image.alt} width={1536} height={1024} className="h-auto w-full" />
+                </div>
+              ) : (
+                <div className="hidden shrink-0 self-start rounded-lg border border-border bg-forge-surface/30 p-2 sm:block">
+                  <ConnectorArt id={c.id} size={120} />
+                </div>
+              )}
               <div className="min-w-0">
                 {c.overview.map((p, i) => (
                   <p key={i} className="mb-2.5 text-[13px] leading-relaxed text-muted">{p}</p>
                 ))}
               </div>
             </div>
+
+            {c.detailImages?.map(image => (
+              <figure key={image.src} className="mb-3 overflow-hidden rounded-lg border border-border bg-forge-surface/30">
+                <Image
+                  src={image.src}
+                  alt={image.alt}
+                  width={1536}
+                  height={1024}
+                  className="h-auto w-full"
+                />
+                <figcaption className="border-t border-border px-3 py-2 text-[11px] text-subtle">
+                  {image.caption}
+                </figcaption>
+              </figure>
+            ))}
 
             {/* Key specs */}
             <div className="mb-3 mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
@@ -798,7 +948,7 @@ export default function ConnectorsPage() {
       <a href="/calculators" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Calculators</a>
       <h2 className="mb-1 text-lg font-semibold text-heading">🔌 Connectors &amp; Cables</h2>
       <p className="mb-5 text-[13px] text-subtle">
-        Pinouts, link versions, and field notes for AV connectors — plus a computed resolution reference
+        Pinouts, link versions, field wiring, and practical notes for AV connectors
       </p>
 
       {/* Search */}
@@ -838,35 +988,8 @@ export default function ConnectorsPage() {
         </div>
       )}
 
-      {/* Resolution reference */}
-      <div className="mb-2 mt-8 text-[11px] font-semibold uppercase tracking-widest text-faint">Resolution Reference</div>
-      <p className="mb-3 text-[12px] text-subtle">
-        Aspect ratio and megapixels are computed from H×V at render time — no hand-typed derived values.
-      </p>
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="border-b border-border bg-forge-surface/60">
-              <th className="px-3 py-2 text-left font-semibold text-secondary">Name</th>
-              <th className="px-3 py-2 text-right font-semibold text-secondary">H</th>
-              <th className="px-3 py-2 text-right font-semibold text-secondary">V</th>
-              <th className="px-3 py-2 text-left font-semibold text-secondary">Aspect</th>
-              <th className="px-3 py-2 text-right font-semibold text-secondary">Mpx</th>
-            </tr>
-          </thead>
-          <tbody>
-            {RESOLUTIONS.map((r, i) => (
-              <tr key={i} className="border-b border-border/50 last:border-0">
-                <td className="px-3 py-1.5 font-medium text-muted">{r.name}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-blue-400">{r.w}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-blue-400">{r.h}</td>
-                <td className="px-3 py-1.5 text-subtle">{aspectLabel(r.w, r.h)}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-subtle">{megapixels(r.w, r.h)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <AudioReferenceTools />
+
     </div>
   );
 }

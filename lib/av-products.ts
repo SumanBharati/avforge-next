@@ -58,6 +58,16 @@ export async function searchProducts(query: string, limit = 30): Promise<AVProdu
   return data ?? [];
 }
 
+export async function getProductById(id: string): Promise<AVProduct | null> {
+  const { data, error } = await supabase
+    .from("av_products")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
 export async function upsertProducts(
   products: Omit<AVProduct, "id">[]
 ): Promise<{ count: number; error?: string }> {

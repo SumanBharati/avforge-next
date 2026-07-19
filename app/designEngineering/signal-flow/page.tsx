@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
-import { searchProducts } from "@/lib/av-products";
+import { getProductById, searchProducts } from "@/lib/av-products";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 
@@ -108,7 +108,8 @@ export default function SignalFlowPage() {
   // Marquee selection of non-device items: annotations (text/shapes/drawings) and locations
   const [selectedAnnIds, setSelectedAnnIds] = useState<Set<any>>(new Set());
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<any>>(new Set());
-  const clearMarqueeSel = () => { setSelectedIds(new Set()); setSelectedAnnIds(new Set()); setSelectedRoomIds(new Set()); };
+  const [selectedConnIds, setSelectedConnIds] = useState<Set<any>>(new Set());
+  const clearMarqueeSel = () => { setSelectedIds(new Set()); setSelectedAnnIds(new Set()); setSelectedRoomIds(new Set()); setSelectedConnIds(new Set()); };
   const [marquee, setMarquee] = useState<{sx:number;sy:number;cx:number;cy:number}|null>(null);
   const canvasLockedRef = useRef(canvasLocked);
   canvasLockedRef.current = canvasLocked;
@@ -126,6 +127,8 @@ export default function SignalFlowPage() {
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const [contextMenu, setContextMenu] = useState<{x:number,y:number,roomId:string,showColors?:boolean}|null>(null);
   const [deviceContextMenu, setDeviceContextMenu] = useState<{x:number,y:number,deviceId:any}|null>(null);
+  const [refreshingDeviceId, setRefreshingDeviceId] = useState<any>(null);
+  const [refreshNotice, setRefreshNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
   const [editingDevice, setEditingDevice] = useState<any>(null);
   const [editDeviceName, setEditDeviceName] = useState("");
   const [editDeviceMfr, setEditDeviceMfr] = useState("");
@@ -278,6 +281,7 @@ export default function SignalFlowPage() {
         const uniqueLocal = localData.filter((p: any) => !dbKeys.has(`${p.mfr}::${p.type}`));
         const combined = [
           ...dbData.map((p: any) => ({
+            libraryProductId: p.id,
             type: p.type,
             mfr: p.manufacturer,
             model: p.model_name,
@@ -317,6 +321,7 @@ export default function SignalFlowPage() {
         const uniqueLocal = localData.filter((p: any) => !dbKeys.has(`${p.mfr}::${p.type}`));
         setModalResults([
           ...dbData.map((p: any) => ({
+            libraryProductId: p.id,
             type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
             color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
             rack_mounted: p.rack_mounted, rack_units: p.rack_units,
@@ -409,6 +414,68 @@ export default function SignalFlowPage() {
       out.push(p);
     }
     return out;
+  };
+
+  const refreshDeviceFromLibrary = async (deviceId: any) => {
+    const dev = devicesRef.current.find((d:any)=>d.id===deviceId);
+    if (!dev || refreshingDeviceId !== null) return;
+    setRefreshingDeviceId(deviceId);
+    setDeviceContextMenu(null);
+    try {
+      let product = dev.libraryProductId ? await getProductById(dev.libraryProductId) : null;
+      if (!product) {
+        const candidates = await searchProducts(dev.model || dev.type, 50);
+        const same = (a:any,b:any) => String(a||"").trim().toLowerCase() === String(b||"").trim().toLowerCase();
+        product = candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.model_name,dev.model))
+          || candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.type,dev.type))
+          || null;
+      }
+      if (!product) throw new Error(`No exact library match found for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
+
+      const freshPorts = expandPortGroups(product.ports || []);
+      const oldByKey = new Map<string,any[]>();
+      const portKey = (p:any) => `${p.side}|${String(p.label||"").trim().toLowerCase()}`;
+      (dev.ports || []).forEach((p:any)=>{
+        const key = portKey(p), list = oldByKey.get(key) || [];
+        list.push(p); oldByKey.set(key,list);
+      });
+      const keptIds = new Set<any>();
+      const stamp = Date.now();
+      const ports = freshPorts.map((p:any,i:number)=>{
+        const old = oldByKey.get(portKey(p))?.shift();
+        const id = old?.id ?? `${dev.id}-refresh-${stamp}-${i}`;
+        keptIds.add(id);
+        return {...p,id};
+      });
+      const removedIds = new Set<any>((dev.ports || []).map((p:any)=>p.id).filter((id:any)=>!keptIds.has(id)));
+      const removedCableCount = connectionsRef.current.filter((c:any)=>removedIds.has(c.from.portId)||removedIds.has(c.to.portId)).length;
+
+      pushUndo();
+      setConnections(prev=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
+      setDevices(prev=>prev.map((d:any)=>d.id===deviceId ? sizeDevice({
+        ...d,
+        libraryProductId: product!.id,
+        type: product!.type,
+        mfr: product!.manufacturer,
+        model: product!.model_name,
+        price: product!.price,
+        color: product!.color || d.color,
+        ports,
+        rack_units: product!.rack_units,
+        voltage: product!.voltage,
+        amp_draw: product!.amp_draw,
+        power_watts: product!.power_watts,
+        btu_hr: product!.btu_hr,
+        w: 0,
+        h: 0,
+      }) : d));
+      setRefreshNotice({kind:"ok",message:`Equipment refreshed from library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
+    } catch (error:any) {
+      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from the library."});
+    } finally {
+      setRefreshingDeviceId(null);
+      window.setTimeout(()=>setRefreshNotice(null),5000);
+    }
   };
 
   const addDevice = (template: any) => {
@@ -638,9 +705,34 @@ export default function SignalFlowPage() {
           const boxInsideRoom = x1 >= b.x1 && x2 <= b.x2 && y1 >= b.y1 && y2 <= b.y2;
           if (boxHit(b) && !(!isWindow && boxInsideRoom)) roomHits.add(r.id);
         });
+        const pointInside = (p: {x:number;y:number}) => p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
+        const segmentCrossesBox = (a: {x:number;y:number}, b: {x:number;y:number}) => {
+          if (pointInside(a) || pointInside(b)) return true;
+          // Liang-Barsky clipping: a non-empty clipped interval means the cable
+          // segment touches or passes through the crossing-selection rectangle.
+          const dx = b.x-a.x, dy = b.y-a.y;
+          let lo = 0, hi = 1;
+          for (const [p,q] of [[-dx,a.x-x1],[dx,x2-a.x],[-dy,a.y-y1],[dy,y2-a.y]] as [number,number][]) {
+            if (p === 0) { if (q < 0) return false; continue; }
+            const t = q/p;
+            if (p < 0) lo = Math.max(lo,t); else hi = Math.min(hi,t);
+            if (lo > hi) return false;
+          }
+          return true;
+        };
+        const connHits = new Set<any>();
+        connectionsRef.current.forEach((c: any) => {
+          const pts = getConnPolyline(c);
+          if (!pts?.length) return;
+          const hit = isWindow
+            ? pts.every(pointInside)
+            : pts.some((p:{x:number;y:number}, i:number) => i > 0 && segmentCrossesBox(pts[i-1], p));
+          if (hit) connHits.add(c.id);
+        });
         setSelectedIds(hits);
         setSelectedAnnIds(annHits);
         setSelectedRoomIds(roomHits);
+        setSelectedConnIds(connHits);
       }
       setMarquee(null);
     };
@@ -772,15 +864,16 @@ export default function SignalFlowPage() {
   };
 
   const deleteSelected = useCallback(() => {
-    if(selectedIds.size>0 || selectedAnnIds.size>0 || selectedRoomIds.size>0){
+    if(selectedIds.size>0 || selectedAnnIds.size>0 || selectedRoomIds.size>0 || selectedConnIds.size>0){
       pushUndo();
       if(selectedIds.size>0){
         setConnections(prev=>prev.filter((c:any)=>!selectedIds.has(c.from.deviceId)&&!selectedIds.has(c.to.deviceId)));
         setDevices(prev=>prev.filter((d:any)=>!selectedIds.has(d.id)));
       }
+      if(selectedConnIds.size>0) setConnections(prev=>prev.filter((c:any)=>!selectedConnIds.has(c.id)));
       if(selectedAnnIds.size>0) setAnnotations(prev=>prev.filter((a:any)=>!selectedAnnIds.has(a.id)));
       if(selectedRoomIds.size>0) setRooms(prev=>prev.filter((r:any)=>!selectedRoomIds.has(r.id)));
-      setSelectedIds(new Set()); setSelectedAnnIds(new Set()); setSelectedRoomIds(new Set());
+      clearMarqueeSel();
     } else if(selectedAnnotId!==null){
       pushUndo();
       setAnnotations(prev=>prev.filter((a:any)=>a.id!==selectedAnnotId));
@@ -797,7 +890,7 @@ export default function SignalFlowPage() {
       setDevices(prev=>prev.filter((d:any)=>d.id!==selected));
       setSelected(null);
     }
-  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds]);
+  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds, selectedConnIds]);
 
   const getSVGCoords = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -1269,7 +1362,7 @@ export default function SignalFlowPage() {
     const p1 = getPortPos(fromDev,fromPort);
     const p2 = getPortPos(toDev,toPort);
     const sig = SIGNAL_TYPES.find(s=>s.id===conn.signal)||SIGNAL_TYPES[0];
-    const isSelected = selectedConn===conn.id;
+    const isSelected = selectedConn===conn.id || selectedConnIds.has(conn.id);
     let path: string, mx: number, my: number;
     if (conn.waypoints?.length) {
       const pts = buildOrthoPoints(p1, conn.waypoints, p2);
@@ -1291,7 +1384,9 @@ export default function SignalFlowPage() {
       mx = (p1.x+p2.x)/2; my = (p1.y+p2.y)/2;
     }
     return (
-      <g key={conn.id} onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);}} style={{cursor:"pointer"}}>
+      <g key={conn.id} onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);clearMarqueeSel();}} style={{cursor:"pointer"}}>
+        {/* Keep the visible cable thin while giving it a forgiving click target. */}
+        <path d={path} fill="none" stroke="transparent" strokeWidth={12/view.zoom} pointerEvents="stroke" />
         {isSelected && <path d={path} fill="none" stroke="#fff" strokeWidth={5} strokeOpacity={0.3} />}
         <path d={path} fill="none" stroke={sig.color} strokeWidth={isSelected?3:2} strokeOpacity={0.8} />
         <rect x={mx-24} y={my-9} width={48} height={18} rx={4} fill="rgb(var(--forge-surface))" stroke={sig.color} strokeWidth={1} opacity={0.95}/>
@@ -1525,10 +1620,15 @@ export default function SignalFlowPage() {
             Click to add points — hold Shift for straight lines, Enter or double-click to finish
           </div>
         )}
+        {refreshNotice && (
+          <div data-html2canvas-ignore="true" style={{position:"absolute",top:44,left:"50%",transform:"translateX(-50%)",zIndex:11,maxWidth:520,padding:"7px 12px",background:refreshNotice.kind==="ok"?"rgba(34,197,94,0.14)":"rgba(239,68,68,0.14)",border:`1px solid ${refreshNotice.kind==="ok"?"rgba(34,197,94,0.4)":"rgba(239,68,68,0.4)"}`,borderRadius:6,color:refreshNotice.kind==="ok"?"#22c55e":"#ef4444",fontSize:11,textAlign:"center"}}>
+            {refreshNotice.message}
+          </div>
+        )}
         {/* Multi-selection status */}
-        {(selectedIds.size + selectedAnnIds.size + selectedRoomIds.size) > 0 && !connecting && (
+        {(selectedIds.size + selectedAnnIds.size + selectedRoomIds.size + selectedConnIds.size) > 0 && !connecting && (
           <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
-            {(() => { const n = selectedIds.size + selectedAnnIds.size + selectedRoomIds.size; return `${n} item${n > 1 ? "s" : ""} selected — drag a device to move all, Delete to remove`; })()}
+            {(() => { const n = selectedIds.size + selectedAnnIds.size + selectedRoomIds.size + selectedConnIds.size; return `${n} item${n > 1 ? "s" : ""} selected — drag a device to move all, Delete to remove`; })()}
           </div>
         )}
         {/* Connection status */}
@@ -1832,6 +1932,13 @@ export default function SignalFlowPage() {
             onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Edit equipment
+          </button>
+          <button onClick={()=>refreshDeviceFromLibrary(deviceContextMenu.deviceId)}
+            disabled={refreshingDeviceId!==null}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:refreshingDeviceId!==null?"wait":"pointer",textAlign:"left",opacity:refreshingDeviceId!==null?0.6:1}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+            Refresh from library
           </button>
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
           <button onClick={()=>{
