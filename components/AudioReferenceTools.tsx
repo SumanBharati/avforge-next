@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Image from "next/image";
+import { Fragment, useMemo, useState } from "react";
 
 const INTERCONNECTS = [
   ["RCA", "RCA", "Unbalanced", "Signal → signal; shield → shield"],
@@ -14,6 +15,49 @@ const INTERCONNECTS = [
   ["1/4\" TRS", "XLR", "Balanced", "Tip → pin 2; ring → pin 3; sleeve → pin 1"],
   ["XLR", "XLR", "Balanced", "Pin 1 → 1; pin 2 → 2; pin 3 → 3"],
 ] as const;
+
+const INTERCONNECT_DIAGRAMS: Record<string, { src: string; alt: string }> = {
+  "RCA->RCA": {
+    src: "/unbalanced-rca-to-rca.png",
+    alt: "Wiring diagram for an unbalanced RCA output connected to an unbalanced RCA input",
+  },
+  "RCA->1/4\" TS": {
+    src: "/unbalanced-rca-quarter-inch-ts.png",
+    alt: "Wiring diagram for an unbalanced RCA output connected to a quarter-inch unbalanced TS input",
+  },
+  "RCA->1/4\" TRS": {
+    src: "/unbalanced-rca-balanced-trs.png",
+    alt: "Wiring diagram for an unbalanced RCA output connected to a quarter-inch balanced TRS input",
+  },
+  "RCA->XLR": {
+    src: "/unbalanced-rca-male-xlr.png",
+    alt: "Wiring diagram for an unbalanced RCA output connected to a male balanced XLR input",
+  },
+  "1/4\" TS->XLR": {
+    src: "/unbalanced-ts-balanced-xlr.png",
+    alt: "Wiring diagram for a quarter-inch unbalanced TS output connected to a male balanced XLR input",
+  },
+  "1/4\" TS->1/4\" TRS": {
+    src: "/unbalanced-ts-balanced-trs.png",
+    alt: "Wiring diagram for a quarter-inch unbalanced TS output connected to a quarter-inch balanced TRS input",
+  },
+  "1/4\" TS->1/4\" TS": {
+    src: "/unbalanced-ts-to-ts.png",
+    alt: "Wiring diagram for a quarter-inch unbalanced TS output connected to a quarter-inch unbalanced TS input",
+  },
+  "1/4\" TRS->XLR": {
+    src: "/trs-to-balanced-xlr.png",
+    alt: "Wiring diagram for a quarter-inch TRS output connected to a balanced XLR input",
+  },
+  "1/4\" TRS->1/4\" TRS": {
+    src: "/balanced-trs-to-trs.png",
+    alt: "Wiring diagram for a balanced quarter-inch TRS output connected to a balanced quarter-inch TRS input",
+  },
+  "XLR->XLR": {
+    src: "/balanced-xlr-to-xlr.png",
+    alt: "Wiring diagram for a balanced female XLR output connected to a balanced male XLR input",
+  },
+};
 
 type WiringMode = "series" | "parallel" | "series-parallel";
 
@@ -37,7 +81,32 @@ export default function AudioReferenceTools() {
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-[12px]">
             <thead><tr className="border-b border-border bg-forge-surface/60"><th className="px-3 py-2 text-left text-secondary">From</th><th className="px-3 py-2 text-left text-secondary">To</th><th className="px-3 py-2 text-left text-secondary">Link</th><th className="px-3 py-2 text-left text-secondary">Typical wiring</th></tr></thead>
-            <tbody>{INTERCONNECTS.map(row => <tr key={`${row[0]}-${row[1]}`} className="border-b border-border/50 last:border-0"><td className="px-3 py-2 font-medium text-muted">{row[0]}</td><td className="px-3 py-2 font-medium text-muted">{row[1]}</td><td className="px-3 py-2 text-subtle">{row[2]}</td><td className="px-3 py-2 text-subtle">{row[3]}</td></tr>)}</tbody>
+            <tbody>{INTERCONNECTS.map(row => {
+              const diagram = INTERCONNECT_DIAGRAMS[`${row[0]}->${row[1]}`];
+              return (
+                <Fragment key={`${row[0]}-${row[1]}`}>
+                  <tr className="border-b border-border/50">
+                    <td className="px-3 py-2 font-medium text-muted">{row[0]}</td>
+                    <td className="px-3 py-2 font-medium text-muted">{row[1]}</td>
+                    <td className="px-3 py-2 text-subtle">{row[2]}</td>
+                    <td className="px-3 py-2 text-subtle">{row[3]}</td>
+                  </tr>
+                  {diagram && (
+                    <tr className="border-b border-border/50">
+                      <td colSpan={4} className="bg-forge-surface/30 p-3">
+                        <Image
+                          src={diagram.src}
+                          alt={diagram.alt}
+                          width={2048}
+                          height={683}
+                          className="h-auto w-full rounded-lg border border-border bg-white"
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}</tbody>
           </table>
         </div>
         <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-subtle">Never apply phantom power through an unbalanced adapter. Transformer-balanced, impedance-balanced, and cross-coupled outputs can require different unbalancing methods.</div>
