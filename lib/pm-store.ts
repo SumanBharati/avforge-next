@@ -132,6 +132,18 @@ export interface BoardData {
   columns: BoardColumn[];
 }
 
+/**
+ * A lightweight, ad-hoc task that only exists for logging time against —
+ * it's not a real project and never appears on the Projects page, Board,
+ * or Scheduler. Time entries reference it via `projectId` just like a
+ * real SchedProject, but with `phaseId` always null.
+ */
+export interface AdHocTask {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface PMStore {
   people: Person[];
   projects: SchedProject[];
@@ -143,6 +155,7 @@ export interface PMStore {
   tasks: SchedTask[];
   boards: BoardMeta[];
   boardData: Record<string, BoardData>;
+  adHocTasks: AdHocTask[];
 }
 
 export const emptyPMStore: PMStore = {
@@ -156,6 +169,7 @@ export const emptyPMStore: PMStore = {
   tasks: [],
   boards: [],
   boardData: {},
+  adHocTasks: [],
 };
 
 /* ── Constants ─────────────────────────────────────────────── */

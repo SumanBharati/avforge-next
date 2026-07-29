@@ -33,10 +33,11 @@ export default function ConduitFillPage() {
 
   return (
     <CalcPageWrapper title="Conduit Fill" desc="NEC conduit fill percentage with jam ratio check">
-      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left half: Inputs ── */}
-        <div className="min-w-0 flex-1 lg:pr-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="Conduit">
             <div className="mb-3.5">
               <label className="mb-1.5 block text-[13px] font-semibold uppercase tracking-[0.05em] text-muted">Conduit Size (EMT)</label>
@@ -66,13 +67,15 @@ export default function ConduitFillPage() {
               + Add Cable
             </button>
           </CalcSection>
+          </div>
         </div>
 
         {/* ── Vertical divider ── */}
         <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results ── */}
-        <div className="min-w-0 flex-1 lg:pl-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="Results">
             <div className="mb-2.5 grid grid-cols-2 gap-2.5">
               <ResultCard label="Actual Fill" value={actualFill.toFixed(1)} unit="%" accent />
@@ -88,6 +91,7 @@ export default function ConduitFillPage() {
               failText={`✗ Fill ${actualFill.toFixed(1)}% exceeds NEC ${fillPct}% max — upsize conduit`}
             />
           </CalcSection>
+          </div>
         </div>
 
       </div>

@@ -19,81 +19,84 @@ export default function SpeakerCoveragePage() {
 
   return (
     <CalcPageWrapper title="Speaker Coverage" desc="EPR-based ceiling speaker aiming and count calculator">
-      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left half: Inputs ── */}
-        <div className="min-w-0 flex-1 lg:pr-8">
-          <CalcSection title="Inputs">
-            <div className="grid grid-cols-2 gap-3">
-              <InputField label="Ceiling Height" value={ceilingH} onChange={setCeilingH} unit="ft" min={7} max={40} />
-              <InputField label="Ear Height" value={earH} onChange={setEarH} unit="ft" min={3} max={6} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <InputField label="Room Width" value={roomW} onChange={setRoomW} unit="ft" min={5} max={200} />
-              <InputField label="Room Length" value={roomL} onChange={setRoomL} unit="ft" min={5} max={200} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <InputField label="Speaker Dispersion" value={dispersion} onChange={setDispersion} unit="°" min={30} max={180} />
-              <InputField label="Overlap %" value={overlap} onChange={setOverlap} unit="%" min={0} max={40} />
-            </div>
-          </CalcSection>
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
+            <CalcSection title="Inputs">
+              <div className="grid grid-cols-2 gap-3">
+                <InputField label="Ceiling Height" value={ceilingH} onChange={setCeilingH} unit="ft" min={7} max={40} />
+                <InputField label="Ear Height" value={earH} onChange={setEarH} unit="ft" min={3} max={6} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <InputField label="Room Width" value={roomW} onChange={setRoomW} unit="ft" min={5} max={200} />
+                <InputField label="Room Length" value={roomL} onChange={setRoomL} unit="ft" min={5} max={200} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <InputField label="Speaker Dispersion" value={dispersion} onChange={setDispersion} unit="°" min={30} max={180} />
+                <InputField label="Overlap %" value={overlap} onChange={setOverlap} unit="%" min={0} max={40} />
+              </div>
+            </CalcSection>
+          </div>
         </div>
 
         {/* ── Vertical divider ── */}
         <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results ── */}
-        <div className="min-w-0 flex-1 lg:pl-8">
-          <CalcSection title="Results">
-            <div className="grid grid-cols-2 gap-2.5">
-              <ResultCard label="Coverage Diameter" value={epr.toFixed(1)} unit="ft" accent />
-              <ResultCard label="Effective Spacing" value={effectiveDia.toFixed(1)} unit="ft" />
-              <ResultCard label="Speakers Wide" value={spkrsW} unit="" />
-              <ResultCard label="Speakers Long" value={spkrsL} unit="" />
-              <ResultCard label="Total Speakers" value={spkrsW * spkrsL} unit="spkrs" accent />
-              <ResultCard label="Height Above Ear" value={h} unit="ft" />
-            </div>
-          </CalcSection>
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
+            <CalcSection title="Results">
+              <div className="grid grid-cols-2 gap-2.5">
+                <ResultCard label="Coverage Diameter" value={epr.toFixed(1)} unit="ft" accent />
+                <ResultCard label="Effective Spacing" value={effectiveDia.toFixed(1)} unit="ft" />
+                <ResultCard label="Speakers Wide" value={spkrsW} unit="" />
+                <ResultCard label="Speakers Long" value={spkrsL} unit="" />
+                <ResultCard label="Total Speakers" value={spkrsW * spkrsL} unit="spkrs" accent />
+                <ResultCard label="Height Above Ear" value={h} unit="ft" />
+              </div>
+            </CalcSection>
+          </div>
         </div>
 
       </div>
 
       {/* ── Formulas ── */}
-      <div style={{ marginTop: 32 }}>
-        <h3 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
-          Formulas Used
-        </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
+        <CalcSection title="Formulas Used">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
 
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Height Above Ear (h)</div>
-            <div className="font-mono text-[13px] text-blue-400">h = ceiling height − ear height</div>
-            <div className="mt-1.5 text-[11px] text-subtle">The vertical drop from speaker to listening plane — drives the entire coverage geometry</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Coverage Diameter (EPR)</div>
-            <div className="font-mono text-[13px] text-blue-400">D = 2 × h × tan(θ ÷ 2)</div>
-            <div className="mt-1.5 text-[11px] text-subtle">θ = speaker dispersion angle. Derived from the Effective Pattern Radius (EPR) formula per AVIXA CTS-D</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Effective Spacing</div>
-            <div className="font-mono text-[13px] text-blue-400">S = D × (1 − overlap% ÷ 100)</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Overlap pulls speakers closer together to eliminate gaps and improve uniformity at the listening plane</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Speaker Count</div>
-            <div className="font-mono text-[13px] text-body">
-              <div>Wide: <span className="text-blue-400">⌈ room width ÷ S ⌉</span></div>
-              <div className="mt-0.5">Long: <span className="text-blue-400">⌈ room length ÷ S ⌉</span></div>
-              <div className="mt-0.5">Total: <span className="text-blue-400">wide × long</span></div>
+            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Height Above Ear (h)</div>
+              <div className="font-mono text-[13px] text-blue-400">h = ceiling height − ear height</div>
+              <div className="mt-1.5 text-[11px] text-subtle">The vertical drop from speaker to listening plane — drives the entire coverage geometry</div>
             </div>
-            <div className="mt-1.5 text-[11px] text-subtle">Ceiling (⌈⌉) rounds up so no area is left uncovered</div>
-          </div>
 
-        </div>
+            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Coverage Diameter (EPR)</div>
+              <div className="font-mono text-[13px] text-blue-400">D = 2 × h × tan(θ ÷ 2)</div>
+              <div className="mt-1.5 text-[11px] text-subtle">θ = speaker dispersion angle. Derived from the Effective Pattern Radius (EPR) formula per AVIXA CTS-D</div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Effective Spacing</div>
+              <div className="font-mono text-[13px] text-blue-400">S = D × (1 − overlap% ÷ 100)</div>
+              <div className="mt-1.5 text-[11px] text-subtle">Overlap pulls speakers closer together to eliminate gaps and improve uniformity at the listening plane</div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Speaker Count</div>
+              <div className="font-mono text-[13px] text-body">
+                <div>Wide: <span className="text-blue-400">⌈ room width ÷ S ⌉</span></div>
+                <div className="mt-0.5">Long: <span className="text-blue-400">⌈ room length ÷ S ⌉</span></div>
+                <div className="mt-0.5">Total: <span className="text-blue-400">wide × long</span></div>
+              </div>
+              <div className="mt-1.5 text-[11px] text-subtle">Ceiling (⌈⌉) rounds up so no area is left uncovered</div>
+            </div>
+
+          </div>
+        </CalcSection>
       </div>
     </CalcPageWrapper>
   );

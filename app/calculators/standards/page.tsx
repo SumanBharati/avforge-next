@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 const CTS_FORMULAS = [
   {
@@ -86,7 +87,7 @@ export default function StandardsPage() {
 
   return (
     <div className="animate-fade-in p-6 max-w-[860px]">
-      <a href="/calculators" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Calculators</a>
+      <Link href="/references" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← References</Link>
       <h2 className="mb-1 text-lg font-semibold text-heading">📐 Formula Sheet</h2>
       <p className="mb-5 text-[13px] text-subtle">AVIXA / CTS-D engineering formulas with examples</p>
 

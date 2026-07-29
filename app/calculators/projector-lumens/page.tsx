@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Sun, Monitor } from 'lucide-react';
 import { CalcPageWrapper } from '@/components/calc';
 
 const inputCls = "w-full rounded-lg border border-border bg-forge-surface px-3 py-2.5 font-mono text-[15px] text-body outline-none transition-colors focus:border-blue-500/40";
@@ -103,16 +102,13 @@ export default function ProjectorLumensPage() {
         <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
-        <div className="min-w-0 flex-1">
-          <div className="h-full rounded-xl border border-border bg-forge-surface/50 p-5">
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <SectionHeader title="Results" />
 
             <div className="mb-4 grid grid-cols-2 gap-3">
               {/* Required Lumens */}
-              <div className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/10">
-                  <Sun size={18} className="text-blue-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
                 <div>
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">Required Lumens</div>
                   <div className="font-mono">
@@ -122,14 +118,11 @@ export default function ProjectorLumensPage() {
                 </div>
               </div>
               {/* Screen Area */}
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
-                  <Monitor size={18} className="text-emerald-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
                 <div>
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">Screen Area</div>
                   <div className="font-mono">
-                    <span className="text-2xl font-bold text-emerald-400">{screenArea.toFixed(1)}</span>
+                    <span className="text-2xl font-bold text-blue-400">{screenArea.toFixed(1)}</span>
                     <span className="ml-1.5 text-sm text-subtle">ft²</span>
                   </div>
                 </div>
@@ -149,31 +142,31 @@ export default function ProjectorLumensPage() {
                 </div>
               ))}
             </div>
+          </div>
 
-            {/* Formulas */}
-            <div className="rounded-xl border border-border bg-forge-surface/30 p-4">
-              <div className="mb-3 text-[13px] font-semibold text-muted">Formulas Used</div>
-              <div className="space-y-2 font-mono text-[12px]">
-                <div>
-                  <span className="font-semibold text-blue-400">Image Height</span>
-                  <span className="text-subtle"> = Width ÷ Aspect ({aspectRatio}) = </span>
-                  <span className="text-body">{imgWidth} ÷ {ar.toFixed(4)} = {imgHeight.toFixed(2)} ft</span>
-                </div>
-                <div>
-                  <span className="font-semibold text-blue-400">Screen Area</span>
-                  <span className="text-subtle"> = Width × Height = </span>
-                  <span className="text-body">{imgWidth} × {imgHeight.toFixed(2)} = {screenArea.toFixed(1)} ft²</span>
-                </div>
-                <div>
-                  <span className="font-semibold text-blue-400">Required Lumens</span>
-                  <span className="text-subtle"> = (Brightness × Area) ÷ Gain = </span>
-                  <span className="text-body">({ambientFl} × {screenArea.toFixed(1)}) ÷ {screenGain} = {Math.ceil(lumens).toLocaleString()} Lm</span>
-                </div>
+          {/* Formulas */}
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
+            <SectionHeader title="Formulas Used" />
+            <div className="space-y-2 font-mono text-[12px]">
+              <div>
+                <span className="font-semibold text-blue-400">Image Height</span>
+                <span className="text-subtle"> = Width ÷ Aspect ({aspectRatio}) = </span>
+                <span className="text-body">{imgWidth} ÷ {ar.toFixed(4)} = {imgHeight.toFixed(2)} ft</span>
               </div>
-              <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-[12px] text-subtle">
-                <div><span className="font-semibold text-muted">Brightness Guide:</span> 20–30 fL dark rooms | 40–60 fL ambient light | 80+ fL bright rooms</div>
-                <div><span className="font-semibold text-muted">Screen Gain:</span> 1.0 = matte white | 1.3+ = high gain | 0.8 = ALR</div>
+              <div>
+                <span className="font-semibold text-blue-400">Screen Area</span>
+                <span className="text-subtle"> = Width × Height = </span>
+                <span className="text-body">{imgWidth} × {imgHeight.toFixed(2)} = {screenArea.toFixed(1)} ft²</span>
               </div>
+              <div>
+                <span className="font-semibold text-blue-400">Required Lumens</span>
+                <span className="text-subtle"> = (Brightness × Area) ÷ Gain = </span>
+                <span className="text-body">({ambientFl} × {screenArea.toFixed(1)}) ÷ {screenGain} = {Math.ceil(lumens).toLocaleString()} Lm</span>
+              </div>
+            </div>
+            <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-[12px] text-subtle">
+              <div><span className="font-semibold text-muted">Brightness Guide:</span> 20–30 fL dark rooms | 40–60 fL ambient light | 80+ fL bright rooms</div>
+              <div><span className="font-semibold text-muted">Screen Gain:</span> 1.0 = matte white | 1.3+ = high gain | 0.8 = ALR</div>
             </div>
           </div>
         </div>

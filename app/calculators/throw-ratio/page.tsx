@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Sun, Monitor } from 'lucide-react';
 import { CalcPageWrapper } from '@/components/calc';
 
 const inputCls = "w-full rounded-lg border border-border bg-forge-surface px-3 py-2.5 font-mono text-[15px] text-body outline-none transition-colors focus:border-blue-500/40";
@@ -162,10 +161,7 @@ export default function ThrowRatioPage() {
             {/* Stat cards */}
             <div className="mb-4 grid grid-cols-2 gap-3">
               {/* Required Lumens */}
-              <div className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/10">
-                  <Sun size={18} className="text-blue-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
                 <div>
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">Required Lumens</div>
                   <div className="font-mono">
@@ -175,10 +171,7 @@ export default function ThrowRatioPage() {
                 </div>
               </div>
               {/* Screen Area */}
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
-                  <Monitor size={18} className="text-emerald-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-4">
                 <div>
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">Screen Area</div>
                   <div className="font-mono">

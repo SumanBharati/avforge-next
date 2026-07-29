@@ -48,10 +48,11 @@ export default function PoEBudgetPage() {
 
   return (
     <CalcPageWrapper title="PoE Budget" desc="IEEE af/at/bt power budgeting for PoE devices">
-      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Left half: Inputs ── */}
-        <div className="min-w-0 flex-1 lg:pr-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="PoE Process">
             <div className="mb-2 text-xs leading-relaxed text-muted">
               <div>1. Find the power requirements for each device (from spec sheet)</div>
@@ -159,13 +160,15 @@ export default function PoEBudgetPage() {
               + Add Switch
             </button>
           </CalcSection>
+          </div>
         </div>
 
         {/* ── Vertical divider ── */}
         <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right half: Results ── */}
-        <div className="min-w-0 flex-1 lg:pl-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           {/* Results */}
           <CalcSection title="Results">
             <div className="mb-2.5 grid grid-cols-2 gap-2.5">
@@ -196,6 +199,7 @@ export default function PoEBudgetPage() {
               <div><strong className="text-red-400">802.3bt (PoE++)</strong><br />60W / 51W<br />Class 5–6</div>
               <div><strong className="text-purple-400">802.3bt Type 4</strong><br />100W / 71.3W<br />Class 7–8</div>
             </div>
+          </div>
           </div>
         </div>
 

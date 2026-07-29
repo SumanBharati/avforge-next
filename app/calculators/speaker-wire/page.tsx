@@ -75,10 +75,11 @@ export default function SpeakerWirePage() {
       title="Speaker Wire Gauge"
       desc="NEC Article 640 / AVIXA CTS-D — determine minimum AWG for any speaker run"
     >
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-0">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
         {/* ── Inputs ── */}
-        <div className="min-w-0 flex-1 lg:pr-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="System Type">
             <div className="mb-4 flex gap-2">
               {(['direct', '70v', '100v'] as SystemType[]).map(type => (
@@ -147,13 +148,15 @@ export default function SpeakerWirePage() {
               options={LOSS_BUDGETS}
             />
           </CalcSection>
+          </div>
         </div>
 
         {/* ── Divider ── */}
         <div className="h-px w-full shrink-0 self-stretch bg-border lg:h-auto lg:w-px" />
 
         {/* ── Results ── */}
-        <div className="min-w-0 flex-1 lg:pl-8">
+        <div className="min-w-0 flex-1">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="Recommendation">
             {results.recommended ? (
               <div className="mb-3 rounded-xl border border-blue-500/30 bg-blue-500/10 px-5 py-4">
@@ -201,11 +204,12 @@ export default function SpeakerWirePage() {
               />
             </CalcSection>
           )}
+          </div>
         </div>
       </div>
 
       {/* ── AWG Comparison Table ── */}
-      <div style={{ marginTop: 32 }}>
+      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
         <h3 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
           All Gauge Comparison
         </h3>
@@ -274,7 +278,7 @@ export default function SpeakerWirePage() {
       </div>
 
       {/* ── Formulas ── */}
-      <div style={{ marginTop: 32 }}>
+      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
         <h3 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
           Formulas Used
         </h3>

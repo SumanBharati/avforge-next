@@ -9,16 +9,22 @@ import {
   startOfWeek,
   toISODate,
   uid,
+  type AdHocTask,
   type TimeEntry,
 } from "@/lib/pm-store";
+
+type PickerSelection = { kind: "project" | "task"; id: string };
 
 export default function TimeTrackingPage() {
   const { store, update, loading } = usePMStore();
   const [cursor, setCursor] = useState<Date>(() => startOfWeek(new Date()));
   const [activePerson, setActivePerson] = useState<string>("");
   const [showPicker, setShowPicker] = useState(false);
-  const [pickedProject, setPickedProject] = useState<string>("");
+  const [pickerSearch, setPickerSearch] = useState<string>("");
+  const [pickerSelected, setPickerSelected] = useState<PickerSelection | null>(null);
   const [pickedPhase, setPickedPhase] = useState<string>("");
+  const [showNewTaskForm, setShowNewTaskForm] = useState(false);
+  const [newTaskName, setNewTaskName] = useState<string>("");
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(cursor, i));
@@ -66,9 +72,35 @@ export default function TimeTrackingPage() {
     [store.projects],
   );
   const phaseOptions = useMemo(
-    () => store.phases.filter((ph) => ph.projectId === pickedProject),
-    [store.phases, pickedProject],
+    () =>
+      pickerSelected?.kind === "project"
+        ? store.phases.filter((ph) => ph.projectId === pickerSelected.id)
+        : [],
+    [store.phases, pickerSelected],
   );
+
+  const adHocTasks = store.adHocTasks ?? [];
+
+  const pickerItems = useMemo(() => {
+    const q = pickerSearch.trim().toLowerCase();
+    if (!q) return [];
+    const projectItems = availableProjects.map((p) => ({
+      kind: "project" as const,
+      id: p.id,
+      name: p.name,
+      sub: p.client || "",
+    }));
+    const taskItems = adHocTasks.map((t) => ({
+      kind: "task" as const,
+      id: t.id,
+      name: t.name,
+      sub: "",
+    }));
+    const all = [...projectItems, ...taskItems];
+    return all.filter(
+      (item) => item.name.toLowerCase().includes(q) || item.sub.toLowerCase().includes(q),
+    );
+  }, [availableProjects, adHocTasks, pickerSearch]);
 
   if (loading) return <PMPageSkeleton />;
 
@@ -115,17 +147,47 @@ export default function TimeTrackingPage() {
 
   function openAddRow() {
     if (!selectedPerson) return;
-    const firstProj = availableProjects[0];
-    setPickedProject(firstProj?.id || "");
+    setPickerSearch("");
+    setPickerSelected(null);
     setPickedPhase("");
+    setShowNewTaskForm(false);
+    setNewTaskName("");
     setShowPicker(true);
   }
 
+  function createNewTask() {
+    const name = newTaskName.trim();
+    if (!name || !selectedPerson) return;
+    const task: AdHocTask = { id: uid(), name, createdAt: new Date().toISOString() };
+    const today = toISODate(new Date());
+    const entry: TimeEntry = {
+      id: uid(),
+      personId: selectedPerson,
+      projectId: task.id,
+      phaseId: null,
+      date: today >= weekStart && today <= weekEnd ? today : weekStart,
+      hours: 0,
+      notes: "",
+      billable: true,
+    };
+    update((prev) => ({
+      ...prev,
+      adHocTasks: [...(prev.adHocTasks ?? []), task],
+      timeEntries: [...prev.timeEntries, entry],
+    }));
+    setShowPicker(false);
+    setPickerSearch("");
+    setPickerSelected(null);
+    setPickedPhase("");
+    setShowNewTaskForm(false);
+    setNewTaskName("");
+  }
+
   function confirmAddRow() {
-    if (!selectedPerson || !pickedProject) return;
-    const phaseId = pickedPhase || null;
+    if (!selectedPerson || !pickerSelected) return;
+    const phaseId = pickerSelected.kind === "project" ? (pickedPhase || null) : null;
     const already = rows.some(
-      (r) => r.projectId === pickedProject && (r.phaseId || null) === phaseId,
+      (r) => r.projectId === pickerSelected.id && (r.phaseId || null) === phaseId,
     );
     if (already) {
       setShowPicker(false);
@@ -135,7 +197,7 @@ export default function TimeTrackingPage() {
     const e: TimeEntry = {
       id: uid(),
       personId: selectedPerson,
-      projectId: pickedProject,
+      projectId: pickerSelected.id,
       phaseId,
       date: today >= weekStart && today <= weekEnd ? today : weekStart,
       hours: 0,
@@ -205,7 +267,7 @@ export default function TimeTrackingPage() {
             <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-forge-panel text-[11px] font-semibold uppercase tracking-wider text-faint">
                 <tr className="border-b border-border">
-                  <th className="px-4 py-3 text-left">Project / Phase</th>
+                  <th className="px-4 py-3 text-left">Projects or Tasks</th>
                   {weekDays.map((d, i) => (
                     <th key={i} className="px-2 py-3 text-center">
                       <div>{d.toLocaleDateString("en-US", { weekday: "short" })}</div>
@@ -231,6 +293,7 @@ export default function TimeTrackingPage() {
                 ) : (
                   rows.map((r, i) => {
                     const proj = store.projects.find((p) => p.id === r.projectId);
+                    const task = !proj ? adHocTasks.find((t) => t.id === r.projectId) : undefined;
                     const phase = r.phaseId ? store.phases.find((ph) => ph.id === r.phaseId) : null;
                     const rowTotal = weekDays.reduce(
                       (s, d) => s + hoursFor(r.projectId, r.phaseId, toISODate(d)),
@@ -245,8 +308,9 @@ export default function TimeTrackingPage() {
                               style={{ backgroundColor: phase?.color || proj?.color || "#94a3b8" }}
                             />
                             <div>
-                              <div className="font-semibold text-body">{proj?.name || "—"}</div>
+                              <div className="font-semibold text-body">{proj?.name || task?.name || "—"}</div>
                               {phase && <div className="text-[11px] text-subtle">{phase.name}</div>}
+                              {!proj && task && <div className="text-[11px] text-subtle">Task</div>}
                             </div>
                           </div>
                         </td>
@@ -324,7 +388,7 @@ export default function TimeTrackingPage() {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPicker(false)} />
           <div className="relative w-full max-w-[440px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-heading">Log time on a project</h3>
+              <h3 className="text-lg font-semibold text-heading">Search Project or Task</h3>
               <button
                 onClick={() => setShowPicker(false)}
                 className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-forge-card hover:text-secondary"
@@ -335,50 +399,120 @@ export default function TimeTrackingPage() {
               </button>
             </div>
 
-            {availableProjects.length === 0 ? (
-              <div className="rounded-lg border border-border bg-forge-bg/40 px-4 py-5 text-center text-sm text-subtle">
-                No projects available yet. Create a project on the Projects page and it will appear here.
+            <div className="flex flex-col gap-3">
+              {/* Search input */}
+              <div className="relative">
+                <svg
+                  width="15" height="15" viewBox="0 0 16 16" fill="none"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
+                >
+                  <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.4" />
+                  <line x1="11.2" y1="11.2" x2="15" y2="15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                <input
+                  autoFocus
+                  value={pickerSearch}
+                  onChange={(e) => { setPickerSearch(e.target.value); setPickerSelected(null); }}
+                  placeholder="Search Project or Task"
+                  className="forge-input pl-9"
+                />
               </div>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-muted">Project</label>
-                  <select
-                    value={pickedProject}
-                    onChange={(e) => {
-                      setPickedProject(e.target.value);
-                      setPickedPhase("");
+
+              {/* Results */}
+              {pickerSearch.trim() && (
+                <div className="max-h-52 overflow-y-auto rounded-lg border border-border">
+                  {pickerItems.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-xs text-faint">No matches</div>
+                  ) : (
+                    pickerItems.map((item) => {
+                      const active = pickerSelected?.kind === item.kind && pickerSelected.id === item.id;
+                      return (
+                        <button
+                          key={`${item.kind}-${item.id}`}
+                          onClick={() => { setPickerSelected({ kind: item.kind, id: item.id }); setPickedPhase(""); }}
+                          className={`flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2.5 text-left text-sm last:border-b-0 transition-colors ${
+                            active ? "bg-blue-500/10 text-blue-400" : "text-body hover:bg-forge-card"
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate font-medium">{item.name}</span>
+                            {item.sub && <span className="shrink-0 truncate text-xs text-subtle">— {item.sub}</span>}
+                          </span>
+                          {item.kind === "task" && (
+                            <span
+                              className="shrink-0 rounded bg-forge-card px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle"
+                            >
+                              Task
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Create new task */}
+              {showNewTaskForm ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={newTaskName}
+                    onChange={(e) => setNewTaskName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createNewTask();
+                      if (e.key === "Escape") { setShowNewTaskForm(false); setNewTaskName(""); }
                     }}
+                    placeholder="Task name…"
+                    className="forge-input flex-1"
+                  />
+                  <button
+                    onClick={createNewTask}
+                    disabled={!newTaskName.trim()}
+                    className="rounded-lg bg-blue-500 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => { setShowNewTaskForm(false); setNewTaskName(""); }}
+                    className="rounded-lg border border-border px-2.5 py-2 text-xs text-subtle hover:text-body"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setShowNewTaskForm(true); setNewTaskName(pickerSearch); }}
+                  className="flex items-center gap-2 rounded-lg border border-dashed border-blue-500/40 bg-blue-500/5 px-3 py-2.5 text-sm font-medium text-blue-400 transition-colors hover:bg-blue-500/10"
+                >
+                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
+                    <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                  Create New Task
+                </button>
+              )}
+
+              {/* Phase selector — only for real projects that have phases */}
+              {pickerSelected?.kind === "project" && phaseOptions.length > 0 && (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-muted">
+                    Phase <span className="text-faint">(optional)</span>
+                  </label>
+                  <select
+                    value={pickedPhase}
+                    onChange={(e) => setPickedPhase(e.target.value)}
                     className="forge-input"
                   >
-                    {availableProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}{p.client ? ` — ${p.client}` : ""}
+                    <option value="">— No phase —</option>
+                    {phaseOptions.map((ph) => (
+                      <option key={ph.id} value={ph.id}>
+                        {ph.name}
                       </option>
                     ))}
                   </select>
                 </div>
-                {phaseOptions.length > 0 && (
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-muted">
-                      Phase <span className="text-faint">(optional)</span>
-                    </label>
-                    <select
-                      value={pickedPhase}
-                      onChange={(e) => setPickedPhase(e.target.value)}
-                      className="forge-input"
-                    >
-                      <option value="">— No phase —</option>
-                      {phaseOptions.map((ph) => (
-                        <option key={ph.id} value={ph.id}>
-                          {ph.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
@@ -389,7 +523,7 @@ export default function TimeTrackingPage() {
               </button>
               <button
                 onClick={confirmAddRow}
-                disabled={!pickedProject}
+                disabled={!pickerSelected}
                 className="forge-btn-primary text-[13px]"
               >
                 Add row

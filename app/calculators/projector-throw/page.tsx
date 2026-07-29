@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Ruler, Layers } from 'lucide-react';
 import { CalcPageWrapper } from '@/components/calc';
 
 const inputCls = "w-full rounded-lg border border-border bg-forge-surface px-3 py-2.5 font-mono text-[15px] text-body outline-none transition-colors focus:border-blue-500/40";
@@ -192,16 +191,13 @@ export default function ProjectorThrowPage() {
         <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: Results ── */}
-        <div className="min-w-0 flex-1">
-          <div className="h-full rounded-xl border border-border bg-forge-surface/50 p-5">
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <SectionHeader title="Results" />
 
             <div className="mb-4 grid grid-cols-2 gap-3">
               {/* Throw Ratio / Distance / Range */}
-              <div className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/10">
-                  <Ruler size={18} className="text-blue-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
                 <div className="min-w-0">
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">
                     {isVariable ? 'Throw Range' : mode === 'dist' ? 'Throw Ratio' : 'Throw Distance'}
@@ -222,13 +218,10 @@ export default function ProjectorThrowPage() {
                 </div>
               </div>
               {/* Lens Type */}
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-4">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
-                  <Layers size={18} className="text-emerald-400" />
-                </div>
+              <div className="flex items-center rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-4">
                 <div className="min-w-0">
                   <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-subtle">Lens Type</div>
-                  <div className="font-mono text-[15px] font-bold text-emerald-400 leading-tight">
+                  <div className="font-mono text-[15px] font-bold text-blue-400 leading-tight">
                     {isVariable ? lensRange : lensType}
                   </div>
                 </div>
@@ -264,45 +257,45 @@ export default function ProjectorThrowPage() {
                 </div>
               ))}
             </div>
+          </div>
 
-            {/* Formulas */}
-            <div className="rounded-xl border border-border bg-forge-surface/30 p-4">
-              <div className="mb-3 text-[13px] font-semibold text-muted">Formulas Used</div>
-              <div className="space-y-2 font-mono text-[12px]">
-                {isVariable ? (
-                  <>
-                    <div>
-                      <span className="font-semibold text-blue-400">Min Throw Distance</span>
-                      <span className="text-subtle"> = Min TR × Width = </span>
-                      <span className="text-body">{minTR} × {imgWidth} = {minDist.toFixed(1)} ft</span>
-                    </div>
-                    <div>
-                      <span className="font-semibold text-blue-400">Max Throw Distance</span>
-                      <span className="text-subtle"> = Max TR × Width = </span>
-                      <span className="text-body">{maxTR} × {imgWidth} = {maxDist.toFixed(1)} ft</span>
-                    </div>
-                  </>
-                ) : (
+          {/* Formulas */}
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
+            <SectionHeader title="Formulas Used" />
+            <div className="space-y-2 font-mono text-[12px]">
+              {isVariable ? (
+                <>
                   <div>
-                    <span className="font-semibold text-blue-400">Throw Ratio</span>
-                    <span className="text-subtle"> = Throw Distance ÷ Image Width = </span>
-                    <span className="text-body">{(mode === 'dist' ? throwDist : computedDist).toFixed(1)} ÷ {imgWidth} = {tr.toFixed(2)}:1</span>
+                    <span className="font-semibold text-blue-400">Min Throw Distance</span>
+                    <span className="text-subtle"> = Min TR × Width = </span>
+                    <span className="text-body">{minTR} × {imgWidth} = {minDist.toFixed(1)} ft</span>
                   </div>
-                )}
+                  <div>
+                    <span className="font-semibold text-blue-400">Max Throw Distance</span>
+                    <span className="text-subtle"> = Max TR × Width = </span>
+                    <span className="text-body">{maxTR} × {imgWidth} = {maxDist.toFixed(1)} ft</span>
+                  </div>
+                </>
+              ) : (
                 <div>
-                  <span className="font-semibold text-blue-400">Image Height</span>
-                  <span className="text-subtle"> = Width ÷ Aspect ({aspectRatio}) = </span>
-                  <span className="text-body">{imgWidth} ÷ {ar.toFixed(4)} = {imgHeight.toFixed(2)} ft</span>
+                  <span className="font-semibold text-blue-400">Throw Ratio</span>
+                  <span className="text-subtle"> = Throw Distance ÷ Image Width = </span>
+                  <span className="text-body">{(mode === 'dist' ? throwDist : computedDist).toFixed(1)} ÷ {imgWidth} = {tr.toFixed(2)}:1</span>
                 </div>
-                <div>
-                  <span className="font-semibold text-blue-400">Image Diagonal</span>
-                  <span className="text-subtle"> = √(W² + H²) = </span>
-                  <span className="text-body">√({imgWidth}² + {imgHeight.toFixed(2)}²) = {imgDiag.toFixed(2)} ft</span>
-                </div>
+              )}
+              <div>
+                <span className="font-semibold text-blue-400">Image Height</span>
+                <span className="text-subtle"> = Width ÷ Aspect ({aspectRatio}) = </span>
+                <span className="text-body">{imgWidth} ÷ {ar.toFixed(4)} = {imgHeight.toFixed(2)} ft</span>
               </div>
-              <div className="mt-3 border-t border-border pt-3 text-[12px] text-subtle">
-                <span className="font-semibold text-muted">Lens Classification:</span> UST &lt; 0.5 | Short Throw 0.5–1.0 | Standard 1.0–2.0 | Long Throw &gt; 2.0
+              <div>
+                <span className="font-semibold text-blue-400">Image Diagonal</span>
+                <span className="text-subtle"> = √(W² + H²) = </span>
+                <span className="text-body">√({imgWidth}² + {imgHeight.toFixed(2)}²) = {imgDiag.toFixed(2)} ft</span>
               </div>
+            </div>
+            <div className="mt-3 border-t border-border pt-3 text-[12px] text-subtle">
+              <span className="font-semibold text-muted">Lens Classification:</span> UST &lt; 0.5 | Short Throw 0.5–1.0 | Standard 1.0–2.0 | Long Throw &gt; 2.0
             </div>
           </div>
         </div>

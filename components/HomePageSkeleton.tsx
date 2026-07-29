@@ -15,10 +15,10 @@ const LEGEND_WIDTHS    = [90, 80, 95, 70, 85];
 
 export default function HomePageSkeleton() {
   return (
-    <div className="flex flex-col px-8 pt-6 pb-16" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 72px)" }}>
 
       {/* ── Top 3 info cards ──────────────────────── */}
-      <div className="mb-4 grid grid-cols-3 gap-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
         {[0, 1, 2].map((i) => (
           <div key={i} className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5" style={CARD_STYLE}>
             {/* Card header */}
@@ -47,11 +47,11 @@ export default function HomePageSkeleton() {
           <Shimmer className="h-5 w-32" />
         </div>
 
-        <div className="flex flex-1 min-h-0 gap-5">
+        <div className="flex flex-1 min-h-0 flex-col gap-5 xl:flex-row">
 
           {/* ── Project section (flex-[3]) ─────────── */}
           <div className="flex flex-[3] min-w-0 flex-col p-4">
-            <div className="flex flex-1 gap-4 overflow-hidden">
+            <div className="flex flex-1 flex-col gap-4 overflow-hidden lg:flex-row">
 
               {/* Pie chart + legend */}
               <div className="flex flex-1 min-w-0 flex-col">
@@ -59,8 +59,8 @@ export default function HomePageSkeleton() {
                   <Shimmer className="h-3 w-3 rounded-sm" />
                   <Shimmer className="h-3 w-36" />
                 </div>
-                <div className="flex flex-1 items-center justify-center gap-4">
-                  <Shimmer className="h-[220px] w-[220px] shrink-0 rounded-full" />
+                <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 sm:flex-row">
+                  <Shimmer className="h-[220px] w-[220px] shrink-0 rounded-full sm:h-[280px] sm:w-[280px]" />
                   <div className="flex flex-col gap-3">
                     {LEGEND_WIDTHS.map((w, i) => (
                       <div key={i} className="flex items-center gap-3">
@@ -73,11 +73,11 @@ export default function HomePageSkeleton() {
                 </div>
               </div>
 
-              <div className="w-px bg-border" />
+              <div className="h-px w-full bg-border lg:h-auto lg:w-px" />
 
               {/* Pipeline overview */}
-              <div className="flex w-[230px] shrink-0 flex-col">
-                <div className="mb-4 flex items-center gap-2">
+              <div className="flex w-full shrink-0 flex-col gap-3 lg:w-[230px]">
+                <div className="mb-1 flex items-center gap-2">
                   <Shimmer className="h-3 w-3 rounded-sm" />
                   <Shimmer className="h-3 w-36" />
                 </div>
@@ -91,10 +91,10 @@ export default function HomePageSkeleton() {
                 </div>
               </div>
 
-              <div className="w-px bg-border" />
+              <div className="h-px w-full bg-border lg:h-auto lg:w-px" />
 
               {/* Team activity */}
-              <div className="flex w-[280px] shrink-0 flex-col">
+              <div className="flex w-full shrink-0 flex-col lg:w-[280px]">
                 <div className="mb-3 flex items-center gap-2">
                   <Shimmer className="h-3 w-3 rounded-sm" />
                   <Shimmer className="h-3 w-28" />
@@ -115,7 +115,7 @@ export default function HomePageSkeleton() {
             </div>
           </div>
 
-          <div className="w-px bg-border" />
+          <div className="h-px w-full bg-border xl:h-auto xl:w-px" />
 
           {/* ── Schedule section (flex-[2]) ─────────── */}
           <div className="flex flex-[2] min-w-0 flex-col overflow-hidden p-4">
@@ -123,7 +123,7 @@ export default function HomePageSkeleton() {
               <Shimmer className="h-3 w-3 rounded-sm" />
               <Shimmer className="h-3 w-20" />
             </div>
-            <Shimmer className="flex-1 min-h-[300px] rounded-lg" />
+            <Shimmer className="min-h-[320px] flex-1 rounded-lg" />
           </div>
 
         </div>

@@ -39,6 +39,10 @@ function ResultRow({ label, value }: { label: string; value: string }) {
 const inputCls =
   'w-full rounded-lg border border-border bg-forge-surface px-3 py-2 font-mono text-[13px] text-body outline-none transition-colors focus:border-blue-500/40 placeholder:text-faint';
 
+const onEnter = (fn: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') { e.preventDefault(); fn(); }
+};
+
 export default function DisplaySizingPage() {
   const [eyeLevel, setEyeLevel] = useState(48);
   const [aspectRatio, setAspectRatio] = useState(1.78);
@@ -183,17 +187,17 @@ export default function DisplaySizingPage() {
                 <div className="flex flex-1 flex-col gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Image Height</label>
-                    <input type="number" value={c1ImageH} onChange={e => setC1ImageH(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c1ImageH} onChange={e => setC1ImageH(e.target.value)} onKeyDown={onEnter(calcCol1)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Min Element Height %</label>
-                    <input type="number" value={c1MinElem} onChange={e => setC1MinElem(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c1MinElem} onChange={e => setC1MinElem(e.target.value)} onKeyDown={onEnter(calcCol1)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">
                       Bottom of Image Height <span className="opacity-50">(optional)</span>
                     </label>
-                    <input type="number" value={colFloors[0]} onChange={e => updateFloor(0, e.target.value)} placeholder="Enter value"
+                    <input type="number" value={colFloors[0]} onChange={e => updateFloor(0, e.target.value)} onKeyDown={onEnter(calcCol1)} placeholder="Enter value"
                       className={inputCls + ' border-dashed'} />
                   </div>
                 </div>
@@ -228,17 +232,17 @@ export default function DisplaySizingPage() {
                 <div className="flex flex-1 flex-col gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Farthest Viewer</label>
-                    <input type="number" value={c2Farthest} onChange={e => setC2Farthest(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c2Farthest} onChange={e => setC2Farthest(e.target.value)} onKeyDown={onEnter(calcCol2)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Min Element Height %</label>
-                    <input type="number" value={c2MinElem} onChange={e => setC2MinElem(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c2MinElem} onChange={e => setC2MinElem(e.target.value)} onKeyDown={onEnter(calcCol2)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">
                       Bottom of Image Height <span className="opacity-50">(optional)</span>
                     </label>
-                    <input type="number" value={colFloors[1]} onChange={e => updateFloor(1, e.target.value)} placeholder="Enter value"
+                    <input type="number" value={colFloors[1]} onChange={e => updateFloor(1, e.target.value)} onKeyDown={onEnter(calcCol2)} placeholder="Enter value"
                       className={inputCls + ' border-dashed'} />
                   </div>
                 </div>
@@ -273,17 +277,17 @@ export default function DisplaySizingPage() {
                 <div className="flex flex-1 flex-col gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Image Height</label>
-                    <input type="number" value={c3ImageH} onChange={e => setC3ImageH(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c3ImageH} onChange={e => setC3ImageH(e.target.value)} onKeyDown={onEnter(calcCol3)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">Farthest Viewer</label>
-                    <input type="number" value={c3Farthest} onChange={e => setC3Farthest(e.target.value)} placeholder="Enter value" className={inputCls} />
+                    <input type="number" value={c3Farthest} onChange={e => setC3Farthest(e.target.value)} onKeyDown={onEnter(calcCol3)} placeholder="Enter value" className={inputCls} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-muted">
                       Bottom of Image Height <span className="opacity-50">(optional)</span>
                     </label>
-                    <input type="number" value={colFloors[2]} onChange={e => updateFloor(2, e.target.value)} placeholder="Enter value"
+                    <input type="number" value={colFloors[2]} onChange={e => updateFloor(2, e.target.value)} onKeyDown={onEnter(calcCol3)} placeholder="Enter value"
                       className={inputCls + ' border-dashed'} />
                   </div>
                 </div>
@@ -327,7 +331,7 @@ export default function DisplaySizingPage() {
         {/* ── Right column: AVIXA Reference ── */}
         <div className="w-full shrink-0 xl:w-[675px] xl:pl-8">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
-          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="Reference" />
+          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="Formulas Used" />
 
           <div className="mb-4 space-y-2 text-[12px] leading-relaxed text-subtle">
             <div>

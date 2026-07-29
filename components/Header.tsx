@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { CalculatorIcon, InventoryIcon, ToolsIcon } from "./Icons";
+import { BookIcon, CalculatorIcon, InventoryIcon, ToolsIcon } from "./Icons";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "./ThemeProvider";
 import OrgSwitcher from "./OrgSwitcher";
@@ -48,7 +48,22 @@ const navItems = [
   { href: "/board", label: "Board", icon: BoardIcon },
   { href: "/inventory", label: "Library", icon: InventoryIcon },
   { href: "/calculators", label: "Calculators", icon: CalculatorIcon },
+  { href: "/references", label: "References", icon: BookIcon },
 ];
+
+// Calculator routes that now live under the References tab in the nav —
+// their pages weren't moved, only relocated in navigation, so highlighting
+// has to be special-cased instead of matched by URL prefix.
+const REFERENCE_CALC_IDS = ["connectors", "microphone-polar-patterns", "resolution-reference", "standards"];
+
+function isNavItemActive(href: string, pathname: string): boolean {
+  const isReferenceCalc = REFERENCE_CALC_IDS.some(
+    (id) => pathname === `/calculators/${id}` || pathname.startsWith(`/calculators/${id}/`)
+  );
+  if (href === "/calculators") return !isReferenceCalc && (pathname === href || pathname.startsWith(href + "/"));
+  if (href === "/references") return isReferenceCalc || pathname === href || pathname.startsWith(href + "/");
+  return pathname === href || pathname.startsWith(href + "/");
+}
 
 function SunIcon() {
   return (
@@ -148,8 +163,7 @@ export default function Header() {
       <div className="flex items-center gap-2 xl:gap-4">
         <nav className="hidden items-center gap-1.5 xl:flex">
           {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+            const isActive = isNavItemActive(item.href, pathname);
             const Icon = item.icon;
 
             return (
@@ -282,8 +296,7 @@ export default function Header() {
           </div>
           <nav className="flex flex-col p-3">
             {navItems.map((item) => {
-              const isActive =
-                pathname === item.href || pathname.startsWith(item.href + "/");
+              const isActive = isNavItemActive(item.href, pathname);
               const Icon = item.icon;
 
               return (

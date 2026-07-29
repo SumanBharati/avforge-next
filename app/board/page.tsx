@@ -84,11 +84,6 @@ export default function BoardsPage() {
             >
               <div className="relative h-20 w-full" style={{ backgroundColor: `${board.color}22` }}>
                 <div className="h-1.5 w-full" style={{ backgroundColor: board.color }} />
-                <div className="absolute bottom-2 left-3 flex gap-1.5">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="h-8 w-10 rounded-md opacity-30" style={{ backgroundColor: board.color }} />
-                  ))}
-                </div>
               </div>
               <div className="px-4 py-3">
                 <div className="text-[14px] font-semibold text-heading">{board.name}</div>

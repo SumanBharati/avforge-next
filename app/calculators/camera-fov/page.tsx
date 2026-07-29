@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Camera, Settings, Ruler, BarChart2 } from 'lucide-react';
+import { Camera, Settings, Ruler } from 'lucide-react';
 import { CalcPageWrapper } from '@/components/calc';
 
 const CAMERAS = [
@@ -158,8 +158,8 @@ export default function CameraFOVPage() {
   const readonlyCls = "w-full rounded-lg border border-border bg-forge-surface/30 px-3 py-2.5 font-mono text-[15px] text-subtle";
   const labelCls = "mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted";
 
-  const ResultCard = ({ camName, subtitle, wide, zoom, zoomLabel, hfovWide, zoomHfovArg, accent, footerText }: {
-    camName: string; subtitle: string;
+  const ResultCard = ({ camName, wide, zoom, zoomLabel, hfovWide, zoomHfovArg, accent, footerText }: {
+    camName: string;
     wide: { w: number; h: number };
     zoom: { w: number; h: number } | null;
     zoomLabel?: string;
@@ -172,7 +172,6 @@ export default function CameraFOVPage() {
       {/* Header */}
       <div className="border-b border-border px-4 py-3">
         <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{camName}</div>
-        <div className="text-[11px] text-subtle">{subtitle}</div>
       </div>
 
       {/* Stat boxes */}
@@ -325,17 +324,13 @@ export default function CameraFOVPage() {
 
         {/* ── Right: results ── */}
         <div className="min-w-0 flex-1">
-          <SectionIcon icon={<BarChart2 size={13} />} title="Field of View Results" />
-
           {customActive && (() => {
             const vfovWideResolved = customVfovAuto ? undefined : customVfovWide;
             const wide = calcFOV(customHfovWide, distance, vfovWideResolved);
             const zoom = hasZoom ? calcFOV(zoomHfovDeg, distance) : null;
-            const subtitle = `HFOV ${customHfovWide}° · VFOV ${customVfovAuto ? `${derivedVfov}° (16:9)` : `${customVfovWide}°`}`;
             return (
               <ResultCard
-                camName="Custom Camera"
-                subtitle={subtitle}
+                camName="Results"
                 wide={wide}
                 zoom={zoom}
                 zoomLabel={`${customHfovZoom}× zoom`}
@@ -351,11 +346,9 @@ export default function CameraFOVPage() {
             const cam = activeCam;
             const wide = calcFOV(cam.hfovWide, distance);
             const zoom = presetZoomHfovDeg ? calcFOV(presetZoomHfovDeg, distance) : null;
-            const subtitle = `HFOV ${cam.hfovWide}° · ${cam.zoom} · ${cam.sensor}`;
             return (
               <ResultCard
                 camName={cam.name}
-                subtitle={subtitle}
                 wide={wide}
                 zoom={zoom}
                 zoomLabel={`${presetZoom}× zoom`}

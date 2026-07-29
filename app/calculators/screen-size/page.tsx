@@ -195,6 +195,7 @@ export default function ScreenSizePage() {
                       type="number"
                       value={row.dim[unit]}
                       onChange={e => row.setDim(prev => ({ ...prev, [unit]: e.target.value, last: unit }))}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onCalc(); } }}
                       placeholder="—"
                       style={inputSt}
                     />

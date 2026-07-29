@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 
 // ─── CalcSection ──────────────────────────────────────────────────────────────
 
@@ -129,9 +130,9 @@ export function CalcPageWrapper({ title, desc, subtitle, children }: CalcPageWra
   return (
     <div className="animate-fade-in px-6 py-3">
       <div className="mb-2 flex items-center gap-2 text-[12px]">
-        <a href="/calculators" className="text-subtle transition-colors hover:text-secondary">
+        <Link href="/calculators" className="text-subtle transition-colors hover:text-secondary">
           ← Calculators
-        </a>
+        </Link>
       </div>
       <h2 className="mb-0.5 text-xl font-semibold text-heading">{title}</h2>
       <p className={subtitle ? 'mb-0.5 text-[13px] text-subtle' : 'mb-3 text-[13px] text-subtle'}>{desc}</p>

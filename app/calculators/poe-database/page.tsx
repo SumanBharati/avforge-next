@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 const POE_DEVICES = [
   { name: "Shure MXA920",            type: "Ceiling Mic",       poeClass: 4, draw: 25.5,  standard: "802.3at" },
@@ -50,7 +51,7 @@ export default function PoEDatabasePage() {
 
   return (
     <div className="animate-fade-in p-6 max-w-[860px]">
-      <a href="/reference" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Back to Reference</a>
+      <Link href="/calculators" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Calculators</Link>
       <h2 className="mb-1 text-lg font-semibold text-heading">📦 PoE Device Database</h2>
       <p className="mb-5 text-[13px] text-subtle">Per-device PoE class and power draw reference for AV equipment</p>
 
