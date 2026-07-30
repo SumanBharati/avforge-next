@@ -534,19 +534,79 @@ export default function RoomDesignerPage() {
   };
 
   const exportAsPDF = () => {
+    const pageKeys = ["plan", "ceil", "mic", "wallSpk", "wallMic"];
+    // Expand every section (so it actually appears in the PDF) and zoom-extend
+    // each canvas to fill its page, remembering what was collapsed so we can
+    // restore the user's on-screen layout once the print dialog closes.
+    const wasCollapsed = new Set(collapsedCanvases);
+    if (pageKeys.some(k => wasCollapsed.has(k))) setCollapsedCanvases(new Set());
+    // Extra margin (vs. the 1.08 used for the interactive double-middle-click
+    // fit) so labels drawn outside the room rect — "Front Wall", the width/
+    // length dimension text — have room to breathe instead of being clipped
+    // against the fixed-height print page.
+    pageKeys.forEach(k => zoomExtents(k, 1.35));
+
+    // Collapse the on-screen flex chrome (left sidebar, toolbar, BOM panel,
+    // etc.) out of the layout and free every ancestor's height/overflow so
+    // the full, un-scrolled canvas content lays out in normal flow and can
+    // paginate correctly. `position:fixed` was tried here before, but a
+    // fixed box taller than one page prints duplicated/clipped content in
+    // Chrome — plain flow + explicit page breaks is what actually works.
+    const exportEl = document.getElementById('rd-canvas-export');
+    const restores: { el: HTMLElement; prop: string; value: string }[] = [];
+    const setStyle = (el: HTMLElement, prop: string, value: string) => {
+      restores.push({ el, prop, value: (el.style as any)[prop] });
+      (el.style as any)[prop] = value;
+    };
+    let node: HTMLElement | null = exportEl;
+    while (node && node !== document.body) {
+      const parent: HTMLElement | null = node.parentElement;
+      if (parent) {
+        Array.from(parent.children).forEach(sib => {
+          if (sib !== node && sib instanceof HTMLElement) setStyle(sib, 'display', 'none');
+        });
+      }
+      setStyle(node, 'overflow', 'visible');
+      setStyle(node, 'overflowY', 'visible');
+      setStyle(node, 'height', 'auto');
+      setStyle(node, 'maxHeight', 'none');
+      setStyle(node, 'position', 'static');
+      node = parent;
+    }
+
     const style = document.createElement('style');
     style.id = '__rd_print_style__';
     style.textContent = `
       @media print {
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; visibility: hidden !important; }
-        #rd-canvas-export, #rd-canvas-export * { visibility: visible !important; }
-        #rd-canvas-export { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; background: #fff !important; overflow: visible !important; }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        #rd-canvas-export { background: #fff !important; padding: 8mm !important; box-sizing: border-box !important; }
+        #rd-canvas-export button, #rd-canvas-export .rd-print-hide { display: none !important; }
+        #rd-print-title-ceil, #rd-print-title-mic, #rd-print-title-wallSpk, #rd-print-title-wallMic { break-before: page !important; }
+        #rd-print-page-plan, #rd-print-page-ceil, #rd-print-page-mic, #rd-print-page-wallSpk, #rd-print-page-wallMic {
+          height: 178mm !important; min-height: 0 !important; max-height: 178mm !important; break-inside: avoid !important;
+        }
+        /* Chrome only reserves (and prints) the date/URL/page-number header+footer
+           band when the print job has a margin; a zero @page margin removes it —
+           the 8mm breathing room is recreated above as padding on the container. */
+        @page { size: 11in 8.5in; margin: 0; }
       }
     `;
     document.head.appendChild(style);
     const prev = document.title;
     document.title = 'Room Design';
-    setTimeout(() => { window.print(); document.head.removeChild(style); document.title = prev; }, 80);
+    // Wait for React to flush the expand/zoom-extend state and for layout to
+    // settle before invoking print, then restore the prior DOM/collapse state.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          window.print();
+          document.head.removeChild(style);
+          document.title = prev;
+          restores.forEach(({ el, prop, value }) => { (el.style as any)[prop] = value; });
+          if (wasCollapsed.size) setCollapsedCanvases(wasCollapsed);
+        }, 150);
+      });
+    });
   };
 
   const addFromModal = () => {
@@ -786,9 +846,9 @@ export default function RoomDesignerPage() {
   // mode) into the 600×420 view of the given canvas. All five canvases fit
   // their content into a ≤380×270 box centered at (300,210), so the room
   // dimensions describe the extents on every canvas.
-  const zoomExtents = (key: string) => {
+  const zoomExtents = (key: string, marginFactor = 1.08) => {
     if (lockedViews[key]) return;
-    const margin = 1.08; // slight breathing room around the extents
+    const margin = marginFactor; // breathing room around the extents (labels like "Front Wall" and the width/length dimensions sit outside the room rect, so PDF export asks for extra margin)
     let w = roomW * planScale, h = roomL * planScale, cx = 300, cy = 210;
     // Custom-drawn rooms live wherever the walls were drawn, not in the
     // nominal room box — every canvas shares the same pX/pY mapping, so fit
@@ -2775,10 +2835,10 @@ export default function RoomDesignerPage() {
       <div id="rd-canvas-export" style={{flex:1,overflowY:"auto"}}>
         <>
         {/* Row 1: Video Calculations */}
-        <div style={{flexShrink:0}}>
+        <div id="rd-print-title-plan" style={{flexShrink:0}}>
           <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations{collapseToggle("plan")}</div>
         </div>
-        <div style={{display:collapsedCanvases.has("plan")?"none":"flex",height:"50vh",minHeight:400}}>
+        <div id="rd-print-page-plan" style={{display:collapsedCanvases.has("plan")?"none":"flex",height:"50vh",minHeight:400}}>
         {/* Floor Plan */}
         <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
@@ -4278,13 +4338,13 @@ export default function RoomDesignerPage() {
           <button onClick={()=>setViewMode("3d")} style={{padding:"8px 20px",fontSize:14,fontWeight:viewMode==="3d"?700:400,background:viewMode==="3d"?"rgba(139,92,246,0.2)":"transparent",border:"none",color:viewMode==="3d"?"#a78bfa":"rgb(var(--text-subtle))",cursor:"pointer",borderRight:"1px solid rgb(var(--border))"}}>3D View</button>
           <button onClick={()=>setViewMode("plan")} style={{padding:"8px 20px",fontSize:14,fontWeight:viewMode==="plan"?700:400,background:viewMode==="plan"?"rgba(139,92,246,0.2)":"transparent",border:"none",color:viewMode==="plan"?"#a78bfa":"rgb(var(--text-subtle))",cursor:"pointer"}}>Plan View</button>
         </div>}
-        <div style={{position:"absolute",bottom:10,left:10,display:"flex",gap:12,fontSize:10,color:"#475569"}}>
+        <div className="rd-print-hide" style={{position:"absolute",bottom:10,left:10,display:"flex",gap:12,fontSize:10,color:"#475569"}}>
           <span>Click catalog items to add</span>
           <span>Drag devices to reposition</span>
           <span>Click to select, × to remove</span>
         </div>
         {/* Ceiling height control */}
-        <div style={{position:"absolute",bottom:12,right:60,display:"flex",alignItems:"center",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",padding:"5px 8px"}}>
+        <div className="rd-print-hide" style={{position:"absolute",bottom:12,right:60,display:"flex",alignItems:"center",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",padding:"5px 8px"}}>
           <span style={{fontSize:10,color:"rgb(var(--text-subtle))",whiteSpace:"nowrap"}}>Ceiling</span>
           <input type="number" className="no-spin" step={1} value={Math.floor(roomH)}
             onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(v + (roomH - Math.floor(roomH)))}}
@@ -4384,10 +4444,10 @@ export default function RoomDesignerPage() {
       </div>{/* end Row 1 */}
 
       {/* Row: Ceiling Speakers */}
-      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+      <div id="rd-print-title-ceil" style={{borderTop:"1px solid rgb(var(--border))"}}>
         <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers{collapseToggle("ceil")}</div>
       </div>
-      <div style={{display:collapsedCanvases.has("ceil")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div id="rd-print-page-ceil" style={{display:collapsedCanvases.has("ceil")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
           style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4529,10 +4589,10 @@ export default function RoomDesignerPage() {
       </div>{/* end ceiling speakers */}
 
       {/* Row 2: Ceiling Microphones */}
-      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+      <div id="rd-print-title-mic" style={{borderTop:"1px solid rgb(var(--border))"}}>
         <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones{collapseToggle("mic")}</div>
       </div>
-      <div style={{display:collapsedCanvases.has("mic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div id="rd-print-page-mic" style={{display:collapsedCanvases.has("mic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={micSvgRef} data-rd-canvas="mic" width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
           style={{background:cc.card,cursor:isMicPanning?"grabbing":micDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4637,10 +4697,10 @@ export default function RoomDesignerPage() {
       </div>
 
       {/* Row 3: Wall Speakers */}
-      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+      <div id="rd-print-title-wallSpk" style={{borderTop:"1px solid rgb(var(--border))"}}>
         <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers{collapseToggle("wallSpk")}</div>
       </div>
-      <div style={{display:collapsedCanvases.has("wallSpk")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div id="rd-print-page-wallSpk" style={{display:collapsedCanvases.has("wallSpk")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={wallSpkSvgRef} data-rd-canvas="wallSpk" width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
           style={{background:cc.card,cursor:isWallSpkPanning?"grabbing":wallSpkDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -4761,10 +4821,10 @@ export default function RoomDesignerPage() {
       </div>
 
       {/* Row 4: Wall Microphones */}
-      <div style={{borderTop:"1px solid rgb(var(--border))"}}>
+      <div id="rd-print-title-wallMic" style={{borderTop:"1px solid rgb(var(--border))"}}>
         <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones{collapseToggle("wallMic")}</div>
       </div>
-      <div style={{display:collapsedCanvases.has("wallMic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+      <div id="rd-print-page-wallMic" style={{display:collapsedCanvases.has("wallMic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
         <svg ref={wallMicSvgRef} data-rd-canvas="wallMic" width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
           style={{background:cc.card,cursor:isWallMicPanning?"grabbing":wallMicDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{

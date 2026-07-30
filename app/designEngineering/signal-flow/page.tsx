@@ -1397,20 +1397,93 @@ export default function SignalFlowPage() {
     );
   };
 
+  // Print page's usable drawing area (11in x 8.5in landscape, minus the 2×8mm
+  // padding recreated below in place of a browser page margin), in px at 96dpi.
+  const SF_PRINT_PAGE_W = 996;
+  const SF_PRINT_PAGE_H = 756;
+
+  // Fit every placed device and room box into the printed page, mirroring the
+  // Room Designer's "zoom extents" — center the content's bounding box and
+  // zoom so it fills the page instead of printing at whatever pan/zoom the
+  // canvas was last left at on screen.
+  const zoomExtentsSF = () => {
+    const pts: { x: number; y: number }[] = [];
+    devices.forEach((d: any) => { pts.push({ x: d.x, y: d.y }, { x: d.x + d.w, y: d.y + d.h }); });
+    rooms.forEach((r: any) => { pts.push({ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h }); });
+    if (!pts.length) return;
+    const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+    const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
+    const bboxW = Math.max(1, maxX - minX), bboxH = Math.max(1, maxY - minY);
+    const margin = 0.92; // slight breathing room around the extents
+    const zoom = Math.min(3, Math.max(0.1, Math.min(SF_PRINT_PAGE_W * margin / bboxW, SF_PRINT_PAGE_H * margin / bboxH)));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    setView({ zoom, x: SF_PRINT_PAGE_W / 2 - cx * zoom, y: SF_PRINT_PAGE_H / 2 - cy * zoom });
+  };
+
   const exportAsPDF = () => {
+    // Zoom-extend the diagram to fill the printed page, remembering the
+    // current view so it can be restored once the print dialog closes.
+    const prevView = view;
+    zoomExtentsSF();
+
+    // Collapse the on-screen flex chrome (toolbar, any sibling panels) out of
+    // the layout and free every ancestor's height/overflow, so the canvas can
+    // be sized to exactly one printed page in normal document flow.
+    // `position:fixed` was tried here before — a fixed box gets redrawn on
+    // every page the underlying (still-in-flow, merely invisible) document
+    // needs, which is why the export always produced a spurious blank 2nd
+    // page even though the diagram itself fit on one page.
+    const exportEl = document.getElementById('sf-canvas-export');
+    const restores: { el: HTMLElement; prop: string; value: string }[] = [];
+    const setStyle = (el: HTMLElement, prop: string, value: string) => {
+      restores.push({ el, prop, value: (el.style as any)[prop] });
+      (el.style as any)[prop] = value;
+    };
+    let node: HTMLElement | null = exportEl;
+    while (node && node !== document.body) {
+      const parent: HTMLElement | null = node.parentElement;
+      if (parent) {
+        Array.from(parent.children).forEach(sib => {
+          if (sib !== node && sib instanceof HTMLElement) setStyle(sib, 'display', 'none');
+        });
+        // Free the ancestor's own box — but never #sf-canvas-export itself:
+        // its overflow:hidden print-clips an oversized diagram to one page,
+        // and its position:relative anchors the floating zoom/tool overlays.
+        setStyle(parent, 'overflow', 'visible');
+        setStyle(parent, 'height', 'auto');
+        setStyle(parent, 'maxHeight', 'none');
+        setStyle(parent, 'position', 'static');
+      }
+      node = parent;
+    }
+
     const style = document.createElement('style');
     style.id = '__sf_print_style__';
     style.textContent = `
       @media print {
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; visibility: hidden !important; }
-        #sf-canvas-export, #sf-canvas-export * { visibility: visible !important; }
-        #sf-canvas-export { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; background: #fff !important; overflow: visible !important; }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        #sf-canvas-export { height: 100vh !important; background: #fff !important; padding: 8mm !important; box-sizing: border-box !important; }
+        /* Chrome only reserves (and prints) the date/URL/page-number header+footer
+           band when the print job has a margin; a zero @page margin removes it. */
+        @page { size: 11in 8.5in; margin: 0; }
       }
     `;
     document.head.appendChild(style);
     const prev = document.title;
     document.title = 'Signal Flow Diagram';
-    setTimeout(() => { window.print(); document.head.removeChild(style); document.title = prev; }, 80);
+    // Wait for the zoom-extend + DOM collapse to flush and layout to settle
+    // before invoking print, then restore the on-screen view and DOM state.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          window.print();
+          document.head.removeChild(style);
+          document.title = prev;
+          restores.forEach(({ el, prop, value }) => { (el.style as any)[prop] = value; });
+          setView(prevView);
+        }, 150);
+      });
+    });
   };
 
   return (
