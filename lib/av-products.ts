@@ -90,3 +90,38 @@ export async function getProductCount(): Promise<number> {
     .select("*", { count: "exact", head: true });
   return count ?? 0;
 }
+
+export async function listProducts(opts: {
+  search?: string;
+  category?: string;
+  manufacturer?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<{ data: AVProduct[]; count: number }> {
+  let query = supabase.from("av_products").select("*", { count: "exact" });
+
+  const q = opts.search?.trim();
+  if (q) {
+    query = query.or(
+      `manufacturer.ilike.%${q}%,model_name.ilike.%${q}%,type.ilike.%${q}%,category.ilike.%${q}%,part_number.ilike.%${q}%`
+    );
+  }
+  if (opts.category) query = query.eq("category", opts.category);
+  if (opts.manufacturer) query = query.eq("manufacturer", opts.manufacturer);
+
+  const offset = opts.offset ?? 0;
+  const limit = opts.limit ?? 40;
+  query = query.order("manufacturer").order("model_name").range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+  return { data: data ?? [], count: count ?? 0 };
+}
+
+export async function getFilterOptions(): Promise<{ categories: string[]; manufacturers: string[] }> {
+  const { data, error } = await supabase.from("av_products").select("category, manufacturer");
+  if (error) throw error;
+  const categories = Array.from(new Set((data ?? []).map((r) => r.category).filter(Boolean))).sort();
+  const manufacturers = Array.from(new Set((data ?? []).map((r) => r.manufacturer).filter(Boolean))).sort();
+  return { categories, manufacturers };
+}

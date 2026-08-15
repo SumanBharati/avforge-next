@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts, type AVProduct } from "@/lib/av-products";
 import { useBOM } from "@/lib/bom-context";
@@ -24,6 +25,38 @@ type RackItem = {
   ru: number;
   color: string;
 };
+
+// Renders its children into document.body, positioned next to `getAnchor()`'s element.
+// The rack area sits inside nested `overflow-y:auto` containers (design-engineering layout +
+// this page's own scroll wrapper); an absolutely-positioned child that floats outside its
+// anchor's box (like the power panel, which sits to the anchor's left) gets silently clipped
+// by those ancestors. Portaling to body + `position:fixed` escapes that clipping entirely.
+function FloatingPanel({ getAnchor, children }: { getAnchor: () => HTMLElement | null; children: React.ReactNode }) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    function update() {
+      const el = getAnchor();
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const next = { top: rect.top + 38, left: rect.left - 210 - 28 };
+      setPos((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+    }
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  });
+
+  if (!pos || typeof document === "undefined") return null;
+  return createPortal(
+    <div style={{ position: "fixed", top: pos.top, left: pos.left, width: 210, zIndex: 50 }}>{children}</div>,
+    document.body
+  );
+}
 
 export default function RackPlannerPage() {
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
@@ -54,6 +87,7 @@ export default function RackPlannerPage() {
   // Annotations (Text / Shape / Pencil / Highlight / Eraser) — drawn on an
   // overlay in the rack container's pixel space
   const rackAreaRef = useRef<HTMLDivElement>(null);
+  const additionalRackRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const annotate = useCanvasAnnotations({
     getPoint: (e) => {
       const el = rackAreaRef.current; if (!el) return null;
@@ -370,7 +404,7 @@ export default function RackPlannerPage() {
     window.addEventListener("mouseup",onUp);
   };
 
-  const renderPowerPanel = (rackNumber:number,rackItems:RackItem[]) => {
+  const renderPowerPanel = (rackNumber:number,rackItems:RackItem[],getAnchor:()=>HTMLElement|null) => {
     const rackVoltage=Math.max(1,rackVoltages[rackNumber-1]??120);
     let watts=0;
     let amps=0;
@@ -387,13 +421,15 @@ export default function RackPlannerPage() {
       btu+=Number.isFinite(specifiedBtu)&&specifiedBtu>0?specifiedBtu:itemWatts*3.412;
     });
     const resultRow=(label:string,value:string,unit:string)=><div style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"baseline",gap:5,padding:"10px 0",borderTop:"1px solid rgb(var(--border))"}}><span style={{fontSize:11,color:"rgb(var(--text-muted))"}}>{label}</span><strong style={{fontSize:15,color:"rgb(var(--text-body))",fontFamily:"'JetBrains Mono',monospace"}}>{value}</strong><span style={{width:38,fontSize:9,color:"rgb(var(--text-subtle))"}}>{unit}</span></div>;
-    return <div style={{position:"absolute",right:"calc(100% + 28px)",top:38,width:210,padding:"14px 16px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.1)"}}>
-      <div style={{fontSize:13,fontWeight:700,color:"rgb(var(--text-body))",marginBottom:12}}>Power Calculations</div>
-      <label style={{display:"grid",gridTemplateColumns:"1fr 72px",alignItems:"center",gap:10,paddingBottom:10}}><span style={{fontSize:11,color:"rgb(var(--text-muted))"}}>Volts</span><div style={{display:"flex",alignItems:"center",gap:4}}><input type="number" min={1} max={1000} value={rackVoltage} aria-label={`Equipment Rack ${rackNumber} voltage`} onChange={e=>{const value=Math.max(1,Math.min(1000,Number(e.target.value)||1));setRackVoltages(values=>Array.from({length:rackCount},(_,index)=>index===rackNumber-1?value:values[index]??120));}} style={{width:50,height:28,padding:"0 5px",textAlign:"right",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none"}}/><span style={{fontSize:9,color:"rgb(var(--text-subtle))"}}>V</span></div></label>
-      {resultRow("Amps",amps.toFixed(2),"A")}
-      {resultRow("Watts",watts.toFixed(1),"W")}
-      {resultRow("BTU/Hr",Math.round(btu).toLocaleString(),"BTU/hr")}
-    </div>;
+    return <FloatingPanel getAnchor={getAnchor}>
+      <div style={{padding:"14px 16px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.1)"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"rgb(var(--text-body))",marginBottom:12}}>Power Calculations</div>
+        <label style={{display:"grid",gridTemplateColumns:"1fr 72px",alignItems:"center",gap:10,paddingBottom:10}}><span style={{fontSize:11,color:"rgb(var(--text-muted))"}}>Volts</span><div style={{display:"flex",alignItems:"center",gap:4}}><input type="number" min={1} max={1000} value={rackVoltage} aria-label={`Equipment Rack ${rackNumber} voltage`} onChange={e=>{const value=Math.max(1,Math.min(1000,Number(e.target.value)||1));setRackVoltages(values=>Array.from({length:rackCount},(_,index)=>index===rackNumber-1?value:values[index]??120));}} style={{width:50,height:28,padding:"0 5px",textAlign:"right",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none"}}/><span style={{fontSize:9,color:"rgb(var(--text-subtle))"}}>V</span></div></label>
+        {resultRow("Amps",amps.toFixed(2),"A")}
+        {resultRow("Watts",watts.toFixed(1),"W")}
+        {resultRow("BTU/Hr",Math.round(btu).toLocaleString(),"BTU/hr")}
+      </div>
+    </FloatingPanel>;
   };
 
   const openRackEquipmentEditor=(index:number)=>{
@@ -563,7 +599,7 @@ export default function RackPlannerPage() {
               <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em"}}>Equipment Rack 1</div>
               {totalRU>maxRU && <div style={{color:"#ef4444",fontWeight:600,fontSize:11}}>⚠ Over capacity by {totalRU-maxRU} RU</div>}
             </div>
-            {renderPowerPanel(1,mountedEntries.map(({item})=>item))}
+            {renderPowerPanel(1,mountedEntries.map(({item})=>item),()=>rackAreaRef.current)}
 
             {/* Annotation overlay — interactive only while a tool is active */}
             <svg
@@ -582,7 +618,7 @@ export default function RackPlannerPage() {
             const rackEntries=items.map((item,index)=>({item,index})).filter(({item})=>item.rackMounted!==false&&(item.rackId??1)===rackNumber);
             const rackHighestRU=rackEntries.reduce((highest,{item})=>Math.max(highest,(item.rackStartRU??1)+item.ru-1),0);
             const rackDisplayRU=Math.max(emptyRackRU,rackHighestRU);
-            return <div key={`rack-${rackNumber}`} onMouseEnter={()=>setHoveredRackNumber(rackNumber)} onMouseLeave={()=>setHoveredRackNumber(prev=>prev===rackNumber?null:prev)} style={{position:"relative",width:rackW+60,margin:"48px auto 0"}}>
+            return <div key={`rack-${rackNumber}`} ref={el=>{additionalRackRefs.current[rackNumber]=el;}} onMouseEnter={()=>setHoveredRackNumber(rackNumber)} onMouseLeave={()=>setHoveredRackNumber(prev=>prev===rackNumber?null:prev)} style={{position:"relative",width:rackW+60,margin:"48px auto 0"}}>
               {hoveredRackNumber===rackNumber&&<button aria-label={`Delete Equipment Rack ${rackNumber}`} title={`Delete Equipment Rack ${rackNumber}`}
                 onClick={()=>{setItems(current=>current.map(item=>(item.rackId??1)===rackNumber?{...item,rackMounted:false,rackId:undefined}:item.rackId&&item.rackId>rackNumber?{...item,rackId:item.rackId-1}:item));setRackCount(count=>Math.max(1,count-1));setAdditionalRackRUCapacities(capacities=>capacities.filter((_,index)=>index!==rackOffset));setRackVoltages(voltages=>voltages.filter((_,index)=>index!==rackNumber-1));setHoveredRackNumber(null);}}
                 style={{position:"absolute",right:8,top:42,zIndex:8,width:22,height:22,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.5)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:17,lineHeight:1,cursor:"pointer",boxShadow:"0 2px 6px rgba(0,0,0,0.2)"}}>×</button>}
@@ -615,7 +651,7 @@ export default function RackPlannerPage() {
                 <div style={{height:8,margin:"4px 8px 0",background:"linear-gradient(0deg,rgb(var(--border)),rgb(var(--forge-surface)))",borderRadius:"0 0 3px 3px",border:"1px solid rgb(var(--border))"}} />
               </div>
               <div style={{textAlign:"center",marginTop:8,fontSize:14,fontWeight:600,color:"rgb(var(--text-muted))",letterSpacing:"0.04em"}}>Equipment Rack {rackNumber}</div>
-              {renderPowerPanel(rackNumber,rackEntries.map(({item})=>item))}
+              {renderPowerPanel(rackNumber,rackEntries.map(({item})=>item),()=>additionalRackRefs.current[rackNumber]??null)}
             </div>;
           })}
           {unrackedEntries.length > 0 && (

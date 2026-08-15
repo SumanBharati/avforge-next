@@ -41,8 +41,13 @@ export default function OrgMembersPage() {
   const [inviteError, setInviteError] = useState("");
   const [inviting, setInviting] = useState(false);
 
+  const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
+
   useEffect(() => {
-    if (activeOrg) loadMembers();
+    if (activeOrg) {
+      loadMembers();
+      setInviteRole(roleOptions[0]);
+    }
   }, [activeOrg?.id]);
 
   async function loadMembers() {
@@ -140,7 +145,7 @@ export default function OrgMembersPage() {
     }
 
     setInviteEmail("");
-    setInviteRole(ROLE_OPTIONS[0]);
+    setInviteRole(roleOptions[0]);
     setShowInvite(false);
     setInviting(false);
     await loadMembers();
@@ -285,7 +290,7 @@ export default function OrgMembersPage() {
                 onChange={(e) => setInviteRole(e.target.value)}
                 className="forge-input max-w-[360px]"
               >
-                {ROLE_OPTIONS.map((r) => (
+                {roleOptions.map((r) => (
                   <option key={r} value={r}>{r}</option>
                 ))}
               </select>

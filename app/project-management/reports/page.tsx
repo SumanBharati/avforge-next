@@ -17,7 +17,7 @@ import {
   toISODate,
 } from "@/lib/pm-store";
 
-type ReportTab = "utilization" | "budget" | "forecast" | "timesheet";
+type ReportTab = "utilization" | "budget" | "forecast";
 
 export default function ReportsPage() {
   const { store, loading } = usePMStore();
@@ -29,38 +29,38 @@ export default function ReportsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-heading">Reports</h1>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-forge-surface/60 p-0.5 text-xs">
-            {(["utilization", "budget", "forecast", "timesheet"] as ReportTab[]).map((t) => (
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
+        <h1 className="mb-3 text-xl font-bold text-heading">Reports</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border">
+          <div className="flex items-center gap-1">
+            {(["utilization", "budget", "forecast"] as ReportTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`rounded px-3 py-1 font-semibold capitalize transition-colors ${
-                  tab === t ? "bg-blue-500 text-white" : "text-muted hover:text-body"
+                className={`border-b-2 px-4 py-2 text-sm font-medium capitalize transition-colors ${
+                  tab === t ? "border-blue-500 text-blue-400" : "border-transparent text-muted hover:text-body"
                 }`}
               >
                 {t}
               </button>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-faint">Range</label>
-          <input
-            type="date"
-            value={rangeStart}
-            onChange={(e) => setRangeStart(e.target.value)}
-            className="forge-input text-sm"
-          />
-          <span className="text-subtle">→</span>
-          <input
-            type="date"
-            value={rangeEnd}
-            onChange={(e) => setRangeEnd(e.target.value)}
-            className="forge-input text-sm"
-          />
+          <div className="flex items-center gap-2 pb-2 text-sm">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-faint">Range</label>
+            <input
+              type="date"
+              value={rangeStart}
+              onChange={(e) => setRangeStart(e.target.value)}
+              className="forge-input text-sm"
+            />
+            <span className="text-subtle">→</span>
+            <input
+              type="date"
+              value={rangeEnd}
+              onChange={(e) => setRangeEnd(e.target.value)}
+              className="forge-input text-sm"
+            />
+          </div>
         </div>
       </div>
 
@@ -68,7 +68,6 @@ export default function ReportsPage() {
         {tab === "utilization" && <UtilizationReport rangeStart={rangeStart} rangeEnd={rangeEnd} />}
         {tab === "budget" && <BudgetReport />}
         {tab === "forecast" && <ForecastReport rangeStart={rangeStart} rangeEnd={rangeEnd} />}
-        {tab === "timesheet" && <TimesheetReport rangeStart={rangeStart} rangeEnd={rangeEnd} />}
       </div>
     </div>
   );
@@ -321,16 +320,14 @@ export default function ReportsPage() {
               return (
                 <div key={i} className="flex flex-1 flex-col items-center justify-end">
                   <div className="relative w-full" style={{ height: 200 }}>
-                    <div className="absolute bottom-0 left-0 right-0">
-                      <div
-                        className="rounded-t"
-                        style={{
-                          height: `${pct}%`,
-                          backgroundColor: over ? "#ef4444" : "#8b5cf6",
-                          opacity: 0.9,
-                        }}
-                      />
-                    </div>
+                    <div
+                      className="absolute bottom-0 left-0 right-0 rounded-t"
+                      style={{
+                        height: `${pct}%`,
+                        backgroundColor: over ? "#ef4444" : "#8b5cf6",
+                        opacity: 0.9,
+                      }}
+                    />
                     <div
                       className="absolute left-0 right-0 border-t border-dashed border-emerald-500/60"
                       style={{ bottom: `${capPct}%` }}
@@ -339,8 +336,10 @@ export default function ReportsPage() {
                   </div>
                   <div className="mt-2 text-center">
                     <div className="font-mono text-xs text-body">{w.scheduled.toFixed(0)}h</div>
-                    <div className="mt-0.5 text-[9px] text-subtle">
+                    <div className="mt-0.5 whitespace-nowrap text-[9px] text-subtle">
                       {w.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      {" – "}
+                      {addDays(w.start, 6).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </div>
                   </div>
                 </div>
@@ -386,181 +385,6 @@ export default function ReportsPage() {
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-      </>
-    );
-  }
-
-  function TimesheetReport({ rangeStart, rangeEnd }: { rangeStart: string; rangeEnd: string }) {
-    const { entries, personRows } = useMemo(() => {
-      const inRange = store.timeEntries.filter((e) => e.date >= rangeStart && e.date <= rangeEnd);
-
-      const byPerson = new Map<
-        string,
-        { logged: number; billable: number; nonBillable: number; count: number }
-      >();
-      for (const e of inRange) {
-        const prev =
-          byPerson.get(e.personId) ?? { logged: 0, billable: 0, nonBillable: 0, count: 0 };
-        prev.logged += e.hours;
-        if (e.billable) prev.billable += e.hours;
-        else prev.nonBillable += e.hours;
-        prev.count += 1;
-        byPerson.set(e.personId, prev);
-      }
-
-      const personRows = store.people
-        .filter((p) => !p.archived && byPerson.has(p.id))
-        .map((p) => ({ person: p, ...byPerson.get(p.id)! }))
-        .sort((a, b) => b.logged - a.logged);
-
-      const entries = [...inRange].sort((a, b) =>
-        a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
-      );
-
-      return { entries, personRows };
-    }, [rangeStart, rangeEnd]);
-
-    const totalLogged = personRows.reduce((s, r) => s + r.logged, 0);
-    const totalBillable = personRows.reduce((s, r) => s + r.billable, 0);
-    const totalNonBillable = personRows.reduce((s, r) => s + r.nonBillable, 0);
-
-    return (
-      <>
-        <div className="mb-6 grid grid-cols-4 gap-3">
-          <Stat label="Total logged" value={`${totalLogged.toFixed(1)}h`} color="#8b5cf6" />
-          <Stat label="Billable" value={`${totalBillable.toFixed(1)}h`} color="#22c55e" />
-          <Stat label="Non-billable" value={`${totalNonBillable.toFixed(1)}h`} color="#f59e0b" />
-          <Stat label="Entries" value={`${entries.length}`} color="#64748b" />
-        </div>
-
-        <div className="mb-6 overflow-hidden rounded-xl border border-border">
-          <div className="border-b border-border bg-forge-panel px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-faint">
-            By person
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-forge-panel/60 text-[11px] font-semibold uppercase tracking-wider text-faint">
-              <tr className="border-b border-border">
-                <th className="px-4 py-2 text-left">Person</th>
-                <th className="px-4 py-2 text-right">Logged</th>
-                <th className="px-4 py-2 text-right">Billable</th>
-                <th className="px-4 py-2 text-right">Non-billable</th>
-                <th className="px-4 py-2 text-right">Entries</th>
-              </tr>
-            </thead>
-            <tbody>
-              {personRows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-faint">
-                    No time logged in this range.
-                  </td>
-                </tr>
-              ) : (
-                personRows.map((r) => (
-                  <tr key={r.person.id} className="border-b border-border hover:bg-forge-surface/30">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                          style={{ backgroundColor: r.person.color }}
-                        >
-                          {r.person.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)
-                            .toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-body">{r.person.name}</div>
-                          <div className="text-[11px] text-subtle">{r.person.role}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-muted">{r.logged.toFixed(1)}h</td>
-                    <td className="px-4 py-3 text-right font-mono text-emerald-400">{r.billable.toFixed(1)}h</td>
-                    <td className="px-4 py-3 text-right font-mono text-amber-400">{r.nonBillable.toFixed(1)}h</td>
-                    <td className="px-4 py-3 text-right font-mono text-subtle">{r.count}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="overflow-hidden rounded-xl border border-border">
-          <div className="border-b border-border bg-forge-panel px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-faint">
-            Entries
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-forge-panel/60 text-[11px] font-semibold uppercase tracking-wider text-faint">
-              <tr className="border-b border-border">
-                <th className="px-4 py-2 text-left">Date</th>
-                <th className="px-4 py-2 text-left">Person</th>
-                <th className="px-4 py-2 text-left">Project</th>
-                <th className="px-4 py-2 text-left">Phase</th>
-                <th className="px-4 py-2 text-right">Hours</th>
-                <th className="px-4 py-2 text-left">Type</th>
-                <th className="px-4 py-2 text-left">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-faint">
-                    No time entries in this range.
-                  </td>
-                </tr>
-              ) : (
-                entries.map((e) => {
-                  const person = store.people.find((p) => p.id === e.personId);
-                  const project = store.projects.find((p) => p.id === e.projectId);
-                  const phase = e.phaseId ? store.phases.find((ph) => ph.id === e.phaseId) : null;
-                  return (
-                    <tr key={e.id} className="border-b border-border hover:bg-forge-surface/30">
-                      <td className="px-4 py-2 font-mono text-[12px] text-muted">{fmtDateShort(e.date)}</td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2">
-                          {person && (
-                            <div
-                              className="h-2 w-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: person.color }}
-                            />
-                          )}
-                          <span className="text-body">{person?.name ?? "—"}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2">
-                          {project && (
-                            <div
-                              className="h-2 w-2 shrink-0 rounded-sm"
-                              style={{ backgroundColor: project.color }}
-                            />
-                          )}
-                          <span className="text-body">{project?.name ?? "—"}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-subtle">{phase?.name ?? "—"}</td>
-                      <td className="px-4 py-2 text-right font-mono text-body">{e.hours.toFixed(1)}h</td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                            e.billable
-                              ? "bg-emerald-500/15 text-emerald-400"
-                              : "bg-amber-500/15 text-amber-400"
-                          }`}
-                        >
-                          {e.billable ? "Billable" : "Non-bill"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-subtle">{e.notes || "—"}</td>
-                    </tr>
-                  );
-                })
-              )}
             </tbody>
           </table>
         </div>

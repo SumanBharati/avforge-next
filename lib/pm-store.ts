@@ -513,8 +513,6 @@ export function personDailyCapacity(p: Person): number {
 
 export function allocationHoursOnDate(a: Allocation, isoDate: string): number {
   if (!dateInRange(isoDate, a.startDate, a.endDate)) return 0;
-  const d = parseISODate(isoDate);
-  if (isWeekend(d)) return 0;
   return a.hoursPerDay;
 }
 

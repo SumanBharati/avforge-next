@@ -4,7 +4,16 @@ import Link from "next/link";
 import { useOrg } from "./OrgProvider";
 
 export default function OrgSwitcher() {
-  const { activeOrg } = useOrg();
+  const { activeOrg, loading } = useOrg();
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-subtle">Organization</span>
+        <span className="h-3.5 w-24 animate-pulse rounded bg-forge-surface/60" />
+      </div>
+    );
+  }
 
   if (!activeOrg) {
     return (
@@ -23,11 +32,7 @@ export default function OrgSwitcher() {
   return (
     <div className="flex flex-col">
       <span className="text-[9px] font-semibold uppercase tracking-widest text-subtle">Organization</span>
-      {activeOrg.logo_url ? (
-        <img src={activeOrg.logo_url} alt={activeOrg.name} className="mt-0.5 h-5 max-w-[120px] object-contain object-left" />
-      ) : (
-        <span className="mt-0.5 max-w-[160px] truncate text-sm font-medium text-body">{activeOrg.name}</span>
-      )}
+      <span className="mt-0.5 max-w-[160px] truncate text-sm font-medium text-body">{activeOrg.name}</span>
     </div>
   );
 }

@@ -193,12 +193,17 @@ export function useAIChatContext(): AIChatContext {
       if (activeOrg) {
         const { data: orgData } = await supabase
           .from("organizations")
-          .select("engineering_rate, installation_rate, project_mgmt_rate, programming_rate, field_engineering_rate, engineering_cost, installation_cost, project_mgmt_cost, programming_cost, field_engineering_cost")
+          .select("labor_line_items")
           .eq("id", activeOrg.id)
           .single();
 
-        if (orgData) {
-          ctx.laborRates = orgData;
+        if (orgData?.labor_line_items) {
+          const rates: Record<string, number> = {};
+          for (const item of orgData.labor_line_items as { label: string; rate: number; cost: number }[]) {
+            rates[`${item.label} rate`] = item.rate;
+            rates[`${item.label} cost`] = item.cost;
+          }
+          ctx.laborRates = rates;
         }
       }
 

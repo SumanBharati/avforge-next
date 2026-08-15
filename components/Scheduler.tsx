@@ -22,6 +22,14 @@ import {
 const ROW_HEIGHT = 60;
 const SEPARATOR_HEIGHT = 30;
 
+function addHoursToTime(time: string, hours: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const totalMin = Math.max(0, Math.min(23 * 60 + 59, h * 60 + m + Math.round(hours * 60)));
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 function MultiSelect({
   placeholder,
   options,
@@ -111,8 +119,17 @@ export function Scheduler({
   const [filterRoles, setFilterRoles] = useState<Set<string>>(new Set());
   const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Allocation | null>(null);
-  const [creating, setCreating] = useState<{ personId: string; startDate: string; endDate: string; x: number; y: number } | null>(null);
-  const [drag, setDrag] = useState<{ personId: string; startIdx: number; endIdx: number } | null>(null);
+  const [creating, setCreating] = useState<{
+    personId: string;
+    startDate: string;
+    endDate: string;
+    startTime: string;
+    endTime: string;
+    hoursPerDay: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [drag, setDrag] = useState<{ personId: string; rowLeft: number; downX: number; endX: number } | null>(null);
 
   const effectiveDays = 7;
   const days = useMemo(() => {
@@ -154,17 +171,80 @@ export function Scheduler({
     [store.projects],
   );
 
+  // Widen a day's column when any visible person is scheduled past their daily capacity that day
+  const dayWidths = useMemo(() => {
+    return days.map((d) => {
+      const iso = toISODate(d);
+      let maxRatio = 1;
+      for (const p of visiblePeople) {
+        const cap = personDailyCapacity(p);
+        if (cap <= 0) continue;
+        const scheduled = personScheduledHoursOnDate(p.id, iso, store.allocations);
+        maxRatio = Math.max(maxRatio, scheduled / cap);
+      }
+      return Math.round(DAY_WIDTH * maxRatio);
+    });
+  }, [days, visiblePeople, store.allocations, DAY_WIDTH]);
+
+  const dayOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const w of dayWidths) {
+      offsets.push(acc);
+      acc += w;
+    }
+    return offsets;
+  }, [dayWidths]);
+
+  const timelineTotalWidth = dayOffsets.length > 0 ? dayOffsets[dayOffsets.length - 1] + dayWidths[dayWidths.length - 1] : 0;
+
+  function dayIndexAtX(x: number) {
+    for (let i = 0; i < dayOffsets.length; i++) {
+      if (x < dayOffsets[i] + dayWidths[i]) return i;
+    }
+    return Math.max(0, dayOffsets.length - 1);
+  }
+
+  // Follow the mouse continuously while dragging, so the ghost bar grows smoothly
+  // instead of snapping straight to a full day's width.
+  useEffect(() => {
+    if (!drag) return;
+    function onMove(e: MouseEvent) {
+      setDrag((d) => (d ? { ...d, endX: Math.max(0, Math.min(e.clientX - d.rowLeft, timelineTotalWidth)) } : d));
+    }
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag !== null]);
 
   // Commit drag on global mouseup
   useEffect(() => {
     function onMouseUp(e: MouseEvent) {
       if (!drag) return;
-      const s = Math.min(drag.startIdx, drag.endIdx);
-      const end = Math.max(drag.startIdx, drag.endIdx);
+      const leftX = Math.min(drag.downX, drag.endX);
+      const rightX = Math.max(drag.downX, drag.endX);
+      const s = dayIndexAtX(leftX);
+      const end = Math.max(s, dayIndexAtX(Math.max(leftX, rightX - 1)));
+
+      // Estimate a duration from the dragged width, snapped to the nearest 15 minutes.
+      // A plain click (no real drag) or a multi-day span defaults to a full day's capacity;
+      // a partial drag within a single day scales proportionally.
+      const person = store.people.find((p) => p.id === drag.personId);
+      const cap = person ? personDailyCapacity(person) : 8;
+      const draggedWidth = rightX - leftX;
+      const isPartialSingleDayDrag = s === end && draggedWidth >= 8;
+      const rawHours = isPartialSingleDayDrag ? (draggedWidth / DAY_WIDTH) * cap : cap;
+      const estimatedHours = Math.max(0.25, Math.min(24, Math.round(rawHours * 4) / 4));
+      const startTime = "09:00";
+      const endTime = addHoursToTime(startTime, estimatedHours);
+
       setCreating({
         personId: drag.personId,
         startDate: toISODate(days[s]),
         endDate: toISODate(days[end]),
+        startTime,
+        endTime,
+        hoursPerDay: estimatedHours,
         x: e.clientX,
         y: e.clientY,
       });
@@ -172,14 +252,10 @@ export function Scheduler({
     }
     window.addEventListener("mouseup", onMouseUp);
     return () => window.removeEventListener("mouseup", onMouseUp);
-  }, [drag, days]);
+  }, [drag, days, dayOffsets, dayWidths, store.people, DAY_WIDTH]);
 
-  function handleCellMouseDown(personId: string, dayIdx: number) {
-    setDrag({ personId, startIdx: dayIdx, endIdx: dayIdx });
-  }
-
-  function handleCellMouseEnter(personId: string, dayIdx: number) {
-    setDrag((d) => d && d.personId === personId ? { ...d, endIdx: dayIdx } : d);
+  function handleCellMouseDown(personId: string, rowLeft: number, x: number) {
+    setDrag({ personId, rowLeft, downX: x, endX: x });
   }
 
   function goToday() {
@@ -208,9 +284,9 @@ export function Scheduler({
     setEditing(null);
   }
 
-  const timelineWidth = days.length * DAY_WIDTH;
+  const timelineWidth = dayWidths.reduce((sum, w) => sum + w, 0);
   const monthLabels = useMemo(() => {
-    const out: { label: string; span: number; offset: number }[] = [];
+    const out: { label: string; offset: number; width: number }[] = [];
     let curMonth = -1;
     let curYear = -1;
     let start = 0;
@@ -219,8 +295,8 @@ export function Scheduler({
         if (curMonth >= 0) {
           out.push({
             label: days[start].toLocaleDateString("en-US", { month: "short", year: "numeric" }),
-            span: i - start,
-            offset: start * DAY_WIDTH,
+            offset: dayOffsets[start],
+            width: dayOffsets[i] - dayOffsets[start],
           });
         }
         curMonth = d.getMonth();
@@ -231,12 +307,12 @@ export function Scheduler({
     if (curMonth >= 0) {
       out.push({
         label: days[start].toLocaleDateString("en-US", { month: "short", year: "numeric" }),
-        span: days.length - start,
-        offset: start * DAY_WIDTH,
+        offset: dayOffsets[start],
+        width: timelineWidth - dayOffsets[start],
       });
     }
     return out;
-  }, [days]);
+  }, [days, dayOffsets, timelineWidth]);
 
   const todayISO = toISODate(new Date());
   const todayOffset = days.findIndex((d) => toISODate(d) === todayISO);
@@ -379,7 +455,7 @@ export function Scheduler({
                   <div
                     key={i}
                     className="absolute top-0 flex h-full items-center border-r border-border px-2 text-[11px] font-semibold uppercase tracking-wider text-faint"
-                    style={{ left: m.offset, width: m.span * DAY_WIDTH }}
+                    style={{ left: m.offset, width: m.width }}
                   >
                     {m.label}
                   </div>
@@ -395,7 +471,7 @@ export function Scheduler({
                       className={`flex shrink-0 flex-col items-center justify-center border-r border-border/50 text-[10px] ${
                         weekend ? "bg-forge-bg/40 text-faint" : "text-muted"
                       } ${isToday ? "bg-blue-500/10" : ""}`}
-                      style={{ width: DAY_WIDTH }}
+                      style={{ width: dayWidths[i] }}
                     >
                       <span className={isToday ? "font-bold text-blue-400" : "font-semibold"}>
                         {d.getDate()}
@@ -413,7 +489,7 @@ export function Scheduler({
             {todayOffset >= 0 && (
               <div
                 className="pointer-events-none absolute top-[58px] bottom-0 z-[5] w-px bg-blue-500/60"
-                style={{ left: todayOffset * DAY_WIDTH + DAY_WIDTH / 2 }}
+                style={{ left: dayOffsets[todayOffset] + dayWidths[todayOffset] / 2 }}
               />
             )}
 
@@ -430,11 +506,12 @@ export function Scheduler({
                     key={p.id}
                     personId={p.id}
                     days={days}
+                    dayWidths={dayWidths}
+                    dayOffsets={dayOffsets}
                     rangeStart={rangeStart}
                     rangeEnd={rangeEnd}
                     drag={drag}
                     onCellMouseDown={handleCellMouseDown}
-                    onCellMouseEnter={handleCellMouseEnter}
                     onAllocationClick={openEdit}
                   />
                 ))}
@@ -457,9 +534,9 @@ export function Scheduler({
               phaseId: null,
               startDate: creating!.startDate,
               endDate: creating!.endDate,
-              hoursPerDay: 8,
-              startTime: "09:00",
-              endTime: "17:00",
+              hoursPerDay: creating!.hoursPerDay,
+              startTime: creating!.startTime,
+              endTime: creating!.endTime,
               notes: "",
               status: "confirmed" as AllocationStatus,
             }
@@ -481,22 +558,25 @@ export function Scheduler({
   function PersonRow({
     personId,
     days,
+    dayWidths,
+    dayOffsets,
     rangeStart,
     rangeEnd,
     drag,
     onCellMouseDown,
-    onCellMouseEnter,
     onAllocationClick,
   }: {
     personId: string;
     days: Date[];
+    dayWidths: number[];
+    dayOffsets: number[];
     rangeStart: string;
     rangeEnd: string;
-    drag: { personId: string; startIdx: number; endIdx: number } | null;
-    onCellMouseDown: (personId: string, dayIdx: number) => void;
-    onCellMouseEnter: (personId: string, dayIdx: number) => void;
+    drag: { personId: string; rowLeft: number; downX: number; endX: number } | null;
+    onCellMouseDown: (personId: string, rowLeft: number, x: number) => void;
     onAllocationClick: (a: Allocation) => void;
   }) {
+    const rowRef = useRef<HTMLDivElement>(null);
     const person = store.people.find((p) => p.id === personId)!;
     const cap = personDailyCapacity(person);
 
@@ -524,8 +604,6 @@ export function Scheduler({
     );
 
     const isDraggingRow = drag?.personId === personId;
-    const dragS = isDraggingRow ? Math.min(drag!.startIdx, drag!.endIdx) : -1;
-    const dragE = isDraggingRow ? Math.max(drag!.startIdx, drag!.endIdx) : -1;
 
     // Compute cumulative hour offsets so overlapping allocations sit side-by-side horizontally
     const sortedAllocs = [...personAllocs].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
@@ -541,7 +619,7 @@ export function Scheduler({
     }
 
     return (
-      <div className="relative flex border-b border-border" style={{ height: ROW_HEIGHT }} onMouseLeave={() => {}}>
+      <div ref={rowRef} className="relative flex border-b border-border" style={{ height: ROW_HEIGHT }} onMouseLeave={() => {}}>
         {/* Grid cells */}
         {days.map((d, i) => {
           const iso = toISODate(d);
@@ -552,36 +630,37 @@ export function Scheduler({
           return (
             <div
               key={i}
-              onMouseDown={() => !weekend && !onLeave && onCellMouseDown(personId, i)}
-              onMouseEnter={() => !weekend && onCellMouseEnter(personId, i)}
-              className={`shrink-0 select-none border-r border-border/40 ${
-                weekend ? "bg-forge-bg/40 cursor-default" : "cursor-crosshair hover:bg-blue-500/5"
+              onMouseDown={(e) => {
+                if (onLeave || !rowRef.current) return;
+                const rect = rowRef.current.getBoundingClientRect();
+                onCellMouseDown(personId, rect.left, e.clientX - rect.left);
+              }}
+              className={`shrink-0 select-none border-r border-border/40 cursor-default hover:bg-blue-500/5 ${
+                weekend ? "bg-forge-bg/40" : ""
               } ${onLeave ? "cursor-not-allowed" : ""}`}
-              style={{ width: DAY_WIDTH, height: ROW_HEIGHT }}
+              style={{ width: dayWidths[i], height: ROW_HEIGHT }}
               title={
-                weekend
-                  ? "Weekend"
-                  : onLeave
-                    ? `On leave (${onLeave.type})`
-                    : `${scheduled}h scheduled · ${cap}h capacity`
+                onLeave
+                  ? `On leave (${onLeave.type})`
+                  : `${scheduled}h scheduled · ${cap}h capacity${weekend ? " · Weekend" : ""}`
               }
             >
-              {over && !weekend && !onLeave && (
+              {over && !onLeave && (
                 <div className="pointer-events-none absolute inset-0 bg-red-500/10" />
               )}
             </div>
           );
         })}
 
-        {/* Drag ghost bar */}
-        {isDraggingRow && dragS >= 0 && (
+        {/* Drag ghost bar — follows the mouse continuously, grows smoothly as you drag */}
+        {isDraggingRow && (
           <div
-            className="pointer-events-none absolute z-20 rounded-md bg-blue-500/30 border-2 border-blue-500/60 border-dashed"
+            className="pointer-events-none absolute z-20 rounded-md border border-blue-600 bg-blue-500/80 shadow-sm"
             style={{
               top: 6,
               height: ROW_HEIGHT - 12,
-              left: dragS * DAY_WIDTH + 2,
-              width: (dragE - dragS + 1) * DAY_WIDTH - 4,
+              left: Math.min(drag!.downX, drag!.endX),
+              width: Math.max(2, Math.abs(drag!.endX - drag!.downX)),
             }}
           />
         )}
@@ -598,8 +677,8 @@ export function Scheduler({
               key={t.id}
               className="pointer-events-none absolute top-1 bottom-1 rounded-md border"
               style={{
-                left: offset * DAY_WIDTH + 2,
-                width: (endIdx - offset + 1) * DAY_WIDTH - 4,
+                left: dayOffsets[offset] + 2,
+                width: dayOffsets[endIdx] + dayWidths[endIdx] - dayOffsets[offset] - 4,
                 backgroundColor: TIME_OFF_COLORS[t.type] + "22",
                 borderColor: TIME_OFF_COLORS[t.type] + "66",
                 backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 6px, ${TIME_OFF_COLORS[t.type]}33 6px, ${TIME_OFF_COLORS[t.type]}33 12px)`,
@@ -642,16 +721,16 @@ export function Scheduler({
               style={{
                 top: barTop,
                 height: barH,
-                left: offset * DAY_WIDTH + 2 + hourShift,
+                left: dayOffsets[offset] + 2 + hourShift,
                 width: barWidth,
                 backgroundColor: tentative ? "transparent" : color,
                 border: tentative ? `2px dashed ${color}` : `1px solid ${color}`,
                 color: tentative ? color : "#fff",
               }}
-              title={`${proj?.name || "?"}${phase ? " · " + phase.name : ""}\n${a.hoursPerDay}h · ${fmtDateShort(a.startDate)} – ${fmtDateShort(a.endDate)}`}
+              title={`${proj?.name || a.title || "?"}${phase ? " · " + phase.name : ""}\n${a.hoursPerDay}h · ${fmtDateShort(a.startDate)} – ${fmtDateShort(a.endDate)}`}
             >
               <div className="flex w-full flex-col overflow-hidden">
-                <span className="truncate leading-tight">{proj?.name || "Project"}</span>
+                <span className="truncate leading-tight">{proj?.name || a.title || "Task"}</span>
                 {phase && <span className="truncate text-[9px] opacity-80">{phase.name}</span>}
                 <span className="truncate text-[9px] opacity-80">{a.hoursPerDay}h</span>
               </div>
@@ -667,7 +746,7 @@ export function Scheduler({
             <div
               key={m.id}
               className="pointer-events-none absolute z-[4] flex flex-col items-center"
-              style={{ left: offset * DAY_WIDTH + DAY_WIDTH / 2 - 6, top: 0 }}
+              style={{ left: dayOffsets[offset] + dayWidths[offset] / 2 - 6, top: 0 }}
               title={`${m.name} — ${fmtDateShort(m.date)}`}
             >
               <svg width="12" height="16" viewBox="0 0 16 20">
@@ -778,7 +857,7 @@ function AllocationModal({
             const hours = (eh * 60 + em - (sh * 60 + sm)) / 60;
             onSave(hours > 0 ? { ...form, hoursPerDay: Math.round(hours * 10) / 10 } : form);
           }}
-          disabled={!form.personId || !form.projectId || !form.startDate || !form.endDate}
+          disabled={!form.personId || !form.startDate || !form.endDate || (!form.projectId && !form.title?.trim())}
           className="flex h-7 items-center gap-1.5 rounded-md bg-emerald-500 px-3 text-[12px] font-bold text-white transition-colors hover:bg-emerald-400 disabled:opacity-40"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -795,7 +874,7 @@ function AllocationModal({
         {/* Row 1: Project + color + Task */}
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">Project</label>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">Project <span className="normal-case text-faint/70">(optional)</span></label>
             <select
               value={form.projectId}
               onChange={(e) => { patch("projectId", e.target.value); patch("phaseId", null); }}

@@ -17,6 +17,23 @@ const SIGNAL_TYPES = [
   {id:"sdi",name:"SDI",color:"#ec4899"},
 ];
 
+const UNKNOWN_SIGNAL = {id:null as any, name:"–", color:"rgb(var(--text-subtle))"};
+
+// Only trust a cable type if it's explicitly overridden by the user, or both
+// ends of the connection agree on the same signal type. A mismatched or
+// unrecognized pairing renders as "–" instead of guessing.
+const resolveConnSignal = (conn: any, fromPort: any, toPort: any) => {
+  if (conn?.signalOverride) {
+    const s = SIGNAL_TYPES.find(t=>t.id===conn.signalOverride);
+    if (s) return s;
+  }
+  if (fromPort && toPort && fromPort.signal === toPort.signal) {
+    const s = SIGNAL_TYPES.find(t=>t.id===fromPort.signal);
+    if (s) return s;
+  }
+  return UNKNOWN_SIGNAL;
+};
+
 const DEVICE_LIBRARY = [
   {cat:"Sources",items:[
     {type:"Laptop",mfr:"Generic",model:"—",price:0,w:120,h:56,color:"#8b5cf6",ports:[{side:"right",signal:"hdmi",dir:"out",label:"HDMI"},{side:"right",signal:"usb",dir:"out",label:"USB"}]},
@@ -127,6 +144,7 @@ export default function SignalFlowPage() {
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const [contextMenu, setContextMenu] = useState<{x:number,y:number,roomId:string,showColors?:boolean}|null>(null);
   const [deviceContextMenu, setDeviceContextMenu] = useState<{x:number,y:number,deviceId:any}|null>(null);
+  const [connContextMenu, setConnContextMenu] = useState<{x:number,y:number,connId:any}|null>(null);
   const [refreshingDeviceId, setRefreshingDeviceId] = useState<any>(null);
   const [refreshNotice, setRefreshNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
   const [editingDevice, setEditingDevice] = useState<any>(null);
@@ -357,7 +375,7 @@ export default function SignalFlowPage() {
       if(!fromDev||!toDev) return null;
       const fromPort = fromDev.ports.find((p:any)=>p.id===conn.from.portId);
       const toPort = toDev.ports.find((p:any)=>p.id===conn.to.portId);
-      const sig = SIGNAL_TYPES.find(s=>s.id===conn.signal)||SIGNAL_TYPES[0];
+      const sig = resolveConnSignal(conn, fromPort, toPort);
       return {id:i+1, from:fromDev.type, fromPort:fromPort?.label||"", to:toDev.type, toPort:toPort?.label||"", signal:sig.name, color:sig.color};
     }).filter(Boolean);
   };
@@ -366,7 +384,9 @@ export default function SignalFlowPage() {
 
   // Size a device box so all port rows fit, left/right labels can't collide,
   // and the rack-mounted control has a dedicated footer.
-  // Port labels are 8px monospace (~4.9px/char); each port row needs ~13px.
+  // Port labels are 8px monospace (~4.9px/char); each port row needs ~17px
+  // (a bit more than the label's own height so cable-type tags on close
+  // ports don't overlap each other).
   const sizeDevice = (d: any) => {
     const left = (d.ports||[]).filter((p:any)=>p.side==="left");
     const right = (d.ports||[]).filter((p:any)=>p.side==="right");
@@ -375,7 +395,7 @@ export default function SignalFlowPage() {
     const maxR = right.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
     const title = [d.mfr&&d.mfr!=="Generic"?d.mfr:null, d.model&&d.model!=="—"?d.model:null].filter(Boolean).join(" · ");
     const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, title.length*7 + 24, (d.type||"").length*4.5 + 20);
-    const h = Math.max(78, d.h||0, 26 + 13*(rows+1) + DEVICE_FOOTER_H);
+    const h = Math.max(78, d.h||0, 26 + 17*(rows+1) + DEVICE_FOOTER_H);
     return {...d, w, h};
   };
 
@@ -829,12 +849,19 @@ export default function SignalFlowPage() {
     } else {
       if(connecting.deviceId!==device.id){
         pushUndo();
-        const sig = SIGNAL_TYPES.find(s=>s.id===connecting.signal) || SIGNAL_TYPES.find(s=>s.id===port.signal) || SIGNAL_TYPES[0];
-        setConnections(prev=>[...prev,{id:Date.now(),from:{deviceId:connecting.deviceId,portId:connecting.portId},to:{deviceId:device.id,portId:port.id},signal:sig.id,waypoints:connecting.waypoints?.length?connecting.waypoints:undefined}]);
+        setConnections(prev=>[...prev,{id:Date.now(),from:{deviceId:connecting.deviceId,portId:connecting.portId},to:{deviceId:device.id,portId:port.id},signal:connecting.signal,waypoints:connecting.waypoints?.length?connecting.waypoints:undefined}]);
       }
       setConnecting(null);
       setConnectCursor(null);
     }
+  };
+
+  // Manually pin a connection's cable type (used when the two ports disagree,
+  // or to correct an auto-detected one). Pass null to go back to auto-detect.
+  const setConnSignalOverride = (connId: any, signalId: string | null) => {
+    pushUndo();
+    setConnections(prev=>prev.map((c:any)=>c.id===connId?{...c, signalOverride: signalId||undefined}:c));
+    setConnContextMenu(null);
   };
 
   // Snap a point so the segment from prev is horizontal or vertical
@@ -1361,7 +1388,7 @@ export default function SignalFlowPage() {
     if(!fromPort||!toPort) return null;
     const p1 = getPortPos(fromDev,fromPort);
     const p2 = getPortPos(toDev,toPort);
-    const sig = SIGNAL_TYPES.find(s=>s.id===conn.signal)||SIGNAL_TYPES[0];
+    const sig = resolveConnSignal(conn, fromPort, toPort);
     const isSelected = selectedConn===conn.id || selectedConnIds.has(conn.id);
     let path: string, mx: number, my: number;
     if (conn.waypoints?.length) {
@@ -1383,14 +1410,19 @@ export default function SignalFlowPage() {
       path = `M${p1.x},${p1.y} C${p1.x+dx},${p1.y} ${p2.x-dx},${p2.y} ${p2.x},${p2.y}`;
       mx = (p1.x+p2.x)/2; my = (p1.y+p2.y)/2;
     }
+    const labelW = Math.max(22, sig.name.length*4.9 + 12);
+    const labelH = 14;
     return (
-      <g key={conn.id} onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);clearMarqueeSel();}} style={{cursor:"pointer"}}>
+      <g key={conn.id}
+        onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);clearMarqueeSel();}}
+        onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();setSelectedConn(conn.id);setConnContextMenu({x:e.clientX,y:e.clientY,connId:conn.id});}}
+        style={{cursor:"pointer"}}>
         {/* Keep the visible cable thin while giving it a forgiving click target. */}
         <path d={path} fill="none" stroke="transparent" strokeWidth={12/view.zoom} pointerEvents="stroke" />
         {isSelected && <path d={path} fill="none" stroke="#fff" strokeWidth={5} strokeOpacity={0.3} />}
         <path d={path} fill="none" stroke={sig.color} strokeWidth={isSelected?3:2} strokeOpacity={0.8} />
-        <rect x={mx-24} y={my-9} width={48} height={18} rx={4} fill="rgb(var(--forge-surface))" stroke={sig.color} strokeWidth={1} opacity={0.95}/>
-        <text x={mx} y={my+4} textAnchor="middle" fontSize={8} fill={sig.color} fontFamily="'JetBrains Mono', monospace" fontWeight={600}>{sig.name}</text>
+        <rect x={mx-labelW/2} y={my-labelH/2} width={labelW} height={labelH} rx={3} fill="rgb(var(--forge-surface))" stroke={sig.color} strokeWidth={1} opacity={0.95}/>
+        <text x={mx} y={my+3} textAnchor="middle" fontSize={8} fill={sig.color} fontFamily="'JetBrains Mono', monospace" fontWeight={600}>{sig.name}</text>
         <circle cx={p1.x} cy={p1.y} r={3} fill={sig.color} />
         <circle cx={p2.x} cy={p2.y} r={3} fill={sig.color} />
       </g>
@@ -2029,6 +2061,40 @@ export default function SignalFlowPage() {
         </div>
       </>
     )}
+
+    {/* Connection Context Menu — pick/override the cable type */}
+    {connContextMenu && (() => {
+      const conn = connections.find((c:any)=>c.id===connContextMenu.connId);
+      if (!conn) return null;
+      const fromDev = devices.find((d:any)=>d.id===conn.from.deviceId);
+      const toDev = devices.find((d:any)=>d.id===conn.to.deviceId);
+      const fromPort = fromDev?.ports.find((p:any)=>p.id===conn.from.portId);
+      const toPort = toDev?.ports.find((p:any)=>p.id===conn.to.portId);
+      const current = resolveConnSignal(conn, fromPort, toPort);
+      return (
+        <>
+          <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setConnContextMenu(null)} onContextMenu={e=>{e.preventDefault();setConnContextMenu(null);}} />
+          <div style={{position:"fixed",left:connContextMenu.x,top:connContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:200,overflow:"hidden",padding:"4px 0"}}>
+            <div style={{padding:"6px 14px 4px",fontSize:10,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",color:"rgb(var(--text-faint))"}}>Cable Type</div>
+            {SIGNAL_TYPES.map(s=>(
+              <button key={s.id} onClick={()=>setConnSignalOverride(connContextMenu.connId, s.id)}
+                style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"6px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:s.color,flexShrink:0}} />
+                {s.name}
+                {current.id===s.id && <span style={{marginLeft:"auto",color:"rgb(var(--text-faint))"}}>✓</span>}
+              </button>
+            ))}
+            <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
+            <button onClick={()=>setConnSignalOverride(connContextMenu.connId, null)}
+              style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-subtle))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+              Auto-detect (from ports)
+            </button>
+          </div>
+        </>
+      );
+    })()}
 
     {/* Edit Equipment Modal */}
     {editingDevice && (

@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getFilterOptions, getProductCount, listProducts, type AVProduct } from "@/lib/av-products";
+import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/components/OrgProvider";
 
 type Section = "org" | "avforge" | "inventory";
 
@@ -144,6 +147,29 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
 ];
 
 function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
+  const { activeOrg } = useOrg();
+  const [avForgeCount, setAvForgeCount] = useState<number | null>(null);
+  const [orgCount, setOrgCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    getProductCount().then(setAvForgeCount).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!activeOrg) { setOrgCount(null); return; }
+    supabase
+      .from("equipment_library")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", activeOrg.id)
+      .then(({ count }) => setOrgCount(count ?? 0));
+  }, [activeOrg?.id]);
+
+  const cards = CARDS.map((c) => {
+    if (c.key === "avforge" && avForgeCount !== null) return { ...c, stat: `${avForgeCount} products` };
+    if (c.key === "org" && orgCount !== null) return { ...c, stat: `${orgCount} items` };
+    return c;
+  });
+
   return (
     <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-8">
@@ -152,7 +178,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
       </div>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {CARDS.map(({ key, label, description, icon, stat }) => (
+        {cards.map(({ key, label, description, icon, stat }) => (
           <button
             key={key}
             onClick={() => onSelect(key)}
@@ -550,6 +576,997 @@ function InventoryView({ onBack }: { onBack: () => void }) {
   );
 }
 
+// ── AV Forge Library section ─────────────────────────────────────────────────
+
+const LIBRARY_PAGE_SIZE = 40;
+
+function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
+  const { activeOrg } = useOrg();
+  const [products, setProducts] = useState<AVProduct[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterManufacturer, setFilterManufacturer] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [manufacturers, setManufacturers] = useState<string[]>([]);
+  const [selected, setSelected] = useState<AVProduct | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+  const [addingToOrg, setAddingToOrg] = useState(false);
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [bulkAdding, setBulkAdding] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ added: number; skipped: number } | null>(null);
+
+  async function addSelectedToOrgLibrary() {
+    if (!activeOrg || selectedIds.size === 0) return;
+    setBulkAdding(true);
+    setBulkResult(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const toAdd = products.filter((p) => selectedIds.has(p.id));
+      let added = 0;
+      let skipped = 0;
+      for (const product of toAdd) {
+        const { data: existing } = await supabase
+          .from("equipment_library")
+          .select("id")
+          .eq("org_id", activeOrg.id)
+          .eq("manufacturer", product.manufacturer)
+          .eq("model", product.model_name)
+          .maybeSingle();
+        if (existing) {
+          skipped++;
+        } else {
+          const { error } = await supabase.from("equipment_library").insert({
+            user_id: user.id,
+            org_id: activeOrg.id,
+            category: product.category,
+            manufacturer: product.manufacturer,
+            model: product.model_name,
+            description: product.type || "",
+            unit_cost: product.price ?? 0,
+          });
+          if (!error) added++;
+          else skipped++;
+        }
+        setAddedIds((prev) => new Set(prev).add(product.id));
+      }
+      setBulkResult({ added, skipped });
+      setTimeout(() => setBulkResult(null), 4000);
+      setSelectedIds(new Set());
+      setAnchorIndex(null);
+    }
+    setBulkAdding(false);
+  }
+
+  function handleRowClick(e: React.MouseEvent, index: number) {
+    const product = products[index];
+    if (e.shiftKey && anchorIndex !== null) {
+      const [start, end] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)];
+      setSelectedIds(new Set(products.slice(start, end + 1).map((p) => p.id)));
+    } else if (e.ctrlKey || e.metaKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(product.id)) next.delete(product.id);
+        else next.add(product.id);
+        return next;
+      });
+      setAnchorIndex(index);
+    } else {
+      setSelectedIds(new Set([product.id]));
+      setAnchorIndex(index);
+    }
+  }
+
+  function handleRowContextMenu(e: React.MouseEvent, index: number) {
+    e.preventDefault();
+    const product = products[index];
+    if (!selectedIds.has(product.id)) {
+      setSelectedIds(new Set([product.id]));
+      setAnchorIndex(index);
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  const [overrideConfirm, setOverrideConfirm] = useState<{ product: AVProduct; existingId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  async function addToOrgLibrary(product: AVProduct) {
+    if (!activeOrg) return;
+    setAddingToOrg(true);
+    const { data: existing } = await supabase
+      .from("equipment_library")
+      .select("id")
+      .eq("org_id", activeOrg.id)
+      .eq("manufacturer", product.manufacturer)
+      .eq("model", product.model_name)
+      .maybeSingle();
+    if (existing) {
+      setAddingToOrg(false);
+      setOverrideConfirm({ product, existingId: existing.id });
+      return;
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { error } = await supabase.from("equipment_library").insert({
+        user_id: user.id,
+        org_id: activeOrg.id,
+        category: product.category,
+        manufacturer: product.manufacturer,
+        model: product.model_name,
+        description: product.type || "",
+        unit_cost: product.price ?? 0,
+      });
+      if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
+    }
+    setAddingToOrg(false);
+  }
+
+  async function confirmOverride() {
+    if (!overrideConfirm) return;
+    const { product, existingId } = overrideConfirm;
+    setAddingToOrg(true);
+    const { error } = await supabase
+      .from("equipment_library")
+      .update({
+        category: product.category,
+        manufacturer: product.manufacturer,
+        model: product.model_name,
+        description: product.type || "",
+        unit_cost: product.price ?? 0,
+      })
+      .eq("id", existingId);
+    if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
+    setAddingToOrg(false);
+    setOverrideConfirm(null);
+  }
+
+  useEffect(() => {
+    getFilterOptions()
+      .then(({ categories, manufacturers }) => {
+        setCategories(categories);
+        setManufacturers(manufacturers);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setLoading(true);
+    listProducts({ search: debouncedSearch, category: filterCategory, manufacturer: filterManufacturer, offset: 0, limit: LIBRARY_PAGE_SIZE })
+      .then(({ data, count }) => {
+        setProducts(data);
+        setTotal(count);
+      })
+      .finally(() => setLoading(false));
+  }, [debouncedSearch, filterCategory, filterManufacturer]);
+
+  function loadMore() {
+    setLoadingMore(true);
+    listProducts({
+      search: debouncedSearch,
+      category: filterCategory,
+      manufacturer: filterManufacturer,
+      offset: products.length,
+      limit: LIBRARY_PAGE_SIZE,
+    })
+      .then(({ data }) => setProducts((prev) => [...prev, ...data]))
+      .finally(() => setLoadingMore(false));
+  }
+
+  return (
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors">
+            <ArrowLeftIcon />
+            Library
+          </button>
+          <span className="text-border">/</span>
+          <h2 className="text-xl font-bold text-heading">AV Forge Library</h2>
+        </div>
+        <span className="text-[12px] text-subtle">{total} products</span>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search by manufacturer, model, type…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="forge-input w-full pl-8 text-[13px]"
+          />
+        </div>
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="forge-input w-auto min-w-[140px] text-[13px]">
+          <option value="">All categories</option>
+          {categories.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <select value={filterManufacturer} onChange={(e) => setFilterManufacturer(e.target.value)} className="forge-input w-auto min-w-[160px] text-[13px]">
+          <option value="">All manufacturers</option>
+          {manufacturers.map((m) => <option key={m}>{m}</option>)}
+        </select>
+        {(search || filterCategory || filterManufacturer) && (
+          <button
+            onClick={() => { setSearch(""); setFilterCategory(""); setFilterManufacturer(""); }}
+            className="text-[12px] font-medium text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+        {selectedIds.size > 0 && (
+          <span className="text-[12px] font-medium text-blue-400">
+            {selectedIds.size} selected ·{" "}
+            <button onClick={() => { setSelectedIds(new Set()); setAnchorIndex(null); }} className="font-medium text-blue-400 underline hover:text-blue-300">
+              Clear
+            </button>
+          </span>
+        )}
+        <span className="ml-auto text-[12px] text-subtle">{products.length} of {total} loaded</span>
+      </div>
+
+      {bulkResult && (
+        <div className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-2 text-[12px] text-emerald-400">
+          Added {bulkResult.added} item{bulkResult.added === 1 ? "" : "s"} to your organization&apos;s library.
+          {bulkResult.skipped > 0 && ` ${bulkResult.skipped} already existed and ${bulkResult.skipped === 1 ? "was" : "were"} skipped.`}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="rounded-xl border border-border bg-forge-surface/20 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px]">
+            <thead>
+              <tr className="border-b border-border bg-forge-surface/60">
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Manufacturer / Model</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Category</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Type</th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold text-muted">Price</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold text-muted">Rack</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Part #</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
+                </tr>
+              ) : products.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-16 text-center text-[13px] text-subtle">No products found.</td>
+                </tr>
+              ) : (
+                products.map((p, index) => (
+                  <tr
+                    key={p.id}
+                    onClick={(e) => handleRowClick(e, index)}
+                    onDoubleClick={() => setSelected(p)}
+                    onContextMenu={(e) => handleRowContextMenu(e, index)}
+                    className={`cursor-pointer select-none border-b border-border/50 transition-colors ${
+                      selectedIds.has(p.id) ? "bg-blue-500/10 hover:bg-blue-500/15" : "hover:bg-forge-surface/40"
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p.color || "#64748b" }} />
+                        <div>
+                          <div className="text-[13px] font-semibold text-heading">{p.manufacturer}</div>
+                          <div className="text-[11px] text-subtle">{p.model_name}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-[12px] text-body">{p.category}</td>
+                    <td className="px-4 py-3 text-[12px] text-subtle">{p.type}</td>
+                    <td className="px-4 py-3 text-right font-mono text-[12px] text-body">
+                      {p.price ? `$${p.price.toLocaleString()}` : <span className="text-faint">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center text-[12px] text-subtle">
+                      {p.rack_mounted ? `${p.rack_units ?? "—"}U` : <span className="text-faint">—</span>}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-subtle">{p.part_number || <span className="text-faint">—</span>}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {!loading && products.length < total && (
+        <div className="mt-4 flex justify-center">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-lg border border-border bg-forge-surface/40 px-4 py-2 text-[12px] font-semibold text-muted transition-colors hover:text-body disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : `Load ${Math.min(LIBRARY_PAGE_SIZE, total - products.length)} more`}
+          </button>
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-border bg-forge-bg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div>
+                <h3 className="text-[15px] font-bold text-heading">{selected.manufacturer} {selected.model_name}</h3>
+                <p className="text-[12px] text-subtle">{selected.category} · {selected.type}</p>
+              </div>
+              <button onClick={() => setSelected(null)} className="text-muted hover:text-heading transition-colors">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-4 p-6 text-[13px]">
+              <div className="grid grid-cols-2 gap-3">
+                <DetailField label="Part Number" value={selected.part_number} />
+                <DetailField label="Price" value={selected.price ? `$${selected.price.toLocaleString()}` : null} />
+                <DetailField label="MSRP" value={selected.msrp ? `$${selected.msrp.toLocaleString()}` : null} />
+                <DetailField label="Cost" value={selected.cost ? `$${selected.cost.toLocaleString()}` : null} />
+              </div>
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Power &amp; Electrical</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <DetailField label="Voltage" value={selected.voltage ? `${selected.voltage}V` : null} />
+                  <DetailField label="Amp Draw" value={selected.amp_draw ? `${selected.amp_draw}A` : null} />
+                  <DetailField label="Power" value={selected.power_watts ? `${selected.power_watts}W` : null} />
+                  <DetailField label="BTU/hr" value={selected.btu_hr ? `${selected.btu_hr}` : null} />
+                </div>
+              </div>
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <DetailField label="Rack Mounted" value={selected.rack_mounted ? `Yes (${selected.rack_units ?? "?"}U)` : "No"} />
+                  <DetailField label="Weight" value={selected.weight_lb ? `${selected.weight_lb} lb` : null} />
+                  <DetailField
+                    label="Dimensions (W×H×D)"
+                    value={
+                      selected.width_in || selected.height_in || selected.depth_in
+                        ? `${selected.width_in ?? "?"} × ${selected.height_in ?? "?"} × ${selected.depth_in ?? "?"} in`
+                        : null
+                    }
+                  />
+                </div>
+              </div>
+              {selected.notes && (
+                <div className="border-t border-border pt-4">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">Notes</div>
+                  <p className="text-[12px] text-body">{selected.notes}</p>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-border px-6 py-4">
+              <button
+                onClick={() => addToOrgLibrary(selected)}
+                disabled={!activeOrg || addingToOrg}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {addedIds.has(selected.id) ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    Added to My Organization&apos;s Equipment Library
+                  </>
+                ) : addingToOrg ? (
+                  "Adding…"
+                ) : (
+                  "+ Add to My Organization's Equipment Library"
+                )}
+              </button>
+              {!activeOrg && (
+                <p className="mt-2 text-center text-[11px] text-faint">Select an organization first to add products to its library.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Override confirmation */}
+      {overrideConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
+            <h3 className="text-[15px] font-bold text-heading">Already in your library</h3>
+            <p className="mt-2 text-[13px] text-muted">
+              {overrideConfirm.product.manufacturer} {overrideConfirm.product.model_name} is already in your Organization&apos;s Equipment Library. Do you want to override it with the current AV Forge Library details?
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setOverrideConfirm(null)}
+                className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmOverride}
+                disabled={addingToOrg}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+              >
+                {addingToOrg ? "Updating…" : "Yes, Override"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            className="fixed z-50 w-64 overflow-hidden rounded-lg border border-border bg-forge-panel py-1 shadow-xl"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              onClick={() => { setContextMenu(null); addSelectedToOrgLibrary(); }}
+              disabled={!activeOrg || bulkAdding}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-body transition-colors hover:bg-forge-surface/60 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </span>
+              Add to My Organization&apos;s Equipment Library{selectedIds.size > 1 ? ` (${selectedIds.size})` : ""}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string | number | null | undefined }) {
+  return (
+    <div>
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className="text-[13px] text-body">{value ?? <span className="text-faint">—</span>}</div>
+    </div>
+  );
+}
+
+// ── My Organization's Equipment Library ──────────────────────────────────────
+
+type OrgEquipmentItem = {
+  id: string;
+  org_id: string;
+  user_id: string;
+  category: string;
+  manufacturer: string;
+  model: string;
+  description: string;
+  unit_cost: number;
+};
+
+const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> => ({
+  org_id: orgId,
+  category: "",
+  manufacturer: "",
+  model: "",
+  description: "",
+  unit_cost: 0,
+});
+
+function OrgLibraryView({ onBack }: { onBack: () => void }) {
+  const { activeOrg } = useOrg();
+  const [items, setItems] = useState<OrgEquipmentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<OrgEquipmentItem | Omit<OrgEquipmentItem, "id" | "user_id"> | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<OrgEquipmentItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  useEffect(() => {
+    if (!activeOrg) { setLoading(false); return; }
+    setLoading(true);
+    supabase
+      .from("equipment_library")
+      .select("*")
+      .eq("org_id", activeOrg.id)
+      .order("manufacturer")
+      .order("model")
+      .then(({ data }) => {
+        setItems((data as OrgEquipmentItem[]) ?? []);
+        setLoading(false);
+      });
+  }, [activeOrg?.id]);
+
+  const categories = Array.from(new Set(items.map((i) => i.category).filter(Boolean))).sort();
+
+  const filtered = items.filter((item) => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || item.manufacturer.toLowerCase().includes(q) || item.model.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
+    const matchCat = !filterCategory || item.category === filterCategory;
+    return matchSearch && matchCat;
+  });
+
+  function handleRowClick(e: React.MouseEvent, index: number) {
+    const item = filtered[index];
+    if (e.shiftKey && anchorIndex !== null) {
+      const [start, end] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)];
+      setSelectedIds(new Set(filtered.slice(start, end + 1).map((i) => i.id)));
+    } else if (e.ctrlKey || e.metaKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(item.id)) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      });
+      setAnchorIndex(index);
+    } else {
+      setSelectedIds(new Set([item.id]));
+      setAnchorIndex(index);
+    }
+  }
+
+  function handleRowContextMenu(e: React.MouseEvent, index: number) {
+    e.preventDefault();
+    const item = filtered[index];
+    if (!selectedIds.has(item.id)) {
+      setSelectedIds(new Set([item.id]));
+      setAnchorIndex(index);
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  async function confirmBulkDelete() {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    const ids = [...selectedIds];
+    await supabase.from("equipment_library").delete().in("id", ids);
+    setItems((prev) => prev.filter((i) => !selectedIds.has(i.id)));
+    setSelectedIds(new Set());
+    setAnchorIndex(null);
+    setDeleting(false);
+    setBulkDeleteConfirm(false);
+  }
+
+  async function confirmBulkEdit() {
+    if (selectedIds.size === 0 || !bulkCategory.trim()) return;
+    setBulkSaving(true);
+    const ids = [...selectedIds];
+    const category = bulkCategory.trim();
+    const { error } = await supabase.from("equipment_library").update({ category }).in("id", ids);
+    if (!error) {
+      setItems((prev) => prev.map((i) => (selectedIds.has(i.id) ? { ...i, category } : i)));
+      setSelectedIds(new Set());
+      setAnchorIndex(null);
+    }
+    setBulkSaving(false);
+    setBulkEditOpen(false);
+  }
+
+  function openNew() {
+    if (!activeOrg) return;
+    setEditing(emptyOrgItem(activeOrg.id));
+    setShowModal(true);
+  }
+
+  function openEdit(item: OrgEquipmentItem) {
+    setEditing({ ...item });
+    setShowModal(true);
+  }
+
+  async function handleSave() {
+    if (!editing || !activeOrg || !editing.manufacturer.trim() || !editing.model.trim()) return;
+    setSaving(true);
+    if ("id" in editing) {
+      const { error } = await supabase
+        .from("equipment_library")
+        .update({
+          category: editing.category,
+          manufacturer: editing.manufacturer,
+          model: editing.model,
+          description: editing.description,
+          unit_cost: editing.unit_cost,
+        })
+        .eq("id", editing.id);
+      if (!error) setItems((prev) => prev.map((i) => (i.id === editing.id ? (editing as OrgEquipmentItem) : i)));
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data, error } = await supabase
+          .from("equipment_library")
+          .insert({ ...editing, user_id: user.id })
+          .select("*")
+          .single();
+        if (!error && data) setItems((prev) => [...prev, data as OrgEquipmentItem]);
+      }
+    }
+    setSaving(false);
+    setShowModal(false);
+    setEditing(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    await supabase.from("equipment_library").delete().eq("id", deleteConfirm.id);
+    setItems((prev) => prev.filter((i) => i.id !== deleteConfirm.id));
+    setDeleting(false);
+    setDeleteConfirm(null);
+  }
+
+  const inputCls = "w-full rounded-lg border border-border bg-forge-surface/60 px-3 py-2 text-[13px] text-heading placeholder:text-faint focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/30";
+  const labelCls = "mb-1 block text-[11px] font-medium text-muted";
+
+  if (!activeOrg) {
+    return (
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mb-6 flex items-center gap-3">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors">
+            <ArrowLeftIcon />
+            Library
+          </button>
+        </div>
+        <div className="py-20 text-center text-sm text-subtle">Select an organization first.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-muted hover:text-heading transition-colors">
+            <ArrowLeftIcon />
+            Library
+          </button>
+          <span className="text-border">/</span>
+          <h2 className="text-xl font-bold text-heading">My Organization&apos;s Equipment Library</h2>
+        </div>
+        <button
+          onClick={openNew}
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Add Item
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search by manufacturer, model, description…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="forge-input w-full pl-8 text-[13px]"
+          />
+        </div>
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="forge-input w-auto min-w-[140px] text-[13px]">
+          <option value="">All categories</option>
+          {categories.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        {(search || filterCategory) && (
+          <button onClick={() => { setSearch(""); setFilterCategory(""); }} className="text-[12px] font-medium text-blue-400 hover:text-blue-300 transition-colors">
+            Clear
+          </button>
+        )}
+        {selectedIds.size > 0 && (
+          <span className="text-[12px] font-medium text-blue-400">
+            {selectedIds.size} selected ·{" "}
+            <button onClick={() => { setSelectedIds(new Set()); setAnchorIndex(null); }} className="font-medium text-blue-400 underline hover:text-blue-300">
+              Clear
+            </button>
+          </span>
+        )}
+        <span className="ml-auto text-[12px] text-subtle">{filtered.length} of {items.length} items</span>
+      </div>
+
+      {/* Table */}
+      <div className="rounded-xl border border-border bg-forge-surface/20 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px]">
+            <thead>
+              <tr className="border-b border-border bg-forge-surface/60">
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Manufacturer / Model</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Category</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Description</th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold text-muted">Unit Cost</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-16 text-center text-[13px] text-subtle">
+                    {items.length === 0 ? (
+                      <>
+                        No equipment yet.{" "}
+                        <button onClick={openNew} className="text-blue-400 hover:text-blue-300 transition-colors">Add the first item</button>
+                        {" "}or add products from the AV Forge Library.
+                      </>
+                    ) : (
+                      "No items found."
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((item, index) => (
+                  <tr
+                    key={item.id}
+                    onClick={(e) => handleRowClick(e, index)}
+                    onDoubleClick={() => openEdit(item)}
+                    onContextMenu={(e) => handleRowContextMenu(e, index)}
+                    className={`cursor-pointer select-none border-b border-border/50 transition-colors ${
+                      selectedIds.has(item.id) ? "bg-blue-500/10 hover:bg-blue-500/15" : "hover:bg-forge-surface/40"
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="text-[13px] font-semibold text-heading">{item.manufacturer}</div>
+                      <div className="text-[11px] text-subtle">{item.model}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {item.category ? (
+                        <span className="inline-flex items-center rounded-full bg-forge-surface px-2.5 py-0.5 text-[11px] font-medium text-muted">{item.category}</span>
+                      ) : <span className="text-faint">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-[12px] text-body">{item.description || <span className="text-faint">—</span>}</td>
+                    <td className="px-4 py-3 text-right font-mono text-[12px] text-body">
+                      {item.unit_cost ? `$${item.unit_cost.toLocaleString()}` : <span className="text-faint">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); openEdit(item); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(item); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add / Edit Modal */}
+      {showModal && editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-forge-bg shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h3 className="text-[15px] font-bold text-heading">{"id" in editing ? "Edit Item" : "Add Item"}</h3>
+              <button onClick={() => { setShowModal(false); setEditing(null); }} className="text-muted hover:text-heading transition-colors">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Manufacturer *</label>
+                  <input type="text" value={editing.manufacturer} onChange={(e) => setEditing({ ...editing, manufacturer: e.target.value })} className={inputCls} placeholder="e.g. Samsung" />
+                </div>
+                <div>
+                  <label className={labelCls}>Model *</label>
+                  <input type="text" value={editing.model} onChange={(e) => setEditing({ ...editing, model: e.target.value })} className={inputCls} placeholder="e.g. QM85B" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Category</label>
+                  <input type="text" value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })} className={inputCls} placeholder="e.g. Display" list="org-lib-categories" />
+                  <datalist id="org-lib-categories">
+                    {categories.map((c) => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
+                <div>
+                  <label className={labelCls}>Unit Cost</label>
+                  <input type="number" min={0} step="0.01" value={editing.unit_cost} onChange={(e) => setEditing({ ...editing, unit_cost: Math.max(0, Number(e.target.value)) })} className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Description</label>
+                <textarea value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} className={inputCls + " resize-none"} rows={2} placeholder="Optional description…" />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+              <button onClick={() => { setShowModal(false); setEditing(null); }} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={saving || !editing.manufacturer.trim() || !editing.model.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
+                {saving ? "Saving…" : "Save Item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
+            <h3 className="text-[15px] font-bold text-heading">Delete item?</h3>
+            <p className="mt-2 text-[13px] text-muted">
+              Delete <span className="font-medium text-body">{deleteConfirm.manufacturer} {deleteConfirm.model}</span> from your organization&apos;s equipment library? This cannot be undone.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            className="fixed z-50 w-44 overflow-hidden rounded-lg border border-border bg-forge-panel py-1 shadow-xl"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              onClick={() => { setContextMenu(null); setBulkCategory(""); setBulkEditOpen(true); }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-body transition-colors hover:bg-forge-surface/60"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              Edit{selectedIds.size > 1 ? ` (${selectedIds.size})` : ""}
+            </button>
+            <button
+              onClick={() => { setContextMenu(null); setBulkDeleteConfirm(true); }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-red-400 transition-colors hover:bg-red-500/10"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+              </svg>
+              Delete{selectedIds.size > 1 ? ` (${selectedIds.size})` : ""}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Bulk delete confirmation */}
+      {bulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
+            <h3 className="text-[15px] font-bold text-heading">Delete {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"}?</h3>
+            <p className="mt-2 text-[13px] text-muted">
+              This will permanently remove the selected equipment from your organization&apos;s library. This cannot be undone.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setBulkDeleteConfirm(false)}
+                className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkDelete}
+                disabled={deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk edit — category only, for now */}
+      {bulkEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h3 className="text-[15px] font-bold text-heading">Edit {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"}</h3>
+              <button onClick={() => setBulkEditOpen(false)} className="text-muted hover:text-heading transition-colors">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-[12px] text-subtle">Only Category can be bulk-updated for now.</p>
+              <div>
+                <label className={labelCls}>Category</label>
+                <input
+                  type="text"
+                  value={bulkCategory}
+                  onChange={(e) => setBulkCategory(e.target.value)}
+                  className={inputCls}
+                  placeholder="e.g. Display"
+                  list="org-lib-bulk-categories"
+                  autoFocus
+                />
+                <datalist id="org-lib-bulk-categories">
+                  {categories.map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+              <button onClick={() => setBulkEditOpen(false)} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
+                Cancel
+              </button>
+              <button onClick={confirmBulkEdit} disabled={bulkSaving || !bulkCategory.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
+                {bulkSaving ? "Saving…" : "Update Category"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Placeholder sections ─────────────────────────────────────────────────────
 
 function PlaceholderView({ label, description, icon, iconBg, iconColor, onBack }: {
@@ -588,29 +1605,11 @@ export default function LibraryPage() {
   }
 
   if (activeSection === "org") {
-    return (
-      <PlaceholderView
-        label="My Organization's Equipment Library"
-        description="Build a curated catalog of approved equipment for your organization."
-        icon={<BuildingIcon size={30} />}
-        iconBg="bg-violet-500/10"
-        iconColor="text-violet-400"
-        onBack={() => setActiveSection(null)}
-      />
-    );
+    return <OrgLibraryView onBack={() => setActiveSection(null)} />;
   }
 
   if (activeSection === "avforge") {
-    return (
-      <PlaceholderView
-        label="AV Forge Library"
-        description="A vetted catalog of AV products with full specs and pricing, maintained by AV Forge."
-        icon={<SparkleIcon size={30} />}
-        iconBg="bg-blue-500/10"
-        iconColor="text-blue-400"
-        onBack={() => setActiveSection(null)}
-      />
-    );
+    return <AVForgeLibraryView onBack={() => setActiveSection(null)} />;
   }
 
   return <LandingView onSelect={setActiveSection} />;

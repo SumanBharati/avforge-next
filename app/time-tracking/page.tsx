@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePMStore } from "@/components/PMStoreProvider";
 import PMPageSkeleton from "@/components/skeletons/PMPageSkeleton";
 import {
@@ -25,6 +25,7 @@ export default function TimeTrackingPage() {
   const [pickedPhase, setPickedPhase] = useState<string>("");
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
   const [newTaskName, setNewTaskName] = useState<string>("");
+  const [notesOpenKey, setNotesOpenKey] = useState<string | null>(null);
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(cursor, i));
@@ -139,6 +140,34 @@ export default function TimeTrackingPage() {
         date,
         hours,
         notes: "",
+        billable: true,
+      };
+      update({ ...store, timeEntries: [...store.timeEntries, e] });
+    }
+  }
+
+  function notesFor(projectId: string, phaseId: string | null, date: string): string {
+    return entriesFor(projectId, phaseId, date)[0]?.notes || "";
+  }
+
+  function setNotes(projectId: string, phaseId: string | null, date: string, notes: string) {
+    const existing = entriesFor(projectId, phaseId, date);
+    if (existing.length > 0) {
+      const keep = existing[0];
+      const toRemove = existing.slice(1).map((e) => e.id);
+      const newEntries = store.timeEntries
+        .filter((e) => !toRemove.includes(e.id))
+        .map((e) => (e.id === keep.id ? { ...e, notes } : e));
+      update({ ...store, timeEntries: newEntries });
+    } else if (notes.trim()) {
+      const e: TimeEntry = {
+        id: uid(),
+        personId: selectedPerson,
+        projectId,
+        phaseId,
+        date,
+        hours: 0,
+        notes,
         billable: true,
       };
       update({ ...store, timeEntries: [...store.timeEntries, e] });
@@ -264,7 +293,14 @@ export default function TimeTrackingPage() {
           <div className="py-20 text-center text-sm text-subtle">Add a person first</div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[720px] text-sm" style={{ tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "20%" }} />
+                {weekDays.map((_, i) => (
+                  <col key={i} style={{ width: "10%" }} />
+                ))}
+                <col style={{ width: "10%" }} />
+              </colgroup>
               <thead className="bg-forge-panel text-[11px] font-semibold uppercase tracking-wider text-faint">
                 <tr className="border-b border-border">
                   <th className="px-4 py-3 text-left">Projects or Tasks</th>
@@ -325,19 +361,35 @@ export default function TimeTrackingPage() {
                                 iso <= a.endDate,
                             )
                             .reduce((s, a) => s + a.hoursPerDay, 0);
+                          const scheduledRounded = Math.round(scheduled * 100) / 100;
                           const actual = hoursFor(r.projectId, r.phaseId, iso);
+                          const cellKey = `${r.projectId}|${r.phaseId || ""}|${iso}`;
+                          const note = notesFor(r.projectId, r.phaseId, iso);
                           return (
-                            <td key={j} className="px-2 py-2 text-center">
+                            <td key={j} className="relative px-2 py-2 text-center">
                               <input
                                 type="number"
                                 step="0.25"
                                 value={actual || ""}
                                 onChange={(e) => setHours(r.projectId, r.phaseId, iso, Number(e.target.value) || 0)}
-                                placeholder={scheduled > 0 ? String(scheduled) : "—"}
+                                onFocus={() => setNotesOpenKey(cellKey)}
+                                placeholder={scheduledRounded > 0 ? String(scheduledRounded) : "—"}
                                 className="w-14 rounded border border-border bg-forge-surface/40 px-2 py-1 text-center text-xs text-body outline-none focus:border-blue-500 focus:bg-forge-bg"
                               />
-                              {scheduled > 0 && (
-                                <div className="mt-0.5 text-[9px] text-faint">plan: {scheduled}h</div>
+                              {scheduledRounded > 0 && (
+                                <div className="mt-0.5 text-[9px] text-faint">plan: {scheduledRounded}h</div>
+                              )}
+                              {note && notesOpenKey !== cellKey && (
+                                <div className="mt-0.5 truncate text-[9px] text-blue-400" title={note}>
+                                  📝 {note}
+                                </div>
+                              )}
+                              {notesOpenKey === cellKey && (
+                                <NotesPopover
+                                  value={note}
+                                  onChange={(v) => setNotes(r.projectId, r.phaseId, iso, v)}
+                                  onClose={() => setNotesOpenKey(null)}
+                                />
                               )}
                             </td>
                           );
@@ -532,6 +584,56 @@ export default function TimeTrackingPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function NotesPopover({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute left-1/2 top-full z-20 mt-1 w-48 -translate-x-1/2 rounded-lg border border-border bg-forge-panel p-2 text-left shadow-lg"
+    >
+      <div className="mb-1 flex items-center justify-between">
+        <label className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+          Description <span className="normal-case text-faint/70">(optional)</span>
+        </label>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-muted transition-colors hover:text-body"
+          title="Close"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <textarea
+        rows={2}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="What did you work on?"
+        className="w-full resize-none rounded border border-border bg-forge-surface/60 px-2 py-1 text-xs text-body outline-none focus:border-blue-500"
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
+import { useOrg } from "@/components/OrgProvider";
 import ProjectDetailSkeleton from "@/components/skeletons/ProjectDetailSkeleton";
 
 interface Project {
@@ -211,6 +212,8 @@ interface ProjectMember {
 
 export default function ProjectDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { activeOrg } = useOrg();
+  const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPhase, setCurrentPhase] = useState("opportunity");
@@ -766,7 +769,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
       <div className="mt-6 rounded-lg border border-border bg-forge-panel p-5">
         <h3 className="mb-4 text-[13px] font-bold uppercase tracking-wider text-heading">Team Members</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-          {ROLE_OPTIONS.map((role) => {
+          {roleOptions.map((role) => {
             const assigned = projectMembers.find((m) => m.role === role);
             const isAssigning = assigningRole === role;
             return (

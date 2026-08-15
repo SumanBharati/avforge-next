@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { ROLE_OPTIONS } from "@/lib/pm-store";
 
 const AUTH_ROUTES = ["/login", "/register", "/org/invite", "/welcome"];
 
@@ -12,6 +13,7 @@ export interface Org {
   slug: string;
   logo_url: string | null;
   role: "owner" | "admin" | "member";
+  member_roles: string[];
 }
 
 interface OrgContextValue {
@@ -45,8 +47,6 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   const [loading, setLoading] = useState(true);
 
   const fetchOrgs = useCallback(async () => {
-    setOrgs([]);
-    setActiveOrgId(null);
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -72,7 +72,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
     const orgIds = memberships.map((m) => m.org_id);
     const { data: orgsData } = await supabase
       .from("organizations")
-      .select("id, name, slug, logo_url")
+      .select("id, name, slug, logo_url, member_roles")
       .in("id", orgIds);
 
     if (!orgsData || orgsData.length === 0) {
@@ -90,6 +90,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
         slug: org?.slug || "",
         logo_url: org?.logo_url || null,
         role: m.role,
+        member_roles: Array.isArray(org?.member_roles) && org.member_roles.length > 0 ? org.member_roles : ROLE_OPTIONS,
       };
     });
 

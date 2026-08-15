@@ -7,6 +7,7 @@ import PMStoreProvider, { usePMStore } from "@/components/PMStoreProvider";
 const TABS = [
   { href: "/time-tracking", label: "Time Tracking", exact: true },
   { href: "/time-tracking/time-off", label: "Time Off" },
+  { href: "/time-tracking/timesheet", label: "Reports" },
 ];
 
 function SaveIndicator() {
