@@ -2,19 +2,21 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { getProductById, searchProducts } from "@/lib/av-products";
+import { searchOrgLibrary, getOrgLibraryItemById } from "@/lib/equipment-library";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
+import { useOrg } from "@/components/OrgProvider";
 
 const SIGNAL_TYPES = [
   {id:"hdmi",name:"HDMI",color:"#8b5cf6"},
-  {id:"dante",name:"Dante",color:"#22c55e"},
+  {id:"dante",name:"UTP",color:"#22c55e"},
   {id:"usb",name:"USB",color:"#a855f7"},
-  {id:"cat6",name:"Cat6/HDBaseT",color:"#f59e0b"},
+  {id:"cat6",name:"STP",color:"#f59e0b"},
   {id:"analog",name:"Analog Audio",color:"#ef4444"},
-  {id:"speaker",name:"Speaker Wire",color:"#f97316"},
-  {id:"control",name:"Control/RS232",color:"rgb(var(--text-subtle))"},
+  {id:"speaker",name:"Speaker",color:"#f97316"},
+  {id:"control",name:"Control",color:"rgb(var(--text-subtle))"},
   {id:"fiber",name:"Fiber",color:"#06b6d4"},
-  {id:"sdi",name:"SDI",color:"#ec4899"},
+  {id:"sdi",name:"Coax",color:"#ec4899"},
 ];
 
 const UNKNOWN_SIGNAL = {id:null as any, name:"–", color:"rgb(var(--text-subtle))"};
@@ -156,10 +158,12 @@ export default function SignalFlowPage() {
   const [editDeviceAmps, setEditDeviceAmps] = useState("");
   const [editDeviceWatts, setEditDeviceWatts] = useState("");
   const [editDeviceBtu, setEditDeviceBtu] = useState("");
+  const { activeOrg } = useOrg();
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
   const [modalResults, setModalResults] = useState<any[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
+  const [modalGlobalSearch, setModalGlobalSearch] = useState(false);
   const [modalSelected, setModalSelected] = useState<any>(null);
 
   const [modalDeviceName, setModalDeviceName] = useState("");
@@ -328,17 +332,12 @@ export default function SignalFlowPage() {
 
   useEffect(() => {
     if (!modalSearch.trim()) { setModalResults([]); return; }
-    setModalLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const [dbData, localData] = await Promise.all([
-          searchProducts(modalSearch).catch(() => []),
-          Promise.resolve(searchLocalLibrary(modalSearch)),
-        ]);
-        const dbKeys = new Set(dbData.map((p: any) => `${p.manufacturer}::${p.type}`));
-        const uniqueLocal = localData.filter((p: any) => !dbKeys.has(`${p.mfr}::${p.type}`));
-        setModalResults([
-          ...dbData.map((p: any) => ({
+    if (modalGlobalSearch) {
+      setModalLoading(true);
+      const timer = setTimeout(async () => {
+        try {
+          const dbData = await searchProducts(modalSearch).catch(() => []);
+          setModalResults(dbData.map((p: any) => ({
             libraryProductId: p.id,
             type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
             color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
@@ -346,13 +345,29 @@ export default function SignalFlowPage() {
             amp_draw: p.amp_draw, voltage: p.voltage, power_watts: p.power_watts, btu_hr: p.btu_hr,
             w: Math.max(120, p.type.length * 7 + 30),
             h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
-          })),
-          ...uniqueLocal,
-        ]);
+          })));
+        } finally { setModalLoading(false); }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+    if (!activeOrg) { setModalResults([]); return; }
+    setModalLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const orgData = await searchOrgLibrary(modalSearch, activeOrg.id).catch(() => []);
+        setModalResults(orgData.map((p) => ({
+          orgLibraryId: p.id,
+          type: p.description || p.model, mfr: p.manufacturer, model: p.model, price: p.unit_cost,
+          color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
+          rack_mounted: p.rack_mounted, rack_units: p.rack_units,
+          amp_draw: p.amp_draw, voltage: p.voltage, power_watts: p.power_watts, btu_hr: p.btu_hr,
+          w: Math.max(120, (p.description || p.model).length * 7 + 30),
+          h: Math.max(56, (p.ports || []).length > 4 ? 80 : (p.ports || []).length > 2 ? 70 : 56),
+        })));
       } finally { setModalLoading(false); }
     }, 300);
     return () => clearTimeout(timer);
-  }, [modalSearch, searchLocalLibrary]);
+  }, [modalSearch, modalGlobalSearch, activeOrg?.id]);
 
   const getMfr = (type: string) => {
     if(type.startsWith("Extron")) return "Extron";
@@ -436,7 +451,7 @@ export default function SignalFlowPage() {
     return out;
   };
 
-  const refreshDeviceFromLibrary = async (deviceId: any) => {
+  const refreshDeviceFromGlobalLibrary = async (deviceId: any) => {
     const dev = devicesRef.current.find((d:any)=>d.id===deviceId);
     if (!dev || refreshingDeviceId !== null) return;
     setRefreshingDeviceId(deviceId);
@@ -450,7 +465,7 @@ export default function SignalFlowPage() {
           || candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.type,dev.type))
           || null;
       }
-      if (!product) throw new Error(`No exact library match found for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
+      if (!product) throw new Error(`No exact match found in the AV Forge Library for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
 
       const freshPorts = expandPortGroups(product.ports || []);
       const oldByKey = new Map<string,any[]>();
@@ -489,9 +504,73 @@ export default function SignalFlowPage() {
         w: 0,
         h: 0,
       }) : d));
-      setRefreshNotice({kind:"ok",message:`Equipment refreshed from library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
+      setRefreshNotice({kind:"ok",message:`Equipment refreshed from the AV Forge Library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
     } catch (error:any) {
-      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from the library."});
+      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from the AV Forge Library."});
+    } finally {
+      setRefreshingDeviceId(null);
+      window.setTimeout(()=>setRefreshNotice(null),5000);
+    }
+  };
+
+  const refreshDeviceFromOrgLibrary = async (deviceId: any) => {
+    const dev = devicesRef.current.find((d:any)=>d.id===deviceId);
+    if (!dev || refreshingDeviceId !== null) return;
+    if (!activeOrg) { setRefreshNotice({kind:"error",message:"No active organization."}); window.setTimeout(()=>setRefreshNotice(null),5000); return; }
+    setRefreshingDeviceId(deviceId);
+    setDeviceContextMenu(null);
+    try {
+      let product = dev.orgLibraryId ? await getOrgLibraryItemById(dev.orgLibraryId) : null;
+      if (!product) {
+        const candidates = await searchOrgLibrary(dev.model || dev.type, activeOrg.id, 50);
+        const same = (a:any,b:any) => String(a||"").trim().toLowerCase() === String(b||"").trim().toLowerCase();
+        product = candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.model,dev.model))
+          || candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.description,dev.type))
+          || null;
+      }
+      if (!product) throw new Error(`No exact match found in your Organization Library for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
+
+      const freshPorts = expandPortGroups(product.ports || []);
+      const oldByKey = new Map<string,any[]>();
+      const portKey = (p:any) => `${p.side}|${String(p.label||"").trim().toLowerCase()}`;
+      (dev.ports || []).forEach((p:any)=>{
+        const key = portKey(p), list = oldByKey.get(key) || [];
+        list.push(p); oldByKey.set(key,list);
+      });
+      const keptIds = new Set<any>();
+      const stamp = Date.now();
+      const ports = freshPorts.map((p:any,i:number)=>{
+        const old = oldByKey.get(portKey(p))?.shift();
+        const id = old?.id ?? `${dev.id}-refresh-${stamp}-${i}`;
+        keptIds.add(id);
+        return {...p,id};
+      });
+      const removedIds = new Set<any>((dev.ports || []).map((p:any)=>p.id).filter((id:any)=>!keptIds.has(id)));
+      const removedCableCount = connectionsRef.current.filter((c:any)=>removedIds.has(c.from.portId)||removedIds.has(c.to.portId)).length;
+
+      pushUndo();
+      setConnections(prev=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
+      setDevices(prev=>prev.map((d:any)=>d.id===deviceId ? sizeDevice({
+        ...d,
+        orgLibraryId: product!.id,
+        type: product!.description || product!.model,
+        mfr: product!.manufacturer,
+        model: product!.model,
+        price: product!.unit_cost,
+        color: product!.color || d.color,
+        cat: product!.category,
+        ports,
+        rack_units: product!.rack_units,
+        voltage: product!.voltage,
+        amp_draw: product!.amp_draw,
+        power_watts: product!.power_watts,
+        btu_hr: product!.btu_hr,
+        w: 0,
+        h: 0,
+      }) : d));
+      setRefreshNotice({kind:"ok",message:`Equipment refreshed from your Organization Library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
+    } catch (error:any) {
+      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from your Organization Library."});
     } finally {
       setRefreshingDeviceId(null);
       window.setTimeout(()=>setRefreshNotice(null),5000);
@@ -1495,6 +1574,7 @@ export default function SignalFlowPage() {
       @media print {
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         #sf-canvas-export { height: 100vh !important; background: #fff !important; padding: 8mm !important; box-sizing: border-box !important; }
+        #sf-canvas-export button { display: none !important; }
         /* Chrome only reserves (and prints) the date/URL/page-number header+footer
            band when the print job has a margin; a zero @page margin removes it. */
         @page { size: 11in 8.5in; margin: 0; }
@@ -1529,7 +1609,7 @@ export default function SignalFlowPage() {
           {/* Drawing group */}
           <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
             <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
-              <button onClick={()=>{setShowAddModal(true);setModalSearch("");setModalSelected(null);}} title="Add equipment to canvas"
+              <button onClick={()=>{setShowAddModal(true);setModalSearch("");setModalSelected(null);setModalGlobalSearch(false);}} title="Add equipment to canvas"
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:56}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
@@ -2038,12 +2118,19 @@ export default function SignalFlowPage() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Edit equipment
           </button>
-          <button onClick={()=>refreshDeviceFromLibrary(deviceContextMenu.deviceId)}
+          <button onClick={()=>refreshDeviceFromOrgLibrary(deviceContextMenu.deviceId)}
             disabled={refreshingDeviceId!==null}
             style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:refreshingDeviceId!==null?"wait":"pointer",textAlign:"left",opacity:refreshingDeviceId!==null?0.6:1}}
             onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
-            Refresh from library
+            Refresh from my Organization Library
+          </button>
+          <button onClick={()=>refreshDeviceFromGlobalLibrary(deviceContextMenu.deviceId)}
+            disabled={refreshingDeviceId!==null}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:refreshingDeviceId!==null?"wait":"pointer",textAlign:"left",opacity:refreshingDeviceId!==null?0.6:1}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+            Refresh from Global Library
           </button>
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
           <button onClick={()=>{
@@ -2252,7 +2339,7 @@ export default function SignalFlowPage() {
     {/* Add Equipment Modal */}
     {showAddModal && (
       <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}}
-        onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");}}>
+        onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");setModalGlobalSearch(false);}}>
         <div style={{width:560,background:"rgb(var(--forge-panel))",borderRadius:10,border:"1px solid rgb(var(--border))",boxShadow:"0 16px 48px rgba(0,0,0,0.5)",display:"flex",flexDirection:"column",maxHeight:"72vh",overflow:"hidden"}}
           onClick={e=>e.stopPropagation()}>
 
@@ -2264,14 +2351,14 @@ export default function SignalFlowPage() {
               </svg>
               <span style={{fontSize:15,fontWeight:700,color:"rgb(var(--text-body))"}}>Add Equipment</span>
             </div>
-            <button onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");}}
+            <button onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");setModalGlobalSearch(false);}}
               style={{background:"none",border:"none",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:20,lineHeight:1,padding:"2px 4px"}}>×</button>
           </div>
 
           {/* Search bar */}
           <div style={{padding:"0 20px 14px",flexShrink:0}}>
             <div style={{display:"flex",gap:0}}>
-              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);}}
+              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);setModalGlobalSearch(false);}}
                 placeholder="Search by Make, Model, Part#..."
                 style={{flex:1,padding:"9px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRight:"none",borderRadius:"6px 0 0 6px",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}
               />
@@ -2285,25 +2372,36 @@ export default function SignalFlowPage() {
 
           {/* Search results (only when searching) */}
           {modalSearch.trim() && (
-            <div style={{maxHeight:220,overflowY:"auto",margin:"0 20px",marginBottom:8,border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
-              {modalLoading ? (
-                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Searching…</div>
-              ) : modalResults.length === 0 ? (
-                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>No results for &ldquo;{modalSearch}&rdquo;</div>
-              ) : modalResults.map((item:any,i:number)=>{
-                const isSel = modalSelected===item;
-                return (
-                  <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
-                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(139,92,246,0.1)":"transparent",transition:"background 0.1s"}}
-                    onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
-                    <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.mfr||"Generic"} {item.model&&item.model!=="N/A"?item.model:item.type}</div>
+            <div style={{margin:"0 20px",marginBottom:8}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"rgb(var(--text-subtle))",marginBottom:6}}>
+                {modalGlobalSearch ? "AV Forge Library" : "My Organization's Equipment Library"}
+              </div>
+              <div style={{maxHeight:220,overflowY:"auto",border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
+                {modalLoading ? (
+                  <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Searching…</div>
+                ) : modalResults.length === 0 ? (
+                  <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>No results for &ldquo;{modalSearch}&rdquo;</div>
+                ) : modalResults.map((item:any,i:number)=>{
+                  const isSel = modalSelected===item;
+                  return (
+                    <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
+                      style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(139,92,246,0.1)":"transparent",transition:"background 0.1s"}}
+                      onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
+                      <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.mfr||"Generic"} {item.model&&item.model!=="N/A"?item.model:item.type}</div>
+                      </div>
+                      {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                     </div>
-                    {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              {!modalGlobalSearch && !modalLoading && modalResults.length === 0 && (
+                <button onClick={()=>setModalGlobalSearch(true)}
+                  style={{marginTop:8,width:"100%",padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"#8b5cf6",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                  Search in Global Library
+                </button>
+              )}
             </div>
           )}
 
@@ -2332,7 +2430,7 @@ export default function SignalFlowPage() {
 
           {/* Footer */}
           <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:10,flexShrink:0}}>
-            <button onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");}}
+            <button onClick={()=>{setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");setModalGlobalSearch(false);}}
               style={{padding:"8px 18px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer"}}>
               Cancel
             </button>
@@ -2343,7 +2441,7 @@ export default function SignalFlowPage() {
                 else if(modalDeviceName.trim()) {
                   addDevice({type:modalDeviceName.trim(),mfr:modalMake.trim()||"Generic",model:modalModel.trim(),color:"#64748b",ports:[],cat:"Custom",w:Math.max(120,modalDeviceName.length*7+30),h:56});
                 }
-                setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");
+                setShowAddModal(false);setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");setModalGlobalSearch(false);
               }}
               style={{padding:"8px 18px",background:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--forge-surface))":"#8b5cf6",border:"1px solid "+((!modalSelected&&!modalDeviceName.trim())?"rgb(var(--border))":"#8b5cf6"),borderRadius:6,color:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--text-subtle))":"#fff",fontSize:12,cursor:(!modalSelected&&!modalDeviceName.trim())?"not-allowed":"pointer",fontWeight:600,transition:"all 0.15s"}}>
               + Add

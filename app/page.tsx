@@ -11,8 +11,18 @@ export default function RootPage() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (redirected.current) return;
-      if (event === "INITIAL_SESSION" || event === "SIGNED_OUT") {
+      if (event === "PASSWORD_RECOVERY") {
         redirected.current = true;
+        router.replace(`/login${window.location.hash}`);
+        return;
+      }
+      if (event === "INITIAL_SESSION" || event === "SIGNED_OUT") {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        redirected.current = true;
+        if (hashParams.get("type") === "recovery") {
+          router.replace(`/login${window.location.hash}`);
+          return;
+        }
         router.replace(session ? "/home" : "/login");
       }
     });

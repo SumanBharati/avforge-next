@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { usePMStore } from "@/components/PMStoreProvider";
 import PMPageSkeleton from "@/components/skeletons/PMPageSkeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   PERSON_COLORS,
   personScheduledHoursInRange,
@@ -18,6 +19,7 @@ export default function PeoplePage() {
   const { store, update, loading } = usePMStore();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Person | null>(null);
 
   const weekStart = useMemo(() => toISODate(startOfWeek(new Date())), []);
   const weekEnd = useMemo(() => toISODate(addDays(startOfWeek(new Date()), 6)), []);
@@ -259,15 +261,12 @@ export default function PeoplePage() {
                             <path d="M3 6v6a1 1 0 001 1h8a1 1 0 001-1V6M6.5 8.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
                           </svg>
                         </button>
-                        {/* Delete */}
+                        {/* Delete — org members can only be removed via Org Settings */}
                         <button
-                          onClick={() => {
-                            if (confirm(`Delete ${p.name}? This removes all their allocations and time.`)) {
-                              deletePerson(p.id);
-                            }
-                          }}
-                          className="rounded p-1.5 text-subtle transition-colors hover:bg-red-500/10 hover:text-red-400"
-                          title="Delete"
+                          onClick={() => !p.memberUserId && setPendingDelete(p)}
+                          disabled={!!p.memberUserId}
+                          className="rounded p-1.5 text-subtle transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-subtle"
+                          title={p.memberUserId ? "Org members can't be removed here — go to Org Settings → Members" : "Delete"}
                         >
                           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                             <path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M4 4v9a1 1 0 001 1h6a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
@@ -282,6 +281,18 @@ export default function PeoplePage() {
           </table>
         )}
       </div>
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete person"
+          message={<>Delete <span className="font-semibold text-heading">{pendingDelete.name}</span>? This removes all their allocations and time.</>}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            deletePerson(pendingDelete.id);
+            setPendingDelete(null);
+          }}
+        />
+      )}
     </div>
   );
 }

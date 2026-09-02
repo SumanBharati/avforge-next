@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getFilterOptions, getProductCount, listProducts, type AVProduct } from "@/lib/av-products";
+import { type OrgEquipmentItem } from "@/lib/equipment-library";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
 
@@ -699,6 +700,21 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         model: product.model_name,
         description: product.type || "",
         unit_cost: product.price ?? 0,
+        part_number: product.part_number,
+        msrp: product.msrp,
+        cost: product.cost,
+        color: product.color,
+        ports: product.ports ?? [],
+        amp_draw: product.amp_draw,
+        voltage: product.voltage,
+        power_watts: product.power_watts,
+        btu_hr: product.btu_hr,
+        rack_mounted: product.rack_mounted ?? false,
+        rack_units: product.rack_units,
+        width_in: product.width_in,
+        height_in: product.height_in,
+        depth_in: product.depth_in,
+        weight_lb: product.weight_lb,
       });
       if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
     }
@@ -717,6 +733,21 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         model: product.model_name,
         description: product.type || "",
         unit_cost: product.price ?? 0,
+        part_number: product.part_number,
+        msrp: product.msrp,
+        cost: product.cost,
+        color: product.color,
+        ports: product.ports ?? [],
+        amp_draw: product.amp_draw,
+        voltage: product.voltage,
+        power_watts: product.power_watts,
+        btu_hr: product.btu_hr,
+        rack_mounted: product.rack_mounted ?? false,
+        rack_units: product.rack_units,
+        width_in: product.width_in,
+        height_in: product.height_in,
+        depth_in: product.depth_in,
+        weight_lb: product.weight_lb,
       })
       .eq("id", existingId);
     if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
@@ -933,6 +964,19 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                   <DetailField label="BTU/hr" value={selected.btu_hr ? `${selected.btu_hr}` : null} />
                 </div>
               </div>
+              {selected.ports && selected.ports.length > 0 && (
+                <div className="border-t border-border pt-4">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {selected.ports.map((port, i) => (
+                      <div key={i} className="flex items-center justify-between rounded-md border border-border bg-forge-surface/40 px-2.5 py-1.5 text-[12px]">
+                        <span className="text-body">{port.label}</span>
+                        <span className="text-faint">{port.side} · {port.dir}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="border-t border-border pt-4">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1050,17 +1094,6 @@ function DetailField({ label, value }: { label: string; value: string | number |
 
 // ── My Organization's Equipment Library ──────────────────────────────────────
 
-type OrgEquipmentItem = {
-  id: string;
-  org_id: string;
-  user_id: string;
-  category: string;
-  manufacturer: string;
-  model: string;
-  description: string;
-  unit_cost: number;
-};
-
 const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> => ({
   org_id: orgId,
   category: "",
@@ -1068,6 +1101,21 @@ const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> =
   model: "",
   description: "",
   unit_cost: 0,
+  part_number: null,
+  msrp: null,
+  cost: null,
+  color: null,
+  ports: [],
+  amp_draw: null,
+  voltage: null,
+  power_watts: null,
+  btu_hr: null,
+  rack_mounted: false,
+  rack_units: null,
+  width_in: null,
+  height_in: null,
+  depth_in: null,
+  weight_lb: null,
 });
 
 function OrgLibraryView({ onBack }: { onBack: () => void }) {
@@ -1192,6 +1240,21 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           model: editing.model,
           description: editing.description,
           unit_cost: editing.unit_cost,
+          part_number: editing.part_number,
+          msrp: editing.msrp,
+          cost: editing.cost,
+          color: editing.color,
+          ports: editing.ports,
+          amp_draw: editing.amp_draw,
+          voltage: editing.voltage,
+          power_watts: editing.power_watts,
+          btu_hr: editing.btu_hr,
+          rack_mounted: editing.rack_mounted,
+          rack_units: editing.rack_units,
+          width_in: editing.width_in,
+          height_in: editing.height_in,
+          depth_in: editing.depth_in,
+          weight_lb: editing.weight_lb,
         })
         .eq("id", editing.id);
       if (!error) setItems((prev) => prev.map((i) => (i.id === editing.id ? (editing as OrgEquipmentItem) : i)));
@@ -1380,8 +1443,8 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
       {/* Add / Edit Modal */}
       {showModal && editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-forge-bg shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-border bg-forge-bg shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-forge-bg px-6 py-4">
               <h3 className="text-[15px] font-bold text-heading">{"id" in editing ? "Edit Item" : "Add Item"}</h3>
               <button onClick={() => { setShowModal(false); setEditing(null); }} className="text-muted hover:text-heading transition-colors">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -1409,16 +1472,153 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
                   </datalist>
                 </div>
                 <div>
+                  <label className={labelCls}>Part Number</label>
+                  <input type="text" value={editing.part_number ?? ""} onChange={(e) => setEditing({ ...editing, part_number: e.target.value || null })} className={inputCls} placeholder="Optional" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
                   <label className={labelCls}>Unit Cost</label>
                   <input type="number" min={0} step="0.01" value={editing.unit_cost} onChange={(e) => setEditing({ ...editing, unit_cost: Math.max(0, Number(e.target.value)) })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>MSRP</label>
+                  <input type="number" min={0} step="0.01" value={editing.msrp ?? ""} onChange={(e) => setEditing({ ...editing, msrp: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })} className={inputCls} placeholder="—" />
+                </div>
+                <div>
+                  <label className={labelCls}>Cost</label>
+                  <input type="number" min={0} step="0.01" value={editing.cost ?? ""} onChange={(e) => setEditing({ ...editing, cost: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })} className={inputCls} placeholder="—" />
                 </div>
               </div>
               <div>
                 <label className={labelCls}>Description</label>
                 <textarea value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} className={inputCls + " resize-none"} rows={2} placeholder="Optional description…" />
               </div>
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Power &amp; Electrical</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Voltage (V)</label>
+                    <input type="number" min={0} step="0.1" value={editing.voltage ?? ""} onChange={(e) => setEditing({ ...editing, voltage: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Amp Draw (A)</label>
+                    <input type="number" min={0} step="0.1" value={editing.amp_draw ?? ""} onChange={(e) => setEditing({ ...editing, amp_draw: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Power (W)</label>
+                    <input type="number" min={0} step="1" value={editing.power_watts ?? ""} onChange={(e) => setEditing({ ...editing, power_watts: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>BTU/hr</label>
+                    <input type="number" min={0} step="1" value={editing.btu_hr ?? ""} onChange={(e) => setEditing({ ...editing, btu_hr: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
+                <div className="mb-3 flex items-center gap-2">
+                  <input
+                    id="org-lib-rack-mounted"
+                    type="checkbox"
+                    checked={editing.rack_mounted}
+                    onChange={(e) => setEditing({ ...editing, rack_mounted: e.target.checked })}
+                    className="h-3.5 w-3.5 rounded border-border"
+                  />
+                  <label htmlFor="org-lib-rack-mounted" className="text-[12px] text-body">Rack mounted</label>
+                  {editing.rack_mounted && (
+                    <input
+                      type="number" min={0} step="0.5"
+                      value={editing.rack_units ?? ""}
+                      onChange={(e) => setEditing({ ...editing, rack_units: e.target.value === "" ? null : Number(e.target.value) })}
+                      className={inputCls + " ml-2 w-24"}
+                      placeholder="RU"
+                    />
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Weight (lb)</label>
+                    <input type="number" min={0} step="0.1" value={editing.weight_lb ?? ""} onChange={(e) => setEditing({ ...editing, weight_lb: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className={labelCls}>W (in)</label>
+                      <input type="number" min={0} step="0.1" value={editing.width_in ?? ""} onChange={(e) => setEditing({ ...editing, width_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                    </div>
+                    <div>
+                      <label className={labelCls}>H (in)</label>
+                      <input type="number" min={0} step="0.1" value={editing.height_in ?? ""} onChange={(e) => setEditing({ ...editing, height_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                    </div>
+                    <div>
+                      <label className={labelCls}>D (in)</label>
+                      <input type="number" min={0} step="0.1" value={editing.depth_in ?? ""} onChange={(e) => setEditing({ ...editing, depth_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ ...editing, ports: [...editing.ports, { side: "right", dir: "out", signal: "", label: "" }] })}
+                    className="text-[11px] font-medium text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    + Add port
+                  </button>
+                </div>
+                {editing.ports.length === 0 ? (
+                  <p className="text-[12px] text-faint">No ports defined.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {editing.ports.map((port, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <select
+                          value={port.side}
+                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, side: e.target.value } : p) })}
+                          className={inputCls + " w-24"}
+                        >
+                          <option value="left">Left</option>
+                          <option value="right">Right</option>
+                          <option value="top">Top</option>
+                          <option value="bottom">Bottom</option>
+                        </select>
+                        <select
+                          value={port.dir}
+                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, dir: e.target.value } : p) })}
+                          className={inputCls + " w-20"}
+                        >
+                          <option value="in">In</option>
+                          <option value="out">Out</option>
+                        </select>
+                        <input
+                          type="text" value={port.signal}
+                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, signal: e.target.value } : p) })}
+                          className={inputCls} placeholder="signal (hdmi, usb…)"
+                        />
+                        <input
+                          type="text" value={port.label}
+                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, label: e.target.value } : p) })}
+                          className={inputCls} placeholder="label"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditing({ ...editing, ports: editing.ports.filter((_, j) => j !== i) })}
+                          className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+            <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-border bg-forge-bg px-6 py-4">
               <button onClick={() => { setShowModal(false); setEditing(null); }} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
                 Cancel
               </button>

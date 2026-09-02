@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePMStore } from "@/components/PMStoreProvider";
 import PMPageSkeleton from "@/components/skeletons/PMPageSkeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   addDays,
   fmtDateShort,
@@ -26,6 +28,10 @@ export default function TimeTrackingPage() {
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
   const [newTaskName, setNewTaskName] = useState<string>("");
   const [notesOpenKey, setNotesOpenKey] = useState<string | null>(null);
+  const [notesAnchor, setNotesAnchor] = useState<HTMLElement | null>(null);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<{ projectId: string; phaseId: string | null; label: string } | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTaskName, setEditingTaskName] = useState("");
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(cursor, i));
@@ -237,6 +243,26 @@ export default function TimeTrackingPage() {
     setShowPicker(false);
   }
 
+  function renameTask(taskId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    update({
+      ...store,
+      adHocTasks: (store.adHocTasks ?? []).map((t) => (t.id === taskId ? { ...t, name: trimmed } : t)),
+    });
+  }
+
+  function deleteRow(projectId: string, phaseId: string | null) {
+    const remainingEntries = store.timeEntries.filter(
+      (e) => !(e.personId === selectedPerson && e.projectId === projectId && (e.phaseId || null) === phaseId),
+    );
+    const stillReferenced = remainingEntries.some((e) => e.projectId === projectId);
+    const nextAdHocTasks = stillReferenced
+      ? (store.adHocTasks ?? [])
+      : (store.adHocTasks ?? []).filter((t) => t.id !== projectId);
+    update({ ...store, timeEntries: remainingEntries, adHocTasks: nextAdHocTasks });
+  }
+
   const weekTotal = weekDays.reduce(
     (sum, d) => sum + rows.reduce((s, r) => s + hoursFor(r.projectId, r.phaseId, toISODate(d)), 0),
     0,
@@ -295,11 +321,12 @@ export default function TimeTrackingPage() {
           <div className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full min-w-[720px] text-sm" style={{ tableLayout: "fixed" }}>
               <colgroup>
-                <col style={{ width: "20%" }} />
+                <col style={{ width: "18%" }} />
                 {weekDays.map((_, i) => (
-                  <col key={i} style={{ width: "10%" }} />
+                  <col key={i} style={{ width: "9.5%" }} />
                 ))}
-                <col style={{ width: "10%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "7.5%" }} />
               </colgroup>
               <thead className="bg-forge-panel text-[11px] font-semibold uppercase tracking-wider text-faint">
                 <tr className="border-b border-border">
@@ -311,12 +338,13 @@ export default function TimeTrackingPage() {
                     </th>
                   ))}
                   <th className="px-4 py-3 text-right">Total</th>
+                  <th className="px-3 py-3"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-subtle">
+                    <td colSpan={10} className="px-4 py-10 text-center text-subtle">
                       <div className="mb-3 text-sm">No allocations or entries this week</div>
                       <button
                         onClick={openAddRow}
@@ -335,19 +363,37 @@ export default function TimeTrackingPage() {
                       (s, d) => s + hoursFor(r.projectId, r.phaseId, toISODate(d)),
                       0,
                     );
+                    const hasAllocation = allocationsForPerson.some(
+                      (a) => a.projectId === r.projectId && (a.phaseId || null) === r.phaseId,
+                    );
+                    const rowLabel = [proj?.name || task?.name || "this row", phase?.name].filter(Boolean).join(" — ");
+                    const isEditingTask = !!task && editingTaskId === task.id;
                     return (
-                      <tr key={i} className="border-b border-border hover:bg-forge-surface/30">
+                      <tr key={i} className="group border-b border-border hover:bg-forge-surface/30">
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-2">
                             <div
                               className="h-2.5 w-2.5 shrink-0 rounded-sm"
                               style={{ backgroundColor: phase?.color || proj?.color || "#94a3b8" }}
                             />
-                            <div>
-                              <div className="font-semibold text-body">{proj?.name || task?.name || "—"}</div>
-                              {phase && <div className="text-[11px] text-subtle">{phase.name}</div>}
-                              {!proj && task && <div className="text-[11px] text-subtle">Task</div>}
-                            </div>
+                            {isEditingTask ? (
+                              <input
+                                value={editingTaskName}
+                                onChange={(e) => setEditingTaskName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") { renameTask(task!.id, editingTaskName); setEditingTaskId(null); }
+                                  if (e.key === "Escape") setEditingTaskId(null);
+                                }}
+                                autoFocus
+                                className="forge-input h-7 w-full text-sm"
+                              />
+                            ) : (
+                              <div>
+                                <div className="font-semibold text-body">{proj?.name || task?.name || "—"}</div>
+                                {phase && <div className="text-[11px] text-subtle">{phase.name}</div>}
+                                {!proj && task && <div className="text-[11px] text-subtle">Task</div>}
+                              </div>
+                            )}
                           </div>
                         </td>
                         {weekDays.map((d, j) => {
@@ -372,7 +418,7 @@ export default function TimeTrackingPage() {
                                 step="0.25"
                                 value={actual || ""}
                                 onChange={(e) => setHours(r.projectId, r.phaseId, iso, Number(e.target.value) || 0)}
-                                onFocus={() => setNotesOpenKey(cellKey)}
+                                onFocus={(e) => { setNotesOpenKey(cellKey); setNotesAnchor(e.currentTarget); }}
                                 placeholder={scheduledRounded > 0 ? String(scheduledRounded) : "—"}
                                 className="w-14 rounded border border-border bg-forge-surface/40 px-2 py-1 text-center text-xs text-body outline-none focus:border-blue-500 focus:bg-forge-bg"
                               />
@@ -384,17 +430,53 @@ export default function TimeTrackingPage() {
                                   📝 {note}
                                 </div>
                               )}
-                              {notesOpenKey === cellKey && (
+                              {notesOpenKey === cellKey && notesAnchor && (
                                 <NotesPopover
+                                  anchorEl={notesAnchor}
                                   value={note}
                                   onChange={(v) => setNotes(r.projectId, r.phaseId, iso, v)}
-                                  onClose={() => setNotesOpenKey(null)}
+                                  onClose={() => { setNotesOpenKey(null); setNotesAnchor(null); }}
                                 />
                               )}
                             </td>
                           );
                         })}
                         <td className="px-4 py-2 text-right font-mono font-semibold text-body">{rowTotal.toFixed(1)}h</td>
+                        <td className="px-3 py-2">
+                          <div className={`flex items-center justify-end gap-1 transition-opacity group-hover:opacity-100 ${isEditingTask ? "opacity-100" : "opacity-0"}`}>
+                            {task && (
+                              <button
+                                onClick={() => {
+                                  if (isEditingTask) { renameTask(task.id, editingTaskName); setEditingTaskId(null); }
+                                  else { setEditingTaskId(task.id); setEditingTaskName(task.name); }
+                                }}
+                                className={`rounded p-1 transition-colors ${isEditingTask ? "text-blue-400 hover:bg-blue-500/10" : "text-subtle hover:bg-forge-surface hover:text-body"}`}
+                                title={isEditingTask ? "Done" : "Rename"}
+                              >
+                                {isEditingTask ? (
+                                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                                    <path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                ) : (
+                                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                                    <path d="M11 2.5a1.5 1.5 0 012.121 2.121L5.5 12.243 2 13.5l1.257-3.5L11 2.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                            {!hasAllocation && (
+                              <button
+                                onClick={() => setPendingDeleteRow({ projectId: r.projectId, phaseId: r.phaseId, label: rowLabel })}
+                                className="rounded p-1 text-subtle transition-colors hover:bg-red-500/10 hover:text-red-400"
+                                title="Delete row"
+                              >
+                                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                                  <path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M4 4v9a1 1 0 001 1h6a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })
@@ -416,6 +498,7 @@ export default function TimeTrackingPage() {
                       );
                     })}
                     <td className="px-4 py-3 text-right font-mono text-heading">{weekTotal.toFixed(1)}h</td>
+                    <td></td>
                   </tr>
                 </tfoot>
               )}
@@ -584,33 +667,63 @@ export default function TimeTrackingPage() {
           </div>
         </div>
       )}
+
+      {pendingDeleteRow && (
+        <ConfirmDialog
+          title="Delete row"
+          message={<>Delete the <span className="font-semibold text-heading">{pendingDeleteRow.label}</span> row? This removes all logged hours and notes for it.</>}
+          onCancel={() => setPendingDeleteRow(null)}
+          onConfirm={() => {
+            deleteRow(pendingDeleteRow.projectId, pendingDeleteRow.phaseId);
+            setPendingDeleteRow(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function NotesPopover({
+  anchorEl,
   value,
   onChange,
   onClose,
 }: {
+  anchorEl: HTMLElement;
   value: string;
   onChange: (v: string) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    const rect = anchorEl.getBoundingClientRect();
+    setPos({ top: rect.bottom + 4, left: rect.left + rect.width / 2 });
+  }, [anchorEl]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     }
+    function handleScroll() {
+      onClose();
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
   }, [onClose]);
 
-  return (
+  if (!pos) return null;
+
+  return createPortal(
     <div
       ref={ref}
-      className="absolute left-1/2 top-full z-20 mt-1 w-48 -translate-x-1/2 rounded-lg border border-border bg-forge-panel p-2 text-left shadow-lg"
+      style={{ position: "fixed", top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
+      className="z-50 w-48 rounded-lg border border-border bg-forge-panel p-2 text-left shadow-lg"
     >
       <div className="mb-1 flex items-center justify-between">
         <label className="text-[10px] font-semibold uppercase tracking-wide text-faint">
@@ -634,6 +747,7 @@ function NotesPopover({
         placeholder="What did you work on?"
         className="w-full resize-none rounded border border-border bg-forge-surface/60 px-2 py-1 text-xs text-body outline-none focus:border-blue-500"
       />
-    </div>
+    </div>,
+    document.body,
   );
 }

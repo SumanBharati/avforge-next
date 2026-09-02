@@ -114,7 +114,7 @@ export function Scheduler({
     return () => obs.disconnect();
   }, []);
   const DAY_WIDTH = gridWidth > 0 ? Math.floor(gridWidth / 7) : (compact ? 60 : 120);
-  const { store, update, currentUserId } = usePMStore();
+  const { store, update, currentUserId, loading } = usePMStore();
   const [search, setSearch] = useState("");
   const [filterRoles, setFilterRoles] = useState<Set<string>>(new Set());
   const [filterProjects, setFilterProjects] = useState<Set<string>>(new Set());
@@ -373,7 +373,11 @@ export function Scheduler({
               {!compact && <span>This week</span>}
             </div>
           </div>
-          {visiblePeople.length === 0 ? (
+          {loading ? (
+            <div className="px-4 py-10 text-center text-sm text-subtle">
+              Loading…
+            </div>
+          ) : visiblePeople.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-subtle">
               No people match filters
             </div>

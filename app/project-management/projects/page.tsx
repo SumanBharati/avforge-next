@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { usePMStore } from "@/components/PMStoreProvider";
 import PMPageSkeleton from "@/components/skeletons/PMPageSkeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   PROJECT_COLORS,
   fmtDateShort,
@@ -19,6 +20,7 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<SchedProject | null>(null);
 
   if (loading) return <PMPageSkeleton />;
 
@@ -316,11 +318,7 @@ export default function ProjectsPage() {
                         </svg>
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete "${proj.name}"? All phases, allocations, and tasks will be removed.`)) {
-                            deleteProject(proj.id);
-                          }
-                        }}
+                        onClick={() => setPendingDelete(proj)}
                         className="rounded p-1.5 text-subtle hover:bg-red-500/10 hover:text-red-400"
                         title="Delete"
                       >
@@ -463,6 +461,18 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete project"
+          message={<>Delete <span className="font-semibold text-heading">"{pendingDelete.name}"</span>? All phases, allocations, and tasks will be removed.</>}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            deleteProject(pendingDelete.id);
+            setPendingDelete(null);
+          }}
+        />
+      )}
     </div>
   );
 }

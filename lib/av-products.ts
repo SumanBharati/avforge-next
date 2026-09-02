@@ -46,14 +46,12 @@ export interface AVProduct {
 
 export async function searchProducts(query: string, limit = 30): Promise<AVProduct[]> {
   if (!query.trim()) return [];
-  const q = query.trim();
-  const { data, error } = await supabase
-    .from("av_products")
-    .select("*")
-    .or(`type.ilike.%${q}%,manufacturer.ilike.%${q}%,model_name.ilike.%${q}%,category.ilike.%${q}%`)
-    .order("manufacturer")
-    .order("type")
-    .limit(limit);
+  const words = query.trim().split(/\s+/);
+  let q = supabase.from("av_products").select("*");
+  for (const w of words) {
+    q = q.or(`type.ilike.%${w}%,manufacturer.ilike.%${w}%,model_name.ilike.%${w}%,category.ilike.%${w}%,part_number.ilike.%${w}%`);
+  }
+  const { data, error } = await q.order("manufacturer").order("type").limit(limit);
   if (error) throw error;
   return data ?? [];
 }

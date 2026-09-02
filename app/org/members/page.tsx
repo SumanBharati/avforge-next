@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 interface Member {
   id: string;
@@ -40,6 +41,7 @@ export default function OrgMembersPage() {
   const [inviteRole, setInviteRole] = useState<string>(ROLE_OPTIONS[0]);
   const [inviteError, setInviteError] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<Member | null>(null);
 
   const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
 
@@ -152,7 +154,6 @@ export default function OrgMembersPage() {
   }
 
   async function handleRemoveMember(memberId: string) {
-    if (!confirm("Remove this member from the organization?")) return;
     await supabase.from("organization_members").delete().eq("id", memberId);
     await loadMembers();
   }
@@ -347,7 +348,7 @@ export default function OrgMembersPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => handleRemoveMember(member.id)}
+                      onClick={() => setPendingRemove(member)}
                       className="rounded p-1 text-subtle transition-colors hover:text-red-400"
                     >
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -398,6 +399,19 @@ export default function OrgMembersPage() {
           </div>
         )}
       </div>
+
+      {pendingRemove && (
+        <ConfirmDialog
+          title="Remove member"
+          message={<>Remove <span className="font-semibold text-heading">{pendingRemove.full_name || pendingRemove.email || "this member"}</span> from the organization?</>}
+          confirmLabel="Remove"
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => {
+            handleRemoveMember(pendingRemove.id);
+            setPendingRemove(null);
+          }}
+        />
+      )}
     </div>
   );
 }
