@@ -82,6 +82,11 @@ export async function deleteProduct(id: string): Promise<void> {
   await supabase.from("av_products").delete().eq("id", id);
 }
 
+export async function updateProduct(id: string, patch: Partial<Omit<AVProduct, "id">>): Promise<{ error?: string }> {
+  const { error } = await supabase.from("av_products").update(patch).eq("id", id);
+  return error ? { error: error.message } : {};
+}
+
 export async function getProductCount(): Promise<number> {
   const { count } = await supabase
     .from("av_products")

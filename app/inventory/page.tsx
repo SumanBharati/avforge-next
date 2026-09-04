@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getFilterOptions, getProductCount, listProducts, type AVProduct } from "@/lib/av-products";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { deleteProduct, getFilterOptions, getProductCount, listProducts, updateProduct, type AVProduct } from "@/lib/av-products";
 import { type OrgEquipmentItem } from "@/lib/equipment-library";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
+import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Section = "org" | "avforge" | "inventory";
 
@@ -130,7 +133,7 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
   },
   {
     key: "avforge",
-    label: "AV Forge Library",
+    label: "AV Forge Equipment Library",
     description: "Vetted AV products and full specifications maintained by AV Forge.",
     icon: <SparkleIcon size={28} />,
     iconBg: "bg-blue-500/10",
@@ -215,7 +218,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
                 <line x1="16" y1="17" x2="8" y2="17" />
               </svg>
               <p className="text-[13px] font-medium text-subtle">No products yet</p>
-              <p className="mt-1 text-[12px] text-faint">Equipment added to the AV Forge Library will appear here.</p>
+              <p className="mt-1 text-[12px] text-faint">Equipment added to the AV Forge Equipment Library will appear here.</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -577,9 +580,58 @@ function InventoryView({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ── AV Forge Library section ─────────────────────────────────────────────────
+// ── AV Forge Equipment Library section ───────────────────────────────────────
 
 const LIBRARY_PAGE_SIZE = 40;
+
+function avProductToFormValue(p: AVProduct): EquipmentFormValue {
+  return {
+    manufacturer: p.manufacturer,
+    model: p.model_name,
+    category: p.category,
+    notes: p.type,
+    unitCost: p.price,
+    partNumber: p.part_number,
+    msrp: p.msrp,
+    cost: p.cost,
+    ports: p.ports,
+    ampDraw: p.amp_draw,
+    voltage: p.voltage,
+    powerWatts: p.power_watts,
+    btuHr: p.btu_hr,
+    rackMounted: p.rack_mounted,
+    rackUnits: p.rack_units,
+    widthIn: p.width_in,
+    heightIn: p.height_in,
+    depthIn: p.depth_in,
+    weightLb: p.weight_lb,
+  };
+}
+
+function applyFormValueToAVProduct(base: AVProduct, v: EquipmentFormValue): AVProduct {
+  return {
+    ...base,
+    manufacturer: v.manufacturer,
+    model_name: v.model,
+    category: v.category,
+    type: v.notes,
+    price: v.unitCost,
+    part_number: v.partNumber,
+    msrp: v.msrp,
+    cost: v.cost,
+    ports: v.ports,
+    amp_draw: v.ampDraw,
+    voltage: v.voltage,
+    power_watts: v.powerWatts,
+    btu_hr: v.btuHr,
+    rack_mounted: v.rackMounted,
+    rack_units: v.rackUnits,
+    width_in: v.widthIn,
+    height_in: v.heightIn,
+    depth_in: v.depthIn,
+    weight_lb: v.weightLb,
+  };
+}
 
 function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const { activeOrg } = useOrg();
@@ -594,6 +646,10 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const [categories, setCategories] = useState<string[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
   const [selected, setSelected] = useState<AVProduct | null>(null);
+  const [editingProduct, setEditingProduct] = useState<AVProduct | null>(null);
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [pendingDeleteProduct, setPendingDeleteProduct] = useState<AVProduct | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
   const [addingToOrg, setAddingToOrg] = useState(false);
@@ -629,6 +685,21 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             model: product.model_name,
             description: product.type || "",
             unit_cost: product.price ?? 0,
+            part_number: product.part_number,
+            msrp: product.msrp,
+            cost: product.cost,
+            color: product.color,
+            ports: product.ports ?? [],
+            amp_draw: product.amp_draw,
+            voltage: product.voltage,
+            power_watts: product.power_watts,
+            btu_hr: product.btu_hr,
+            rack_mounted: product.rack_mounted ?? false,
+            rack_units: product.rack_units,
+            width_in: product.width_in,
+            height_in: product.height_in,
+            depth_in: product.depth_in,
+            weight_lb: product.weight_lb,
           });
           if (!error) added++;
           else skipped++;
@@ -792,6 +863,28 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
       .finally(() => setLoadingMore(false));
   }
 
+  async function handleSaveProduct() {
+    if (!editingProduct || !editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()) return;
+    setSavingProduct(true);
+    const { id, ...patch } = editingProduct;
+    const { error } = await updateProduct(id, patch);
+    if (!error) {
+      setProducts((prev) => prev.map((p) => (p.id === id ? editingProduct : p)));
+    }
+    setSavingProduct(false);
+    setEditingProduct(null);
+  }
+
+  async function handleDeleteProduct() {
+    if (!pendingDeleteProduct) return;
+    setDeletingProduct(true);
+    await deleteProduct(pendingDeleteProduct.id);
+    setProducts((prev) => prev.filter((p) => p.id !== pendingDeleteProduct.id));
+    setTotal((prev) => Math.max(0, prev - 1));
+    setDeletingProduct(false);
+    setPendingDeleteProduct(null);
+  }
+
   return (
     <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
@@ -802,7 +895,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             Library
           </button>
           <span className="text-border">/</span>
-          <h2 className="text-xl font-bold text-heading">AV Forge Library</h2>
+          <h2 className="text-xl font-bold text-heading">AV Forge Equipment Library</h2>
         </div>
         <span className="text-[12px] text-subtle">{total} products</span>
       </div>
@@ -867,16 +960,17 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                 <th className="px-4 py-3 text-right text-[11px] font-semibold text-muted">Price</th>
                 <th className="px-4 py-3 text-center text-[11px] font-semibold text-muted">Rack</th>
                 <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Part #</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
+                  <td colSpan={7} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-[13px] text-subtle">No products found.</td>
+                  <td colSpan={7} className="px-4 py-16 text-center text-[13px] text-subtle">No products found.</td>
                 </tr>
               ) : (
                 products.map((p, index) => (
@@ -907,6 +1001,24 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                       {p.rack_mounted ? `${p.rack_units ?? "—"}U` : <span className="text-faint">—</span>}
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-subtle">{p.part_number || <span className="text-faint">—</span>}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); setEditingProduct({ ...p }); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setPendingDeleteProduct(p); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400" title="Delete">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -934,27 +1046,33 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           onClick={() => setSelected(null)}
         >
           <div
-            className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-border bg-forge-bg shadow-2xl"
+            className="flex w-full max-w-lg max-h-[85vh] flex-col rounded-2xl border border-border bg-forge-bg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <div>
-                <h3 className="text-[15px] font-bold text-heading">{selected.manufacturer} {selected.model_name}</h3>
-                <p className="text-[12px] text-subtle">{selected.category} · {selected.type}</p>
-              </div>
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+              <h3 className="text-[15px] font-bold text-heading">{selected.manufacturer} {selected.model_name}</h3>
               <button onClick={() => setSelected(null)} className="text-muted hover:text-heading transition-colors">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
-            <div className="space-y-4 p-6 text-[13px]">
+            <div className="flex-1 overflow-y-auto space-y-4 p-6 text-[13px]">
               <div className="grid grid-cols-2 gap-3">
+                <DetailField label="Manufacturer" value={selected.manufacturer} />
+                <DetailField label="Model" value={selected.model_name} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <DetailField label="Category" value={selected.category} />
                 <DetailField label="Part Number" value={selected.part_number} />
-                <DetailField label="Price" value={selected.price ? `$${selected.price.toLocaleString()}` : null} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <DetailField label="Unit Cost" value={selected.price ? `$${selected.price.toLocaleString()}` : null} />
                 <DetailField label="MSRP" value={selected.msrp ? `$${selected.msrp.toLocaleString()}` : null} />
                 <DetailField label="Cost" value={selected.cost ? `$${selected.cost.toLocaleString()}` : null} />
               </div>
+              <DetailField label="Type" value={selected.type} />
+
               <div className="border-t border-border pt-4">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Power &amp; Electrical</div>
                 <div className="grid grid-cols-2 gap-3">
@@ -964,34 +1082,38 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                   <DetailField label="BTU/hr" value={selected.btu_hr ? `${selected.btu_hr}` : null} />
                 </div>
               </div>
-              {selected.ports && selected.ports.length > 0 && (
-                <div className="border-t border-border pt-4">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
-                  <div className="grid grid-cols-2 gap-2">
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
+                <DetailField label="Rack Mounted" value={selected.rack_mounted ? `Yes (${selected.rack_units ?? "?"}U)` : "No"} />
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <DetailField label="Weight (lb)" value={selected.weight_lb} />
+                  <div className="grid grid-cols-3 gap-2">
+                    <DetailField label="W (in)" value={selected.width_in} />
+                    <DetailField label="H (in)" value={selected.height_in} />
+                    <DetailField label="D (in)" value={selected.depth_in} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
+                {selected.ports && selected.ports.length > 0 ? (
+                  <div className="space-y-2">
                     {selected.ports.map((port, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-md border border-border bg-forge-surface/40 px-2.5 py-1.5 text-[12px]">
-                        <span className="text-body">{port.label}</span>
-                        <span className="text-faint">{port.side} · {port.dir}</span>
+                      <div key={i} className="grid grid-cols-4 gap-2 rounded-md border border-border bg-forge-surface/40 px-2.5 py-1.5 text-[12px]">
+                        <span className="text-body capitalize">{port.side}</span>
+                        <span className="text-body uppercase">{port.dir}</span>
+                        <span className="text-body">{port.signal || <span className="text-faint">—</span>}</span>
+                        <span className="text-body">{port.label || <span className="text-faint">—</span>}</span>
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-              <div className="border-t border-border pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <DetailField label="Rack Mounted" value={selected.rack_mounted ? `Yes (${selected.rack_units ?? "?"}U)` : "No"} />
-                  <DetailField label="Weight" value={selected.weight_lb ? `${selected.weight_lb} lb` : null} />
-                  <DetailField
-                    label="Dimensions (W×H×D)"
-                    value={
-                      selected.width_in || selected.height_in || selected.depth_in
-                        ? `${selected.width_in ?? "?"} × ${selected.height_in ?? "?"} × ${selected.depth_in ?? "?"} in`
-                        : null
-                    }
-                  />
-                </div>
+                ) : (
+                  <p className="text-[12px] text-faint">No ports defined.</p>
+                )}
               </div>
+
               {selected.notes && (
                 <div className="border-t border-border pt-4">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">Notes</div>
@@ -999,7 +1121,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                 </div>
               )}
             </div>
-            <div className="border-t border-border px-6 py-4">
+            <div className="shrink-0 border-t border-border px-6 py-4">
               <button
                 onClick={() => addToOrgLibrary(selected)}
                 disabled={!activeOrg || addingToOrg}
@@ -1030,7 +1152,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
             <h3 className="text-[15px] font-bold text-heading">Already in your library</h3>
             <p className="mt-2 text-[13px] text-muted">
-              {overrideConfirm.product.manufacturer} {overrideConfirm.product.model_name} is already in your Organization&apos;s Equipment Library. Do you want to override it with the current AV Forge Library details?
+              {overrideConfirm.product.manufacturer} {overrideConfirm.product.model_name} is already in your Organization&apos;s Equipment Library. Do you want to override it with the current AV Forge Equipment Library details?
             </p>
             <div className="mt-5 flex items-center justify-end gap-3">
               <button
@@ -1079,6 +1201,32 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           </div>
         </>
       )}
+
+      {/* Edit Modal */}
+      {editingProduct && (
+        <EquipmentFormModal
+          title="Edit Product"
+          value={avProductToFormValue(editingProduct)}
+          onChange={(v) => setEditingProduct(applyFormValueToAVProduct(editingProduct, v))}
+          onCancel={() => setEditingProduct(null)}
+          onSave={handleSaveProduct}
+          saving={savingProduct}
+          saveDisabled={!editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()}
+          categories={categories}
+          notesLabel="Type"
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {pendingDeleteProduct && (
+        <ConfirmDialog
+          title="Delete product"
+          message={<>Delete <span className="font-semibold text-heading">{pendingDeleteProduct.manufacturer} {pendingDeleteProduct.model_name}</span> from the AV Forge Equipment Library? This removes it for every organization and cannot be undone.</>}
+          busy={deletingProduct}
+          onCancel={() => setPendingDeleteProduct(null)}
+          onConfirm={handleDeleteProduct}
+        />
+      )}
     </div>
   );
 }
@@ -1117,6 +1265,55 @@ const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> =
   depth_in: null,
   weight_lb: null,
 });
+
+function orgItemToFormValue(item: OrgEquipmentItem | Omit<OrgEquipmentItem, "id" | "user_id">): EquipmentFormValue {
+  return {
+    manufacturer: item.manufacturer,
+    model: item.model,
+    category: item.category,
+    notes: item.description,
+    unitCost: item.unit_cost,
+    partNumber: item.part_number,
+    msrp: item.msrp,
+    cost: item.cost,
+    ports: item.ports,
+    ampDraw: item.amp_draw,
+    voltage: item.voltage,
+    powerWatts: item.power_watts,
+    btuHr: item.btu_hr,
+    rackMounted: item.rack_mounted,
+    rackUnits: item.rack_units,
+    widthIn: item.width_in,
+    heightIn: item.height_in,
+    depthIn: item.depth_in,
+    weightLb: item.weight_lb,
+  };
+}
+
+function applyFormValueToOrgItem<T extends OrgEquipmentItem | Omit<OrgEquipmentItem, "id" | "user_id">>(base: T, v: EquipmentFormValue): T {
+  return {
+    ...base,
+    manufacturer: v.manufacturer,
+    model: v.model,
+    category: v.category,
+    description: v.notes,
+    unit_cost: v.unitCost,
+    part_number: v.partNumber,
+    msrp: v.msrp,
+    cost: v.cost,
+    ports: v.ports,
+    amp_draw: v.ampDraw,
+    voltage: v.voltage,
+    power_watts: v.powerWatts,
+    btu_hr: v.btuHr,
+    rack_mounted: v.rackMounted,
+    rack_units: v.rackUnits,
+    width_in: v.widthIn,
+    height_in: v.heightIn,
+    depth_in: v.depthIn,
+    weight_lb: v.weightLb,
+  };
+}
 
 function OrgLibraryView({ onBack }: { onBack: () => void }) {
   const { activeOrg } = useOrg();
@@ -1320,7 +1517,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          Add Item
+          Add Equipment
         </button>
       </div>
 
@@ -1382,8 +1579,8 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
                     {items.length === 0 ? (
                       <>
                         No equipment yet.{" "}
-                        <button onClick={openNew} className="text-blue-400 hover:text-blue-300 transition-colors">Add the first item</button>
-                        {" "}or add products from the AV Forge Library.
+                        <button onClick={openNew} className="text-blue-400 hover:text-blue-300 transition-colors">Add your first equipment</button>
+                        {" "}or add equipment from the AV Forge Equipment Library.
                       </>
                     ) : (
                       "No items found."
@@ -1442,192 +1639,16 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
 
       {/* Add / Edit Modal */}
       {showModal && editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-border bg-forge-bg shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-forge-bg px-6 py-4">
-              <h3 className="text-[15px] font-bold text-heading">{"id" in editing ? "Edit Item" : "Add Item"}</h3>
-              <button onClick={() => { setShowModal(false); setEditing(null); }} className="text-muted hover:text-heading transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>Manufacturer *</label>
-                  <input type="text" value={editing.manufacturer} onChange={(e) => setEditing({ ...editing, manufacturer: e.target.value })} className={inputCls} placeholder="e.g. Samsung" />
-                </div>
-                <div>
-                  <label className={labelCls}>Model *</label>
-                  <input type="text" value={editing.model} onChange={(e) => setEditing({ ...editing, model: e.target.value })} className={inputCls} placeholder="e.g. QM85B" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>Category</label>
-                  <input type="text" value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })} className={inputCls} placeholder="e.g. Display" list="org-lib-categories" />
-                  <datalist id="org-lib-categories">
-                    {categories.map((c) => <option key={c} value={c} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label className={labelCls}>Part Number</label>
-                  <input type="text" value={editing.part_number ?? ""} onChange={(e) => setEditing({ ...editing, part_number: e.target.value || null })} className={inputCls} placeholder="Optional" />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>Unit Cost</label>
-                  <input type="number" min={0} step="0.01" value={editing.unit_cost} onChange={(e) => setEditing({ ...editing, unit_cost: Math.max(0, Number(e.target.value)) })} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>MSRP</label>
-                  <input type="number" min={0} step="0.01" value={editing.msrp ?? ""} onChange={(e) => setEditing({ ...editing, msrp: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })} className={inputCls} placeholder="—" />
-                </div>
-                <div>
-                  <label className={labelCls}>Cost</label>
-                  <input type="number" min={0} step="0.01" value={editing.cost ?? ""} onChange={(e) => setEditing({ ...editing, cost: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })} className={inputCls} placeholder="—" />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>Description</label>
-                <textarea value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} className={inputCls + " resize-none"} rows={2} placeholder="Optional description…" />
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Power &amp; Electrical</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelCls}>Voltage (V)</label>
-                    <input type="number" min={0} step="0.1" value={editing.voltage ?? ""} onChange={(e) => setEditing({ ...editing, voltage: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Amp Draw (A)</label>
-                    <input type="number" min={0} step="0.1" value={editing.amp_draw ?? ""} onChange={(e) => setEditing({ ...editing, amp_draw: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Power (W)</label>
-                    <input type="number" min={0} step="1" value={editing.power_watts ?? ""} onChange={(e) => setEditing({ ...editing, power_watts: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>BTU/hr</label>
-                    <input type="number" min={0} step="1" value={editing.btu_hr ?? ""} onChange={(e) => setEditing({ ...editing, btu_hr: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Physical</div>
-                <div className="mb-3 flex items-center gap-2">
-                  <input
-                    id="org-lib-rack-mounted"
-                    type="checkbox"
-                    checked={editing.rack_mounted}
-                    onChange={(e) => setEditing({ ...editing, rack_mounted: e.target.checked })}
-                    className="h-3.5 w-3.5 rounded border-border"
-                  />
-                  <label htmlFor="org-lib-rack-mounted" className="text-[12px] text-body">Rack mounted</label>
-                  {editing.rack_mounted && (
-                    <input
-                      type="number" min={0} step="0.5"
-                      value={editing.rack_units ?? ""}
-                      onChange={(e) => setEditing({ ...editing, rack_units: e.target.value === "" ? null : Number(e.target.value) })}
-                      className={inputCls + " ml-2 w-24"}
-                      placeholder="RU"
-                    />
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelCls}>Weight (lb)</label>
-                    <input type="number" min={0} step="0.1" value={editing.weight_lb ?? ""} onChange={(e) => setEditing({ ...editing, weight_lb: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className={labelCls}>W (in)</label>
-                      <input type="number" min={0} step="0.1" value={editing.width_in ?? ""} onChange={(e) => setEditing({ ...editing, width_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>H (in)</label>
-                      <input type="number" min={0} step="0.1" value={editing.height_in ?? ""} onChange={(e) => setEditing({ ...editing, height_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>D (in)</label>
-                      <input type="number" min={0} step="0.1" value={editing.depth_in ?? ""} onChange={(e) => setEditing({ ...editing, depth_in: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
-                  <button
-                    type="button"
-                    onClick={() => setEditing({ ...editing, ports: [...editing.ports, { side: "right", dir: "out", signal: "", label: "" }] })}
-                    className="text-[11px] font-medium text-blue-400 hover:text-blue-300 transition-colors"
-                  >
-                    + Add port
-                  </button>
-                </div>
-                {editing.ports.length === 0 ? (
-                  <p className="text-[12px] text-faint">No ports defined.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {editing.ports.map((port, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <select
-                          value={port.side}
-                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, side: e.target.value } : p) })}
-                          className={inputCls + " w-24"}
-                        >
-                          <option value="left">Left</option>
-                          <option value="right">Right</option>
-                          <option value="top">Top</option>
-                          <option value="bottom">Bottom</option>
-                        </select>
-                        <select
-                          value={port.dir}
-                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, dir: e.target.value } : p) })}
-                          className={inputCls + " w-20"}
-                        >
-                          <option value="in">In</option>
-                          <option value="out">Out</option>
-                        </select>
-                        <input
-                          type="text" value={port.signal}
-                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, signal: e.target.value } : p) })}
-                          className={inputCls} placeholder="signal (hdmi, usb…)"
-                        />
-                        <input
-                          type="text" value={port.label}
-                          onChange={(e) => setEditing({ ...editing, ports: editing.ports.map((p, j) => j === i ? { ...p, label: e.target.value } : p) })}
-                          className={inputCls} placeholder="label"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setEditing({ ...editing, ports: editing.ports.filter((_, j) => j !== i) })}
-                          className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-border bg-forge-bg px-6 py-4">
-              <button onClick={() => { setShowModal(false); setEditing(null); }} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
-                Cancel
-              </button>
-              <button onClick={handleSave} disabled={saving || !editing.manufacturer.trim() || !editing.model.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
-                {saving ? "Saving…" : "Save Item"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <EquipmentFormModal
+          title={"id" in editing ? "Edit Item" : "Add Item"}
+          value={orgItemToFormValue(editing)}
+          onChange={(v) => setEditing(applyFormValueToOrgItem(editing, v))}
+          onCancel={() => { setShowModal(false); setEditing(null); }}
+          onSave={handleSave}
+          saving={saving}
+          saveDisabled={!editing.manufacturer.trim() || !editing.model.trim()}
+          categories={categories}
+        />
       )}
 
       {/* Delete confirmation */}
@@ -1798,19 +1819,33 @@ function PlaceholderView({ label, description, icon, iconBg, iconColor, onBack }
 // ── Root ─────────────────────────────────────────────────────────────────────
 
 export default function LibraryPage() {
-  const [activeSection, setActiveSection] = useState<Section | null>(null);
+  return (
+    <Suspense fallback={null}>
+      <LibraryPageInner />
+    </Suspense>
+  );
+}
+
+function LibraryPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeSection = searchParams.get("section") as Section | null;
+
+  function goToSection(section: Section | null) {
+    router.push(section ? `/inventory?section=${section}` : "/inventory");
+  }
 
   if (activeSection === "inventory") {
-    return <InventoryView onBack={() => setActiveSection(null)} />;
+    return <InventoryView onBack={() => goToSection(null)} />;
   }
 
   if (activeSection === "org") {
-    return <OrgLibraryView onBack={() => setActiveSection(null)} />;
+    return <OrgLibraryView onBack={() => goToSection(null)} />;
   }
 
   if (activeSection === "avforge") {
-    return <AVForgeLibraryView onBack={() => setActiveSection(null)} />;
+    return <AVForgeLibraryView onBack={() => goToSection(null)} />;
   }
 
-  return <LandingView onSelect={setActiveSection} />;
+  return <LandingView onSelect={goToSection} />;
 }

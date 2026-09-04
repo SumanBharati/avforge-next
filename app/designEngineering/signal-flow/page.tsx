@@ -339,7 +339,7 @@ export default function SignalFlowPage() {
           const dbData = await searchProducts(modalSearch).catch(() => []);
           setModalResults(dbData.map((p: any) => ({
             libraryProductId: p.id,
-            type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
+            type: p.type, mfr: p.manufacturer, model: p.model_name, part_number: p.part_number, price: p.price,
             color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
             rack_mounted: p.rack_mounted, rack_units: p.rack_units,
             amp_draw: p.amp_draw, voltage: p.voltage, power_watts: p.power_watts, btu_hr: p.btu_hr,
@@ -357,7 +357,7 @@ export default function SignalFlowPage() {
         const orgData = await searchOrgLibrary(modalSearch, activeOrg.id).catch(() => []);
         setModalResults(orgData.map((p) => ({
           orgLibraryId: p.id,
-          type: p.description || p.model, mfr: p.manufacturer, model: p.model, price: p.unit_cost,
+          type: p.description || p.model, mfr: p.manufacturer, model: p.model, part_number: p.part_number, price: p.unit_cost,
           color: p.color || "#64748b", ports: p.ports || [], cat: p.category,
           rack_mounted: p.rack_mounted, rack_units: p.rack_units,
           amp_draw: p.amp_draw, voltage: p.voltage, power_watts: p.power_watts, btu_hr: p.btu_hr,
@@ -465,7 +465,7 @@ export default function SignalFlowPage() {
           || candidates.find((p:any)=>same(p.manufacturer,dev.mfr) && same(p.type,dev.type))
           || null;
       }
-      if (!product) throw new Error(`No exact match found in the AV Forge Library for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
+      if (!product) throw new Error(`No exact match found in the AV Forge Equipment Library for ${dev.mfr || ""} ${dev.model || dev.type}`.trim());
 
       const freshPorts = expandPortGroups(product.ports || []);
       const oldByKey = new Map<string,any[]>();
@@ -493,6 +493,7 @@ export default function SignalFlowPage() {
         type: product!.type,
         mfr: product!.manufacturer,
         model: product!.model_name,
+        part_number: product!.part_number,
         price: product!.price,
         color: product!.color || d.color,
         ports,
@@ -504,9 +505,9 @@ export default function SignalFlowPage() {
         w: 0,
         h: 0,
       }) : d));
-      setRefreshNotice({kind:"ok",message:`Equipment refreshed from the AV Forge Library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
+      setRefreshNotice({kind:"ok",message:`Equipment refreshed from the AV Forge Equipment Library${removedCableCount ? `; ${removedCableCount} cable${removedCableCount===1?"":"s"} on removed ports deleted` : ""}.`});
     } catch (error:any) {
-      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from the AV Forge Library."});
+      setRefreshNotice({kind:"error",message:error?.message || "Unable to refresh equipment from the AV Forge Equipment Library."});
     } finally {
       setRefreshingDeviceId(null);
       window.setTimeout(()=>setRefreshNotice(null),5000);
@@ -556,6 +557,7 @@ export default function SignalFlowPage() {
         type: product!.description || product!.model,
         mfr: product!.manufacturer,
         model: product!.model,
+        part_number: product!.part_number,
         price: product!.unit_cost,
         color: product!.color || d.color,
         cat: product!.category,
@@ -1910,8 +1912,9 @@ export default function SignalFlowPage() {
                 <rect x={dev.x+panOffset.x+2} y={dev.y+panOffset.y+2} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--text-faint))" opacity={0.15} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#8b5cf6":"#4b5563"} strokeWidth={isSel?2:1.5} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={4} height={dev.h} rx={2} fill="#4b5563" opacity={0.8} />
-                {(dev.mfr||dev.model)&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={11} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={700}>{[dev.mfr&&dev.mfr!=="Generic"?dev.mfr:null,dev.model&&dev.model!=="—"?dev.model:null].filter(Boolean).join(" · ")}</text>}
-                <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(dev.mfr||dev.model?23:16)} textAnchor="middle" fontSize={8} fill="rgb(var(--text-subtle))" fontFamily="Inter, sans-serif">{dev.type}</text>
+                {dev.cat&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y-3} textAnchor="middle" fontSize={9} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={600}>{dev.cat}</text>}
+                {(dev.mfr||dev.model)&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={11} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={400}>{[dev.mfr&&dev.mfr!=="Generic"?dev.mfr:null,dev.model&&dev.model!=="—"?dev.model:null].filter(Boolean).join(" · ")}</text>}
+                <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(dev.mfr||dev.model?23:16)} textAnchor="middle" fontSize={8} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif">{dev.part_number || dev.type}</text>
                 {leftPorts.map((port:any,pi:number)=>{
                   const spacing = (dev.h-PORT_TOP_PAD-DEVICE_FOOTER_H)/(leftPorts.length+1);
                   const py = dev.y+panOffset.y+PORT_TOP_PAD+spacing*(pi+1);
@@ -2374,7 +2377,7 @@ export default function SignalFlowPage() {
           {modalSearch.trim() && (
             <div style={{margin:"0 20px",marginBottom:8}}>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"rgb(var(--text-subtle))",marginBottom:6}}>
-                {modalGlobalSearch ? "AV Forge Library" : "My Organization's Equipment Library"}
+                {modalGlobalSearch ? "AV Forge Equipment Library" : "My Organization's Equipment Library"}
               </div>
               <div style={{maxHeight:220,overflowY:"auto",border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
                 {modalLoading ? (
