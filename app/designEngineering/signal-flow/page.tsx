@@ -6,6 +6,7 @@ import { searchOrgLibrary, getOrgLibraryItemById } from "@/lib/equipment-library
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 import { useOrg } from "@/components/OrgProvider";
+import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
 
 const SIGNAL_TYPES = [
   {id:"hdmi",name:"HDMI",color:"#8b5cf6"},
@@ -106,6 +107,56 @@ const DEVICE_LIBRARY = [
   ]},
 ];
 
+function deviceToFormValue(d: any): EquipmentFormValue {
+  return {
+    manufacturer: d.mfr || "",
+    model: d.model || "",
+    category: d.cat || "",
+    notes: d.type || "",
+    unitCost: d.price ?? 0,
+    partNumber: d.part_number ?? null,
+    msrp: d.msrp ?? null,
+    cost: d.cost ?? null,
+    ports: d.ports || [],
+    ampDraw: d.amp_draw ?? null,
+    voltage: d.voltage ?? null,
+    powerWatts: d.power_watts ?? null,
+    btuHr: d.btu_hr ?? null,
+    rackMounted: d.rackMounted ?? d.rack_mounted ?? false,
+    rackUnits: d.rack_units ?? null,
+    widthIn: d.width_in ?? null,
+    heightIn: d.height_in ?? null,
+    depthIn: d.depth_in ?? null,
+    weightLb: d.weight_lb ?? null,
+  };
+}
+
+function applyFormValueToDevice(d: any, v: EquipmentFormValue) {
+  return {
+    ...d,
+    mfr: v.manufacturer,
+    model: v.model,
+    cat: v.category,
+    type: v.notes,
+    price: v.unitCost,
+    part_number: v.partNumber,
+    msrp: v.msrp,
+    cost: v.cost,
+    ports: v.ports,
+    amp_draw: v.ampDraw,
+    voltage: v.voltage,
+    power_watts: v.powerWatts,
+    btu_hr: v.btuHr,
+    rackMounted: v.rackMounted,
+    rack_mounted: v.rackMounted,
+    rack_units: v.rackUnits,
+    width_in: v.widthIn,
+    height_in: v.heightIn,
+    depth_in: v.depthIn,
+    weight_lb: v.weightLb,
+  };
+}
+
 export default function SignalFlowPage() {
   const [devices, setDevices] = useState<any[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
@@ -147,17 +198,10 @@ export default function SignalFlowPage() {
   const [contextMenu, setContextMenu] = useState<{x:number,y:number,roomId:string,showColors?:boolean}|null>(null);
   const [deviceContextMenu, setDeviceContextMenu] = useState<{x:number,y:number,deviceId:any}|null>(null);
   const [connContextMenu, setConnContextMenu] = useState<{x:number,y:number,connId:any}|null>(null);
+  const [annotContextMenu, setAnnotContextMenu] = useState<{x:number,y:number,annotId:any}|null>(null);
   const [refreshingDeviceId, setRefreshingDeviceId] = useState<any>(null);
   const [refreshNotice, setRefreshNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
   const [editingDevice, setEditingDevice] = useState<any>(null);
-  const [editDeviceName, setEditDeviceName] = useState("");
-  const [editDeviceMfr, setEditDeviceMfr] = useState("");
-  const [editDeviceModel, setEditDeviceModel] = useState("");
-  const [editDevicePorts, setEditDevicePorts] = useState<any[]>([]);
-  const [editDeviceVoltage, setEditDeviceVoltage] = useState("");
-  const [editDeviceAmps, setEditDeviceAmps] = useState("");
-  const [editDeviceWatts, setEditDeviceWatts] = useState("");
-  const [editDeviceBtu, setEditDeviceBtu] = useState("");
   const { activeOrg } = useOrg();
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
@@ -247,14 +291,21 @@ export default function SignalFlowPage() {
     saveTimer.current = setTimeout(() => doSave(), 1500);
   }, [devices, connections, rooms, loaded, doSave]);
 
-  // Sync devices to shared BOM
+  // Sync devices to shared BOM. Group/display by manufacturer + model (the
+  // device's actual identity, editable via Edit Equipment) rather than the
+  // Description field alone — otherwise renaming a cloned device's make/model
+  // doesn't split it out of the original's line item.
   useEffect(() => {
-    updateSlice('signal-flow', devices.map((d: any) => ({
-      name: d.type,
-      mfr: d.mfr || getMfr(d.type),
-      cat: d.cat || d.category || '',
-      listPrice: d.price || 0,
-    })));
+    updateSlice('signal-flow', devices.map((d: any) => {
+      const mfrText = d.mfr && d.mfr!=="Generic" ? d.mfr : null;
+      const modelText = d.model && d.model!=="—" ? d.model : null;
+      return {
+        name: [mfrText, modelText].filter(Boolean).join(" ") || d.type,
+        mfr: d.mfr || getMfr(d.type),
+        cat: d.cat || d.category || '',
+        listPrice: d.price || 0,
+      };
+    }));
   }, [devices, updateSlice]);
 
   // Auto-expand BOM when a device is added (not on initial load)
@@ -397,6 +448,14 @@ export default function SignalFlowPage() {
 
   const DEVICE_FOOTER_H = 22;
 
+  // Header top padding: taller when manufacturer and model render as two
+  // separate lines above the ports, instead of one combined line.
+  const getTopPad = (d: any) => {
+    const mfrText = d.mfr&&d.mfr!=="Generic"?d.mfr:null;
+    const modelText = d.model&&d.model!=="—"?d.model:null;
+    return [mfrText, modelText].filter(Boolean).length===2 ? 36 : 26;
+  };
+
   // Size a device box so all port rows fit, left/right labels can't collide,
   // and the rack-mounted control has a dedicated footer.
   // Port labels are 8px monospace (~4.9px/char); each port row needs ~17px
@@ -408,9 +467,11 @@ export default function SignalFlowPage() {
     const rows = Math.max(left.length, right.length, 1);
     const maxL = left.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
     const maxR = right.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
-    const title = [d.mfr&&d.mfr!=="Generic"?d.mfr:null, d.model&&d.model!=="—"?d.model:null].filter(Boolean).join(" · ");
-    const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, title.length*7 + 24, (d.type||"").length*4.5 + 20);
-    const h = Math.max(78, d.h||0, 26 + 17*(rows+1) + DEVICE_FOOTER_H);
+    const mfrText = d.mfr&&d.mfr!=="Generic"?d.mfr:null;
+    const modelText = d.model&&d.model!=="—"?d.model:null;
+    const topPad = getTopPad(d);
+    const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, Math.max((mfrText||"").length,(modelText||"").length)*7 + 24, (d.type||"").length*4.5 + 20);
+    const h = Math.max(78, d.h||0, topPad + 17*(rows+1) + DEVICE_FOOTER_H);
     return {...d, w, h};
   };
 
@@ -591,7 +652,44 @@ export default function SignalFlowPage() {
     setDevices(prev=>[...prev,sizeDevice({...template,id,x:wx,y:wy,ports,rackMounted})]);
   };
 
-  const roomColors = ["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
+  // Clone one or more devices — fresh ids for the devices and their ports (so
+  // connections never get shared between original and clone), offset so the
+  // copies don't sit exactly on top of the originals.
+  const cloneDevices = (sourceDevices: any[], dx = 30, dy = 30) => {
+    if (sourceDevices.length === 0) return;
+    pushUndo();
+    const clones = sourceDevices.map((src:any) => {
+      const id = nextId.current++;
+      const ports = (src.ports||[]).map((p:any,i:number)=>({...p,id:`${id}-p${i}`}));
+      return sizeDevice({...src,id,x:src.x+dx,y:src.y+dy,ports,w:0,h:0});
+    });
+    setDevices(prev=>[...prev,...clones]);
+    clearMarqueeSel();
+    if (clones.length === 1) { setSelected(clones[0].id); }
+    else { setSelected(null); setSelectedIds(new Set(clones.map((c:any)=>c.id))); }
+  };
+
+  const clipboardRef = useRef<any[]>([]);
+  const pasteCountRef = useRef(0);
+  const copySelectedDevices = () => {
+    const ids = selectedIds.size > 0 ? selectedIds : (selected ? new Set([selected]) : new Set());
+    if (ids.size === 0) return;
+    clipboardRef.current = devicesRef.current.filter((d:any)=>ids.has(d.id)).map((d:any)=>({...d, ports:(d.ports||[]).map((p:any)=>({...p}))}));
+    pasteCountRef.current = 0;
+  };
+  const pasteClipboard = () => {
+    if (clipboardRef.current.length === 0) return;
+    pasteCountRef.current += 1;
+    const off = 24 * pasteCountRef.current;
+    cloneDevices(clipboardRef.current, off, off);
+  };
+  // Ref-mirrored for the window keydown handler (mounted once, stale closures)
+  const copySelectedDevicesRef = useRef(() => {});
+  copySelectedDevicesRef.current = copySelectedDevices;
+  const pasteClipboardRef = useRef(() => {});
+  pasteClipboardRef.current = pasteClipboard;
+
+  const roomColors =["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
   const addRoom = () => {
     pushUndo();
     const id = "room-"+(Date.now());
@@ -700,17 +798,17 @@ export default function SignalFlowPage() {
     }));
   };
 
-  const PORT_TOP_PAD = 26;
   const getPortPos = useCallback((device: any, port: any) => {
     const leftPorts = device.ports.filter((p:any)=>p.side==="left");
     const rightPorts = device.ports.filter((p:any)=>p.side==="right");
     const isLeft = port.side==="left";
     const arr = isLeft?leftPorts:rightPorts;
     const idx = arr.indexOf(port);
-    const spacing = (device.h - PORT_TOP_PAD - DEVICE_FOOTER_H)/(arr.length+1);
+    const topPad = getTopPad(device);
+    const spacing = (device.h - topPad - DEVICE_FOOTER_H)/(arr.length+1);
     return {
       x: device.x + panOffset.x + (isLeft?0:device.w),
-      y: device.y + panOffset.y + PORT_TOP_PAD + spacing*(idx+1)
+      y: device.y + panOffset.y + topPad + spacing*(idx+1)
     };
   },[panOffset]);
 
@@ -899,9 +997,23 @@ export default function SignalFlowPage() {
     // Selected annotations and locations ride along with a group drag
     const origAnns = new Map<any,any>(inGroup ? annotations.filter((a:any)=>selectedAnnIds.has(a.id)).map((a:any)=>[a.id,a]) : []);
     const origRooms = new Map<any,{x:number;y:number}>(inGroup ? rooms.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
+    // Manually-routed cables (with fixed bend points) touching a moved device fall
+    // back to live auto-routing once the move actually starts — rigidly translating
+    // the old bend instead can leave a nonsensical detour when only one end of the
+    // cable is part of this drag. Auto-routing always tracks the current ports
+    // correctly; a bend can be re-added afterward if the shape still matters.
+    const affectedConnIds = new Set<any>(
+      connectionsRef.current
+        .filter((c:any)=>c.waypoints?.length && (ids.has(c.from.deviceId)||ids.has(c.to.deviceId)))
+        .map((c:any)=>c.id)
+    );
     let undoPushed = false;
     const onMove = (me: MouseEvent) => {
-      if (!undoPushed) { undoPushed = true; pushUndo(); }
+      if (!undoPushed) {
+        undoPushed = true;
+        pushUndo();
+        if (affectedConnIds.size) setConnections((prev:any[])=>prev.map((c:any)=>affectedConnIds.has(c.id) ? {...c, waypoints:[]} : c));
+      }
       const dx = me.clientX/z - startX;
       const dy = me.clientY/z - startY;
       setDevices(prev=>prev.map((d:any)=>{
@@ -911,6 +1023,57 @@ export default function SignalFlowPage() {
       if (origAnns.size) setAnnotations(prev=>prev.map((a:any)=>{
         const o = origAnns.get(a.id);
         return o ? translateAnnotation(o, dx, dy) : a;
+      }));
+      if (origRooms.size) setRooms(prev=>prev.map((r:any)=>{
+        const o = origRooms.get(r.id);
+        return o ? {...r, x: o.x + dx, y: o.y + dy} : r;
+      }));
+    };
+    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+  };
+
+  // Drag a single annotation (text/shape/pencil/highlight) — or, if it's part of an
+  // existing multi-select, the whole selected group of annotations/devices/rooms.
+  const handleAnnotMouseDown = (e: React.MouseEvent, a: any) => {
+    e.stopPropagation();
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
+    if (e.button !== 0) return;
+    const inGroup = selectedAnnIds.has(a.id);
+    if (inGroup) { setSelectedAnnotId(null); }
+    else { setSelectedAnnotId(a.id); clearMarqueeSel(); }
+    setSelected(null); setSelectedConn(null); setSelectedRoom(null);
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    const annIds = inGroup ? new Set(selectedAnnIds) : new Set([a.id]);
+    const origAnns = new Map<any,any>(annotationsRef.current.filter((x:any)=>annIds.has(x.id)).map((x:any)=>[x.id,x]));
+    const origDevs = new Map<any,{x:number;y:number}>(inGroup ? devicesRef.current.filter((d:any)=>selectedIds.has(d.id)).map((d:any)=>[d.id,{x:d.x,y:d.y}]) : []);
+    const origRooms = new Map<any,{x:number;y:number}>(inGroup ? roomsRef.current.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
+    // Manually-routed cables touching a device in this group fall back to live
+    // auto-routing once the move actually starts (see handleDeviceMouseDown for why
+    // a rigid translate of the old bend isn't safe here).
+    const affectedConnIds = new Set<any>(
+      origDevs.size ? connectionsRef.current
+        .filter((c:any)=>c.waypoints?.length && (origDevs.has(c.from.deviceId)||origDevs.has(c.to.deviceId)))
+        .map((c:any)=>c.id) : []
+    );
+    let undoPushed = false;
+    const onMove = (me: MouseEvent) => {
+      if (!undoPushed) {
+        undoPushed = true;
+        pushUndo();
+        if (affectedConnIds.size) setConnections((prev:any[])=>prev.map((c:any)=>affectedConnIds.has(c.id) ? {...c, waypoints:[]} : c));
+      }
+      const dx = me.clientX/z - startX;
+      const dy = me.clientY/z - startY;
+      setAnnotations(prev=>prev.map((x:any)=>{
+        const o = origAnns.get(x.id);
+        return o ? translateAnnotation(o, dx, dy) : x;
+      }));
+      if (origDevs.size) setDevices(prev=>prev.map((d:any)=>{
+        const o = origDevs.get(d.id);
+        return o ? {...d, x: o.x + dx, y: o.y + dy} : d;
       }));
       if (origRooms.size) setRooms(prev=>prev.map((r:any)=>{
         const o = origRooms.get(r.id);
@@ -1108,10 +1271,13 @@ export default function SignalFlowPage() {
       return;
     }
     if (activeTool === "text") {
-      // Commit any in-progress text before opening a new editor — this runs before
-      // the document-level outside-click handler, which would otherwise see the
-      // refs already reset and silently drop the typed text
-      if (textInputRef.current) commitTextRef.current();
+      // A click while an editor is already open just finishes that text —
+      // it doesn't chain into placing another one.
+      if (textInputRef.current) {
+        commitTextRef.current();
+        setActiveTool(null);
+        return;
+      }
       const rect = canvasRef.current!.getBoundingClientRect();
       const ti = {cssX: e.clientX - rect.left, cssY: e.clientY - rect.top, svgX: x, svgY: y, clientX: e.clientX, clientY: e.clientY};
       textInputRef.current = ti;
@@ -1214,6 +1380,10 @@ export default function SignalFlowPage() {
   // stale closures) can finish an in-progress polyline on Enter/Escape
   const polylineKeyRef = useRef({ active: false, finish: () => {} });
   polylineKeyRef.current = { active: activeTool === "shape" && shapeSubtype === "polyline", finish: finishPolyline };
+  // Same staleness fix for the Enter-finishes-current-command shortcut
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+  const finishActiveToolRef = useRef<() => void>(() => {});
 
   const textValueRef = useRef("");
   const textInputRef = useRef<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
@@ -1221,27 +1391,37 @@ export default function SignalFlowPage() {
 
   const commitTextRef = useRef<()=>void>(()=>{});
 
-  // Force-focus + select-all when editor opens
+  // Force-focus + select-all when editor opens. Deferred to the next frame so it
+  // runs after the click that created the editor finishes its own default focus
+  // handling — otherwise that click can steal focus back right after we set it.
   useEffect(() => {
     if (!textInput || !textareaRef.current) return;
     const el = textareaRef.current;
-    el.focus();
-    el.select();
     el.style.height = "auto";
     el.style.height = el.scrollHeight + "px";
+    const raf = requestAnimationFrame(() => {
+      el.focus();
+      el.select();
+    });
+    return () => cancelAnimationFrame(raf);
   }, [textInput?.clientX, textInput?.clientY]);
 
-  // Save on click outside the editor
+  // Save on click outside the editor. Canvas clicks are only skipped while the
+  // Text tool is actively placing/finishing boxes — handleToolDown owns those
+  // (it also ends the tool instead of just committing). Editing an existing
+  // annotation (opened via double-click or the right-click menu) doesn't set
+  // that tool, so this handler is what closes the editor on an outside click.
   useEffect(() => {
     if (!textInput) return;
     const handler = (e: MouseEvent) => {
-      if (!(e.target as Element).closest('[data-texteditor]')) {
-        commitTextRef.current();
-      }
+      const target = e.target as Element;
+      if (target.closest('[data-texteditor]')) return;
+      if (activeTool === "text" && canvasRef.current?.contains(target)) return;
+      commitTextRef.current();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [textInput?.clientX, textInput?.clientY]);
+  }, [textInput?.clientX, textInput?.clientY, activeTool]);
 
   const commitText = () => {
     if (cancelTextRef.current) { cancelTextRef.current = false; textInputRef.current = null; setTextInput(null); setTextValue(""); setEditingAnnotId(null); editingAnnotIdRef.current = null; return; }
@@ -1264,25 +1444,55 @@ export default function SignalFlowPage() {
   };
   commitTextRef.current = commitText;
 
+  // Finish whatever command is currently in progress — same intent as pressing
+  // Enter (AutoCAD-style): keep what's been drawn/typed so far and exit the tool,
+  // rather than discarding it. Triggered by Enter and by right-click on the canvas.
+  const finishActiveTool = () => {
+    if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
+    if (textInputRef.current) commitTextRef.current();
+    setActiveTool(null);
+    setLiveAnnot(null);
+    drawRef.current = null;
+  };
+  finishActiveToolRef.current = finishActiveTool;
+
+  // Open the text editor pre-filled with an existing annotation's content —
+  // shared by double-click-to-edit and the right-click "Edit" menu action.
+  const openTextEditor = (a: any, clientX: number, clientY: number) => {
+    if (activeTool) return;
+    textValueRef.current = a.text;
+    setTextValue(a.text);
+    setTextFontSize(a.size||14);
+    setTextBold(a.bold||false);
+    setTextItalic(a.italic||false);
+    setTextAlign(a.align||"left");
+    setToolColor(a.color||"#374151");
+    editingAnnotIdRef.current = a.id;
+    setEditingAnnotId(a.id);
+    const ti = {cssX:0, cssY:0, svgX:a.x, svgY:a.y-(a.size||14), clientX, clientY};
+    textInputRef.current = ti;
+    setTextInput(ti);
+  };
+
   const renderAnnotation = (a: any, isLive = false) => {
     const key = isLive ? "live" : a.id;
     const isSel = !isLive && (selectedAnnotId === a.id || selectedAnnIds.has(a.id));
     const selRing = isSel ? {filter:"drop-shadow(0 0 3px #8b5cf6)"} : {};
     if (a.type === "pencil") return (
-      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
     );
     if (a.type === "highlight") {
       if (a.sub === "freehand") return (
-        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
       );
       return (
-        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}/>
+        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
       );
     }
     if (a.type === "shape") {
       const {sub,x1,y1,x2,y2,color,sw} = a;
       const stroke = color||"#374151"; const sw2 = sw||2;
-      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}};
+      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}, onMouseDown:(e:any)=>handleAnnotMouseDown(e,a)};
       if (sub==="rect") return <rect key={key} x={Math.min(x1,x2)} y={Math.min(y1,y2)} width={Math.abs(x2-x1)} height={Math.abs(y2-y1)} rx={3} {...props}/>;
       if (sub==="circle") { const cx=(x1+x2)/2,cy=(y1+y2)/2,rx2=Math.abs(x2-x1)/2,ry=Math.abs(y2-y1)/2; return <ellipse key={key} cx={cx} cy={cy} rx={rx2} ry={ry} {...props}/>; }
       if (sub==="triangle") {
@@ -1294,32 +1504,18 @@ export default function SignalFlowPage() {
       if (sub==="arrow") {
         const ang=Math.atan2(y2-y1,x2-x1), hl=14, ha=Math.PI/6;
         const ax1=x2-hl*Math.cos(ang-ha), ay1=y2-hl*Math.sin(ang-ha), ax2=x2-hl*Math.cos(ang+ha), ay2=y2-hl*Math.sin(ang+ha);
-        return <g key={key} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}>
+        return <g key={key} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={(e)=>handleAnnotMouseDown(e,a)}>
           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw2} strokeLinecap="round"/>
           <polygon points={`${x2},${y2} ${ax1},${ay1} ${ax2},${ay2}`} fill={stroke}/>
         </g>;
       }
     }
     if (a.type === "text") return (
-      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}}
+      <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default",...selRing}}
         onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}
-        onDoubleClick={e=>{
-          e.stopPropagation();
-          if(activeTool)return;
-          textValueRef.current = a.text;
-          setTextValue(a.text);
-          setTextFontSize(a.size||14);
-          setTextBold(a.bold||false);
-          setTextItalic(a.italic||false);
-          setTextAlign(a.align||"left");
-          setToolColor(a.color||"#374151");
-          editingAnnotIdRef.current = a.id;
-          setEditingAnnotId(a.id);
-          const rect=canvasRef.current!.getBoundingClientRect();
-          const ti={cssX:e.clientX-rect.left,cssY:e.clientY-rect.top,svgX:a.x,svgY:a.y-(a.size||14),clientX:e.clientX,clientY:e.clientY};
-          textInputRef.current=ti;
-          setTextInput(ti);
-        }}
+        onMouseDown={e=>handleAnnotMouseDown(e,a)}
+        onDoubleClick={e=>{e.stopPropagation();openTextEditor(a,e.clientX,e.clientY);}}
+        onContextMenu={e=>{e.preventDefault();e.stopPropagation();if(activeTool){finishActiveTool();return;}setSelectedAnnotId(a.id);setAnnotContextMenu({x:e.clientX,y:e.clientY,annotId:a.id});}}
       >{a.text}</text>
     );
     return null;
@@ -1334,6 +1530,16 @@ export default function SignalFlowPage() {
         undoRef.current();
         return;
       }
+      if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "c" && !isTyping) {
+        e.preventDefault();
+        copySelectedDevicesRef.current();
+        return;
+      }
+      if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "v" && !isTyping) {
+        e.preventDefault();
+        pasteClipboardRef.current();
+        return;
+      }
       if(e.key === "Escape") {
         // finish (not discard) an in-progress polyline — the drawn segments stay
         if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
@@ -1342,11 +1548,10 @@ export default function SignalFlowPage() {
         if (textInputRef.current) commitTextRef.current();
         return;
       }
-      if(e.key === "Enter" && !isTyping && polylineKeyRef.current.active && drawRef.current?.pts) {
-        // Enter finishes the polyline and exits the command (AutoCAD-style)
+      if(e.key === "Enter" && !isTyping && activeToolRef.current) {
+        // Enter finishes the current command and exits the tool (AutoCAD-style)
         e.preventDefault();
-        polylineKeyRef.current.finish();
-        setActiveTool(null);
+        finishActiveToolRef.current();
         return;
       }
       if(e.key !== "Delete" && e.key !== "Backspace") return;
@@ -1734,7 +1939,7 @@ export default function SignalFlowPage() {
         {/* Tool palette — GoodNotes-style floating toolbar on the left edge of the canvas */}
         {activeTool && activeTool !== "text" && (
           <div data-html2canvas-ignore="true"
-            style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",zIndex:10,display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"10px 7px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:16,boxShadow:"0 4px 18px rgba(0,0,0,0.18)",maxHeight:"calc(100% - 24px)",overflowY:"auto"}}>
+            style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",zIndex:10,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 6px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:14,boxShadow:"0 4px 18px rgba(0,0,0,0.18)",maxHeight:"calc(100% - 24px)",overflowY:"auto"}}>
             {/* Shape subtypes */}
             {activeTool === "shape" && ([
               ["rect",     <rect key="i" x="3.5" y="6" width="15" height="10" rx="1.5"/>,                        "Rectangle"],
@@ -1751,16 +1956,16 @@ export default function SignalFlowPage() {
                   setShapeSubtype(id as any);
                 }}
                 title={label as string}
-                style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:shapeSubtype===id?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${shapeSubtype===id?"#8b5cf6":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
-                <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke={shapeSubtype===id?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
+                style={{width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",background:shapeSubtype===id?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${shapeSubtype===id?"#8b5cf6":"transparent"}`,borderRadius:8,cursor:"pointer",flexShrink:0}}>
+                <svg width="19" height="19" viewBox="0 0 22 22" fill="none" stroke={shapeSubtype===id?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
               </button>
             ))}
             {activeTool === "shape" && <div style={{height:1,alignSelf:"stretch",margin:"3px 2px",background:"rgb(var(--border))",flexShrink:0}}/>}
             {/* Stroke width — pencil & shapes */}
             {(activeTool === "shape" || activeTool === "pencil") && [1,2,4,6].map(w=>(
               <button key={w} onClick={()=>setStrokeW(w)} title={`${w}px`}
-                style={{width:34,height:24,display:"flex",alignItems:"center",justifyContent:"center",background:strokeW===w?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${strokeW===w?"#8b5cf6":"transparent"}`,borderRadius:7,cursor:"pointer",flexShrink:0}}>
-                <div style={{width:18,height:w,background:strokeW===w?"#8b5cf6":"rgb(var(--text-muted))",borderRadius:w}}/>
+                style={{width:30,height:21,display:"flex",alignItems:"center",justifyContent:"center",background:strokeW===w?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${strokeW===w?"#8b5cf6":"transparent"}`,borderRadius:6,cursor:"pointer",flexShrink:0}}>
+                <div style={{width:16,height:w,background:strokeW===w?"#8b5cf6":"rgb(var(--text-muted))",borderRadius:w}}/>
               </button>
             ))}
             {(activeTool === "shape" || activeTool === "pencil") && <>
@@ -1768,34 +1973,34 @@ export default function SignalFlowPage() {
               {/* Colors */}
               {["#374151","#8b5cf6","#ef4444","#22c55e","#f59e0b","#a855f7"].map(c=>(
                 <button key={c} onClick={()=>setToolColor(c)} title={c}
-                  style={{width:18,height:18,borderRadius:"50%",background:c,border:toolColor===c?"2px solid rgb(var(--forge-panel))":"2px solid transparent",outline:toolColor===c?`2px solid ${c}`:"none",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
+                  style={{width:14,height:14,borderRadius:"50%",background:c,border:toolColor===c?"2px solid rgb(var(--forge-panel))":"2px solid transparent",outline:toolColor===c?`2px solid ${c}`:"none",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
               ))}
             </>}
             {/* Highlighter — mode + colors */}
             {activeTool === "highlight" && <>
               {[
-                {id:"rect", label:"Highlight area (rectangle)", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="10" rx="2" fill={hlSubtype==="rect"?hlColor:"none"} stroke={hlSubtype==="rect"?hlColor:"rgb(var(--text-muted))"} strokeWidth="1.7" opacity={hlSubtype==="rect"?0.75:1}/></svg>},
-                {id:"freehand", label:"Highlight freehand (pen)", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M2.5 14 Q6 6 10 9.5 Q14 13 17.5 5.5" stroke={hlSubtype==="freehand"?hlColor:"rgb(var(--text-muted))"} strokeWidth={hlSubtype==="freehand"?4.5:2} strokeLinecap="round" fill="none" opacity={hlSubtype==="freehand"?0.85:1}/></svg>},
+                {id:"rect", label:"Highlight area (rectangle)", icon:<svg width="17" height="17" viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="10" rx="2" fill={hlSubtype==="rect"?hlColor:"none"} stroke={hlSubtype==="rect"?hlColor:"rgb(var(--text-muted))"} strokeWidth="1.7" opacity={hlSubtype==="rect"?0.75:1}/></svg>},
+                {id:"freehand", label:"Highlight freehand (pen)", icon:<svg width="17" height="17" viewBox="0 0 20 20" fill="none"><path d="M2.5 14 Q6 6 10 9.5 Q14 13 17.5 5.5" stroke={hlSubtype==="freehand"?hlColor:"rgb(var(--text-muted))"} strokeWidth={hlSubtype==="freehand"?4.5:2} strokeLinecap="round" fill="none" opacity={hlSubtype==="freehand"?0.85:1}/></svg>},
               ].map(({id,label,icon})=>(
                 <button key={id} onClick={()=>setHlSubtype(id as "rect"|"freehand")} title={label}
-                  style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:hlSubtype===id?"rgba(251,191,36,0.15)":"transparent",border:`1px solid ${hlSubtype===id?"#fbbf24":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
+                  style={{width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",background:hlSubtype===id?"rgba(251,191,36,0.15)":"transparent",border:`1px solid ${hlSubtype===id?"#fbbf24":"transparent"}`,borderRadius:8,cursor:"pointer",flexShrink:0}}>
                   {icon}
                 </button>
               ))}
               <div style={{height:1,alignSelf:"stretch",margin:"3px 2px",background:"rgb(var(--border))",flexShrink:0}}/>
               {["#fbbf24","#fb923c","#4ade80","#a78bfa","#f472b6","#c084fc"].map(c=>(
                 <button key={c} onClick={()=>setHlColor(c)} title={c}
-                  style={{width:18,height:18,borderRadius:4,background:c,opacity:0.75,border:hlColor===c?"2px solid rgb(var(--text-body))":"2px solid transparent",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
+                  style={{width:16,height:16,borderRadius:4,background:c,opacity:0.75,border:hlColor===c?"2px solid rgb(var(--text-body))":"2px solid transparent",cursor:"pointer",padding:0,flexShrink:0,margin:"1px 0"}}/>
               ))}
             </>}
             {/* Eraser — size presets */}
             {activeTool === "eraser" && [
-              {r: 8,  d: 10, label: "Small eraser"},
-              {r: 15, d: 16, label: "Medium eraser"},
-              {r: 26, d: 24, label: "Large eraser"},
+              {r: 8,  d: 9,  label: "Small eraser"},
+              {r: 15, d: 14, label: "Medium eraser"},
+              {r: 26, d: 21, label: "Large eraser"},
             ].map(({r, d, label})=>(
               <button key={r} onClick={()=>setEraserSize(r)} title={label}
-                style={{width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",background:eraserSize===r?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${eraserSize===r?"#8b5cf6":"transparent"}`,borderRadius:9,cursor:"pointer",flexShrink:0}}>
+                style={{width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",background:eraserSize===r?"rgba(139,92,246,0.15)":"transparent",border:`1px solid ${eraserSize===r?"#8b5cf6":"transparent"}`,borderRadius:8,cursor:"pointer",flexShrink:0}}>
                 <div style={{width:d,height:d,borderRadius:"50%",border:`2px solid ${eraserSize===r?"#8b5cf6":"rgb(var(--text-muted))"}`,flexShrink:0}}/>
               </button>
             ))}
@@ -1804,7 +2009,7 @@ export default function SignalFlowPage() {
         {/* Polyline drawing hint */}
         {activeTool === "shape" && shapeSubtype === "polyline" && !connecting && (
           <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
-            Click to add points — hold Shift for straight lines, Enter or double-click to finish
+            Click to add points — hold Shift for straight lines, Enter, right-click, or double-click to finish
           </div>
         )}
         {refreshNotice && (
@@ -1831,6 +2036,7 @@ export default function SignalFlowPage() {
           onMouseMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
           onMouseUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
           onMouseLeave={activeTool==="eraser"?()=>setEraserCursor(null):undefined}
+          onContextMenu={e=>{if(activeTool){e.preventDefault();finishActiveTool();}}}
           onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);clearMarqueeSel();}}}
           style={{cursor:activeTool==="text"?"text":activeTool==="eraser"?"none":activeTool?"crosshair":marquee?"crosshair":"default"}}>
           <defs>
@@ -1912,12 +2118,22 @@ export default function SignalFlowPage() {
                 <rect x={dev.x+panOffset.x+2} y={dev.y+panOffset.y+2} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--text-faint))" opacity={0.15} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#8b5cf6":"#4b5563"} strokeWidth={isSel?2:1.5} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={4} height={dev.h} rx={2} fill="#4b5563" opacity={0.8} />
-                {dev.cat&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y-3} textAnchor="middle" fontSize={9} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={600}>{dev.cat}</text>}
-                {(dev.mfr||dev.model)&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={11} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={400}>{[dev.mfr&&dev.mfr!=="Generic"?dev.mfr:null,dev.model&&dev.model!=="—"?dev.model:null].filter(Boolean).join(" · ")}</text>}
-                <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(dev.mfr||dev.model?23:16)} textAnchor="middle" fontSize={8} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif">{dev.part_number || dev.type}</text>
+                {dev.cat&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y-3} textAnchor="middle" fontSize={10} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={600}>{dev.cat}</text>}
+                {(() => {
+                  const mfrText = dev.mfr && dev.mfr!=="Generic" ? dev.mfr : null;
+                  const modelText = dev.model && dev.model!=="—" ? dev.model : null;
+                  const headerLines = [mfrText, modelText].filter(Boolean).length;
+                  return (
+                    <>
+                      {mfrText&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+13} textAnchor="middle" fontSize={10} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={400}>{mfrText}</text>}
+                      {modelText&&<text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(mfrText?23:13)} textAnchor="middle" fontSize={10} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif" fontWeight={400}>{modelText}</text>}
+                      <text x={dev.x+panOffset.x+dev.w/2} y={dev.y+panOffset.y+(headerLines===2?33:headerLines===1?23:16)} textAnchor="middle" fontSize={10} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif">{dev.part_number || dev.type}</text>
+                    </>
+                  );
+                })()}
                 {leftPorts.map((port:any,pi:number)=>{
-                  const spacing = (dev.h-PORT_TOP_PAD-DEVICE_FOOTER_H)/(leftPorts.length+1);
-                  const py = dev.y+panOffset.y+PORT_TOP_PAD+spacing*(pi+1);
+                  const spacing = (dev.h-getTopPad(dev)-DEVICE_FOOTER_H)/(leftPorts.length+1);
+                  const py = dev.y+panOffset.y+getTopPad(dev)+spacing*(pi+1);
                   const px = dev.x+panOffset.x;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
                   const isConn = connecting && connecting.portId!==port.id;
@@ -1929,8 +2145,8 @@ export default function SignalFlowPage() {
                   );
                 })}
                 {rightPorts.map((port:any,pi:number)=>{
-                  const spacing = (dev.h-PORT_TOP_PAD-DEVICE_FOOTER_H)/(rightPorts.length+1);
-                  const py = dev.y+panOffset.y+PORT_TOP_PAD+spacing*(pi+1);
+                  const spacing = (dev.h-getTopPad(dev)-DEVICE_FOOTER_H)/(rightPorts.length+1);
+                  const py = dev.y+panOffset.y+getTopPad(dev)+spacing*(pi+1);
                   const px = dev.x+panOffset.x+dev.w;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
                   const isConn = connecting && connecting.portId!==port.id;
@@ -2113,7 +2329,7 @@ export default function SignalFlowPage() {
         <div style={{position:"fixed",left:deviceContextMenu.x,top:deviceContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:190,overflow:"hidden",padding:"4px 0"}}>
           <button onClick={()=>{
             const dev = devices.find((d:any)=>d.id===deviceContextMenu.deviceId);
-            if(dev){setEditingDevice(dev);setEditDeviceName(dev.type||"");setEditDeviceMfr(dev.mfr||"");setEditDeviceModel(dev.model||"");setEditDevicePorts(dev.ports?dev.ports.map((p:any)=>({...p})):[]);setEditDeviceVoltage(dev.voltage==null?"":String(dev.voltage));setEditDeviceAmps(dev.amp_draw==null?"":String(dev.amp_draw));setEditDeviceWatts(dev.power_watts==null?"":String(dev.power_watts));setEditDeviceBtu(dev.btu_hr==null?"":String(dev.btu_hr));}
+            if(dev) setEditingDevice({...dev, ports: dev.ports ? dev.ports.map((p:any)=>({...p})) : []});
             setDeviceContextMenu(null);
           }}
             style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
@@ -2121,19 +2337,15 @@ export default function SignalFlowPage() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Edit equipment
           </button>
-          <button onClick={()=>refreshDeviceFromOrgLibrary(deviceContextMenu.deviceId)}
-            disabled={refreshingDeviceId!==null}
-            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:refreshingDeviceId!==null?"wait":"pointer",textAlign:"left",opacity:refreshingDeviceId!==null?0.6:1}}
+          <button onClick={()=>{
+            const dev = devices.find((d:any)=>d.id===deviceContextMenu.deviceId);
+            if(dev) cloneDevices([dev], 30, 30);
+            setDeviceContextMenu(null);
+          }}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
             onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
-            Refresh from my Organization Library
-          </button>
-          <button onClick={()=>refreshDeviceFromGlobalLibrary(deviceContextMenu.deviceId)}
-            disabled={refreshingDeviceId!==null}
-            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:refreshingDeviceId!==null?"wait":"pointer",textAlign:"left",opacity:refreshingDeviceId!==null?0.6:1}}
-            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
-            Refresh from Global Library
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Clone
           </button>
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
           <button onClick={()=>{
@@ -2186,157 +2398,56 @@ export default function SignalFlowPage() {
       );
     })()}
 
-    {/* Edit Equipment Modal */}
+    {/* Text annotation context menu */}
+    {annotContextMenu && (() => {
+      const a = annotations.find((x:any)=>x.id===annotContextMenu.annotId);
+      if (!a) return null;
+      return (
+        <>
+          <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setAnnotContextMenu(null)} onContextMenu={e=>{e.preventDefault();setAnnotContextMenu(null);}} />
+          <div style={{position:"fixed",left:annotContextMenu.x,top:annotContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:170,overflow:"hidden",padding:"4px 0"}}>
+            <button onClick={()=>{openTextEditor(a,annotContextMenu.x,annotContextMenu.y);setAnnotContextMenu(null);}}
+              style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edit
+            </button>
+            <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
+            <button onClick={()=>{pushUndo();setAnnotations(prev=>prev.filter((x:any)=>x.id!==annotContextMenu.annotId));if(selectedAnnotId===annotContextMenu.annotId)setSelectedAnnotId(null);setAnnotContextMenu(null);}}
+              style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,cursor:"pointer",textAlign:"left"}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              Delete
+            </button>
+          </div>
+        </>
+      );
+    })()}
+
+    {/* Edit Equipment Modal — same form used by My Organization's and AV Forge Equipment Library */}
     {editingDevice && (
-      <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}}
-        onClick={()=>setEditingDevice(null)}>
-        <div style={{width:520,background:"rgb(var(--forge-panel))",borderRadius:10,border:"1px solid rgb(var(--border))",boxShadow:"0 16px 48px rgba(0,0,0,0.5)",display:"flex",flexDirection:"column",maxHeight:"82vh",overflow:"hidden"}}
-          onClick={e=>e.stopPropagation()}>
-          {/* Header */}
-          <div style={{padding:"16px 20px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid rgb(var(--border))",flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:9}}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-body))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              <span style={{fontSize:14,fontWeight:700,color:"rgb(var(--text-body))"}}>Edit Equipment</span>
-            </div>
-            <button onClick={()=>setEditingDevice(null)} style={{background:"none",border:"none",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:20,lineHeight:1,padding:"2px 4px"}}>×</button>
-          </div>
-          {/* Scrollable body */}
-          <div style={{flex:1,overflowY:"auto",padding:"18px 20px",display:"flex",flexDirection:"column",gap:14}}>
-            {/* Description */}
-            <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>
-              Description
-              <input autoFocus value={editDeviceName} onChange={e=>setEditDeviceName(e.target.value)}
-                onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
-                style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
-              />
-            </label>
-            {/* Make / Model */}
-            <div style={{display:"flex",gap:10}}>
-              <label style={{flex:1,display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>
-                Make
-                <input value={editDeviceMfr} onChange={e=>setEditDeviceMfr(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
-                  style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                  onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
-                />
-              </label>
-              <label style={{flex:1,display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>
-                Model
-                <input value={editDeviceModel} onChange={e=>setEditDeviceModel(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Escape")setEditingDevice(null);}}
-                  style={{padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:13,outline:"none"}}
-                  onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
-                />
-              </label>
-            </div>
-            {/* Electrical specifications */}
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Equipment Specifications</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-                {[
-                  {label:"Voltage",unit:"V",value:editDeviceVoltage,set:setEditDeviceVoltage},
-                  {label:"Current Draw",unit:"A",value:editDeviceAmps,set:setEditDeviceAmps},
-                  {label:"Power",unit:"W",value:editDeviceWatts,set:setEditDeviceWatts},
-                  {label:"Heat Output",unit:"BTU/hr",value:editDeviceBtu,set:setEditDeviceBtu},
-                ].map(field=><label key={field.label} style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={0} step="any" value={field.value} onChange={e=>field.set(e.target.value)} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}/><span style={{minWidth:38,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}
-              </div>
-            </div>
-            {/* Ports */}
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Ports</div>
-              <div style={{border:"1px solid rgb(var(--border))",borderRadius:6,overflow:"hidden"}}>
-                {/* Left ports */}
-                <div style={{padding:"10px 12px",background:"rgb(var(--forge-surface) / 0.4)"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:7}}>Left</div>
-                  {editDevicePorts.filter((p:any)=>p.side==="left").map((port:any)=>(
-                    <div key={port.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                      <span style={{width:8,height:8,borderRadius:"50%",background:SIGNAL_TYPES.find(s=>s.id===port.signal)?.color||"#94a3b8",flexShrink:0}} />
-                      <select value={port.signal} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,signal:e.target.value}:p))}
-                        style={{padding:"3px 6px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none",cursor:"pointer"}}>
-                        {SIGNAL_TYPES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                      <select value={port.dir} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,dir:e.target.value}:p))}
-                        style={{padding:"3px 6px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none",width:100,cursor:"pointer"}}>
-                        <option value="in">In</option>
-                        <option value="out">Out</option>
-                        <option value="bi">Bidirectional</option>
-                      </select>
-                      <input value={port.label} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,label:e.target.value}:p))}
-                        placeholder="Label"
-                        style={{flex:1,padding:"3px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
-                      />
-                      <button onClick={()=>setEditDevicePorts(prev=>prev.filter((p:any)=>p.id!==port.id))}
-                        style={{background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",padding:"2px 5px",fontSize:15,lineHeight:1,flexShrink:0}}
-                        onMouseEnter={e=>e.currentTarget.style.color="#ef4444"} onMouseLeave={e=>e.currentTarget.style.color="rgb(var(--text-muted))"}>×</button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={()=>setEditDevicePorts(prev=>[...prev,{id:`new-${Date.now()}-${Math.random()}`,side:"left",signal:"hdmi",dir:"in",label:""}])}
-                    style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,width:"100%",padding:"4px 0",marginTop:2,background:"none",border:"1px dashed rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-subtle))",fontSize:11,cursor:"pointer"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
-                    + Add Left Port
-                  </button>
-                </div>
-                <div style={{height:1,background:"rgb(var(--border))"}} />
-                {/* Right ports */}
-                <div style={{padding:"10px 12px"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:7}}>Right</div>
-                  {editDevicePorts.filter((p:any)=>p.side==="right").map((port:any)=>(
-                    <div key={port.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                      <span style={{width:8,height:8,borderRadius:"50%",background:SIGNAL_TYPES.find(s=>s.id===port.signal)?.color||"#94a3b8",flexShrink:0}} />
-                      <select value={port.signal} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,signal:e.target.value}:p))}
-                        style={{padding:"3px 6px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none",cursor:"pointer"}}>
-                        {SIGNAL_TYPES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                      <select value={port.dir} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,dir:e.target.value}:p))}
-                        style={{padding:"3px 6px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none",width:100,cursor:"pointer"}}>
-                        <option value="in">In</option>
-                        <option value="out">Out</option>
-                        <option value="bi">Bidirectional</option>
-                      </select>
-                      <input value={port.label} onChange={e=>setEditDevicePorts(prev=>prev.map((p:any)=>p.id===port.id?{...p,label:e.target.value}:p))}
-                        placeholder="Label"
-                        style={{flex:1,padding:"3px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:11,outline:"none"}}
-                        onFocus={e=>e.target.style.borderColor="#8b5cf6"} onBlur={e=>e.target.style.borderColor="rgb(var(--border))"}
-                      />
-                      <button onClick={()=>setEditDevicePorts(prev=>prev.filter((p:any)=>p.id!==port.id))}
-                        style={{background:"none",border:"none",color:"rgb(var(--text-muted))",cursor:"pointer",padding:"2px 5px",fontSize:15,lineHeight:1,flexShrink:0}}
-                        onMouseEnter={e=>e.currentTarget.style.color="#ef4444"} onMouseLeave={e=>e.currentTarget.style.color="rgb(var(--text-muted))"}>×</button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={()=>setEditDevicePorts(prev=>[...prev,{id:`new-${Date.now()}-${Math.random()}`,side:"right",signal:"hdmi",dir:"out",label:""}])}
-                    style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,width:"100%",padding:"4px 0",marginTop:2,background:"none",border:"1px dashed rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-subtle))",fontSize:11,cursor:"pointer"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-subtle))";}}>
-                    + Add Right Port
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          {/* Footer */}
-          <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:10,flexShrink:0}}>
-            <button onClick={()=>setEditingDevice(null)} style={{padding:"8px 18px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer"}}>
-              Cancel
-            </button>
-            <button
-              disabled={!editDeviceName.trim()}
-              onClick={()=>{
-                pushUndo();
-                const removedIds = new Set(editingDevice.ports.map((p:any)=>p.id).filter((id:string)=>!editDevicePorts.find((p:any)=>p.id===id)));
-                if(removedIds.size>0) setConnections((prev:any[])=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
-                const specValue=(text:string)=>text.trim()===""?null:Number(text);
-                setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...d,type:editDeviceName.trim()||d.type,mfr:editDeviceMfr.trim(),model:editDeviceModel.trim(),ports:editDevicePorts,voltage:specValue(editDeviceVoltage),amp_draw:specValue(editDeviceAmps),power_watts:specValue(editDeviceWatts),btu_hr:specValue(editDeviceBtu),w:0,h:0}):d));
-                setEditingDevice(null);
-              }}
-              style={{padding:"8px 18px",background:editDeviceName.trim()?"#8b5cf6":"rgb(var(--forge-surface))",border:"1px solid "+(editDeviceName.trim()?"#8b5cf6":"rgb(var(--border))"),borderRadius:6,color:editDeviceName.trim()?"#fff":"rgb(var(--text-subtle))",fontSize:12,cursor:editDeviceName.trim()?"pointer":"not-allowed",fontWeight:600,transition:"all 0.15s"}}>
-              Save
-            </button>
-          </div>
-        </div>
-      </div>
+      <EquipmentFormModal
+        title="Edit Equipment"
+        value={deviceToFormValue(editingDevice)}
+        onChange={(v)=>setEditingDevice(applyFormValueToDevice(editingDevice, v))}
+        onCancel={()=>setEditingDevice(null)}
+        onSave={()=>{
+          pushUndo();
+          const oldPorts: any[] = devicesRef.current.find((d:any)=>d.id===editingDevice.id)?.ports || [];
+          const oldIds = new Set(oldPorts.map((p:any)=>p.id));
+          let fresh = 0;
+          const newPorts = (editingDevice.ports||[]).map((p:any)=>p.id ? p : {...p, id:`${editingDevice.id}-p${Date.now()}-${fresh++}`});
+          const newIds = new Set(newPorts.map((p:any)=>p.id));
+          const removedIds = new Set([...oldIds].filter((id:any)=>!newIds.has(id)));
+          if (removedIds.size>0) setConnections((prev:any[])=>prev.filter((c:any)=>!removedIds.has(c.from.portId)&&!removedIds.has(c.to.portId)));
+          setDevices((prev:any[])=>prev.map((d:any)=>d.id===editingDevice.id?sizeDevice({...editingDevice, ports:newPorts, w:0, h:0}):d));
+          setEditingDevice(null);
+        }}
+        saving={false}
+        saveDisabled={!(editingDevice.type||"").trim()}
+        notesLabel="Description"
+        categories={DEVICE_LIBRARY.map(g=>g.cat)}
+      />
     )}
 
     {/* Add Equipment Modal */}

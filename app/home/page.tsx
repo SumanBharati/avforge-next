@@ -377,7 +377,7 @@ export default function DashboardPage() {
 
         {/* ── Project Dashboard ──────────────────────── */}
         <div className="flex flex-[3] min-w-0 flex-col p-4">
-          <div className="flex flex-1 flex-col gap-4 overflow-hidden lg:flex-row">
+          <div className="flex flex-1 flex-col gap-4 overflow-x-auto 2xl:flex-row">
             {/* Left: Pie Chart */}
             <div className="flex flex-1 min-w-0 flex-col">
               <div className="mb-3 flex items-center gap-2">
