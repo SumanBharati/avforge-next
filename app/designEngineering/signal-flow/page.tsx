@@ -169,6 +169,10 @@ export default function SignalFlowPage() {
   // the matching arrow keys, independent of selecting the whole connection.
   const [selectedConnSegment, setSelectedConnSegment] = useState<{connId:any;index:number}|null>(null);
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
+  // A single edge of a freeform (custom-drawn) location, selected by clicking it
+  // directly — draggable perpendicular to its own orientation, deletable on its
+  // own via Delete/Backspace, independent of selecting the whole location.
+  const [selectedRoomEdge, setSelectedRoomEdge] = useState<{roomId:any;index:number}|null>(null);
   const [rooms, setRooms] = useState<any[]>([]);
   const [editingRoom, setEditingRoom] = useState<any>(null);
   const [panOffset] = useState({x:0,y:0});
@@ -219,7 +223,7 @@ export default function SignalFlowPage() {
   const [modalModel, setModalModel] = useState("");
 
   // Annotation tools
-  const [activeTool, setActiveTool] = useState<"text"|"shape"|"pencil"|"highlight"|"eraser"|null>(null);
+  const [activeTool, setActiveTool] = useState<"text"|"shape"|"pencil"|"highlight"|"eraser"|"location"|null>(null);
   const [shapeSubtype, setShapeSubtype] = useState<"rect"|"circle"|"triangle"|"line"|"arrow"|"polyline">("rect");
   const [toolColor, setToolColor] = useState("#374151");
   const [hlColor, setHlColor] = useState("#fbbf24");
@@ -227,6 +231,8 @@ export default function SignalFlowPage() {
   const [eraserSize, setEraserSize] = useState(15);
   const [eraserCursor, setEraserCursor] = useState<{x:number;y:number}|null>(null);
   const [strokeW, setStrokeW] = useState(2);
+  // Live preview while freehand-tracing a new custom location boundary
+  const [liveRoomPts, setLiveRoomPts] = useState<{x:number;y:number}[]|null>(null);
   const [annotations, setAnnotations] = useState<any[]>([]);
 
   // ── Undo (Ctrl+Z): snapshot the four content slices before each mutation ──
@@ -262,7 +268,7 @@ export default function SignalFlowPage() {
     setRooms(snap.rooms);
     setAnnotations(snap.annotations);
     // Selections may point at items that no longer exist after the restore
-    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null); setSelectedAnnotId(null); clearMarqueeSel();
   };
   const redo = () => {
     const stack = redoStackRef.current;
@@ -277,7 +283,7 @@ export default function SignalFlowPage() {
     setConnections(snap.connections);
     setRooms(snap.rooms);
     setAnnotations(snap.annotations);
-    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null); setSelectedAnnotId(null); clearMarqueeSel();
   };
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -720,12 +726,86 @@ export default function SignalFlowPage() {
   pasteClipboardRef.current = pasteClipboard;
 
   const roomColors =["#4b5563","#6b7280","#8b5cf6","#22c55e","#f59e0b","#a855f7","#ef4444","#06b6d4","#f97316","#ec4899"];
+
+  // A location is either the classic axis-aligned rectangle (x/y/w/h) or a
+  // freeform polygon traced with the location tool (points). This gives either
+  // shape's bounding box, for anything that only needs "roughly where is it"
+  // (marquee hit-testing, zoom-to-fit) without caring which kind it is.
+  const roomBBox = (r: any): {x:number;y:number;w:number;h:number} => {
+    if (r.points?.length) {
+      const xs = r.points.map((p:any)=>p.x), ys = r.points.map((p:any)=>p.y);
+      const x = Math.min(...xs), y = Math.min(...ys);
+      return { x, y, w: Math.max(...xs)-x, h: Math.max(...ys)-y };
+    }
+    return { x: r.x, y: r.y, w: r.w, h: r.h };
+  };
+  const translateRoom = (r: any, dx: number, dy: number) =>
+    r.points ? {...r, points: r.points.map((p:any)=>({x:p.x+dx,y:p.y+dy}))} : {...r, x:r.x+dx, y:r.y+dy};
+
+  // Live orthogonal tracing state for the location tool: a committed run of
+  // corners (each placed by an explicit click) plus the current uncommitted
+  // segment's live end, which just follows the mouse — snapped to whichever
+  // axis it currently leans toward — until the next click locks it in. The
+  // shape never bends on its own mid-segment; only a click adds a corner.
+  // nearStart flags when the cursor is inside the snap zone around the first
+  // corner, so a click there closes the shape instead of adding a duplicate.
+  // trackFrom is an earlier corner the free coordinate has snapped into
+  // alignment with — like CAD point tracking — so the new corner lands
+  // exactly level with it; the guide line drawn between them is what makes
+  // that alignment visible while you're still aiming.
+  const roomDrawRef = useRef<{corners:{x:number;y:number}[]; liveEnd:{x:number;y:number}; nearStart:boolean; trackFrom:{x:number;y:number}|null}|null>(null);
+  const LOCATION_SNAP_PX = 10;
+  const LOCATION_TRACK_PX = 6;
+
+  // If the last point doesn't already line up with the first on one axis, this
+  // is the extra right-angle corner needed to close the path orthogonally —
+  // used both for the live "closing" preview and the final committed shape.
+  const closingFixupCorner = (pts: {x:number;y:number}[]): {x:number;y:number} | null => {
+    if (pts.length < 2) return null;
+    const first = pts[0], last = pts[pts.length-1];
+    if (Math.abs(last.x-first.x) <= 0.5 || Math.abs(last.y-first.y) <= 0.5) return null;
+    const prevPt = pts[pts.length-2] || first;
+    const wasHorizontal = Math.abs(last.x-prevPt.x) > Math.abs(last.y-prevPt.y);
+    return wasHorizontal ? {x:last.x, y:first.y} : {x:first.x, y:last.y};
+  };
+
+  // Finalize a traced location: drop any hairline segments, then make sure the
+  // closing edge (last corner back to the first) is axis-aligned too — inserting
+  // one more right-angle corner if the trace didn't already land back on the
+  // same row/column it started on.
+  const finishLocationDraw = (raw: {x:number;y:number}[]) => {
+    const pts: {x:number;y:number}[] = [];
+    for (const p of raw) {
+      const prev = pts[pts.length-1];
+      if (!prev || Math.hypot(p.x-prev.x, p.y-prev.y) > 4) pts.push(p);
+    }
+    if (pts.length < 3) return;
+    const fixup = closingFixupCorner(pts);
+    if (fixup) pts.push(fixup);
+    if (pts.length < 3) return;
+    pushUndo();
+    const id = "room-"+Date.now();
+    setRooms(prev=>[...prev, {id, label:"Location "+(prev.length+1), points:pts, color:"#4b5563"}]);
+    setSelectedRoom(id); setSelectedRoomEdge(null);
+  };
+
+  // Close and commit the location currently being traced (Enter, right-click,
+  // or double-click) — same "finish, don't discard" convention as the polyline
+  // shape tool.
+  const finishLocationPolyline = () => {
+    const rd = roomDrawRef.current;
+    if (rd) finishLocationDraw([...rd.corners, rd.liveEnd]);
+    roomDrawRef.current = null;
+    setLiveRoomPts(null);
+    drawRef.current = null;
+  };
+
   const addRoom = () => {
     pushUndo();
     const id = "room-"+(Date.now());
     const v = viewRef.current;
     setRooms(prev=>[...prev,{id,label:"Location "+(prev.length+1),x:(80+Math.random()*100-v.x)/v.zoom,y:(80+Math.random()*100-v.y)/v.zoom,w:400,h:300,color:"#4b5563"}]);
-    setSelectedRoom(id);
+    setSelectedRoom(id); setSelectedRoomEdge(null);
   };
 
   const handleRoomMouseDown = (e: React.MouseEvent, room: any) => {
@@ -734,16 +814,16 @@ export default function SignalFlowPage() {
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     // With an annotation tool active, draw over the location instead of moving it
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
-    setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null);
+    setSelectedRoom(room.id); setSelectedRoomEdge(null); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null);
     const z = viewRef.current.zoom;
-    const startX = e.clientX/z - room.x - panOffset.x;
-    const startY = e.clientY/z - room.y - panOffset.y;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    const orig = { ...room };
     let undoPushed = false;
     const onMove = (me: MouseEvent) => {
       if (!undoPushed) { undoPushed = true; pushUndo(); }
-      const nx = me.clientX/z - startX - panOffset.x;
-      const ny = me.clientY/z - startY - panOffset.y;
-      setRooms(prev=>prev.map(r=>r.id===room.id?{...r,x:nx,y:ny}:r));
+      const dx = me.clientX/z - startX;
+      const dy = me.clientY/z - startY;
+      setRooms(prev=>prev.map(r=>r.id===room.id ? translateRoom(orig, dx, dy) : r));
     };
     const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
     window.addEventListener("pointermove",onMove);
@@ -758,15 +838,88 @@ export default function SignalFlowPage() {
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     // With an annotation tool active, draw over the location instead of selecting it
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
-    if (e.button !== 0) { setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); return; }
-    setSelectedRoom(null); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedAnnotId(null); clearMarqueeSel();
+    if (e.button !== 0) { setSelectedRoom(room.id); setSelectedRoomEdge(null); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); return; }
+    setSelectedRoom(null); setSelectedRoomEdge(null); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedAnnotId(null); clearMarqueeSel();
     const sx = e.clientX, sy = e.clientY;
     startMarquee(e);
     const onUp = (me: MouseEvent) => {
       window.removeEventListener("pointerup", onUp);
-      if (Math.abs(me.clientX - sx) < 4 && Math.abs(me.clientY - sy) < 4) setSelectedRoom(room.id);
+      if (Math.abs(me.clientX - sx) < 4 && Math.abs(me.clientY - sy) < 4) { setSelectedRoom(room.id); setSelectedRoomEdge(null); }
     };
     window.addEventListener("pointerup", onUp);
+  };
+
+  // Drag one edge of a freeform (custom-drawn) location, perpendicular to its own
+  // orientation only — pushes that wall in/out to grow or shrink the space, exactly
+  // like dragging a cable bend segment. Both vertices bounding the edge move together
+  // so the edge itself stays straight.
+  const handleRoomEdgeMouseDown = (e: React.MouseEvent, room: any, edgeIndex: number) => {
+    e.stopPropagation();
+    if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
+    if (e.button !== 0) return;
+    setSelectedRoom(room.id); setSelectedRoomEdge({roomId:room.id, index:edgeIndex});
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); clearMarqueeSel();
+    const pts: {x:number;y:number}[] = room.points;
+    const n = pts.length;
+    const a = pts[edgeIndex], b = pts[(edgeIndex+1)%n];
+    const ex = b.x-a.x, ey = b.y-a.y;
+    const len = Math.hypot(ex,ey) || 1;
+    const nx = -ey/len, ny = ex/len; // unit normal — the direction this edge can push
+    const basePts = pts.map(p=>({...p}));
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    let undoPushed = false;
+    const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
+      const dx = me.clientX/z - startX, dy = me.clientY/z - startY;
+      const proj = dx*nx + dy*ny; // signed distance along the edge's own normal
+      const newPts = basePts.map((p,i)=> (i===edgeIndex || i===(edgeIndex+1)%n) ? {x:p.x+nx*proj, y:p.y+ny*proj} : p);
+      setRooms(prev=>prev.map((r:any)=>r.id===room.id ? {...r, points:newPts} : r));
+    };
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
+  };
+
+  // Drag one vertex ("stretch point") of a freeform location — like dragging a
+  // rectangle's corner handle, generalized to any number of corners. In a
+  // rectilinear shape, the two edges touching a vertex are always perpendicular
+  // to each other (one horizontal, one vertical), so moving the vertex just
+  // carries whichever coordinate each neighbor shares with it, keeping both
+  // edges straight without needing to touch anything further away.
+  const handleRoomVertexMouseDown = (e: React.MouseEvent, room: any, vertexIndex: number) => {
+    e.stopPropagation();
+    if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
+    if (e.button !== 0) return;
+    setSelectedRoom(room.id); setSelectedRoomEdge(null);
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); clearMarqueeSel();
+    const pts: {x:number;y:number}[] = room.points;
+    const n = pts.length;
+    const prevIdx = (vertexIndex-1+n)%n, nextIdx = (vertexIndex+1)%n;
+    const basePts = pts.map(p=>({...p}));
+    const v0 = basePts[vertexIndex];
+    const prevSharesX = Math.abs(basePts[prevIdx].x-v0.x) < 0.5;
+    const nextSharesX = Math.abs(basePts[nextIdx].x-v0.x) < 0.5;
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    let undoPushed = false;
+    const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
+      const dx = me.clientX/z - startX, dy = me.clientY/z - startY;
+      const newV = {x:v0.x+dx, y:v0.y+dy};
+      const newPts = basePts.map(p=>({...p}));
+      newPts[vertexIndex] = newV;
+      newPts[prevIdx] = prevSharesX ? {...newPts[prevIdx], x:newV.x} : {...newPts[prevIdx], y:newV.y};
+      newPts[nextIdx] = nextSharesX ? {...newPts[nextIdx], x:newV.x} : {...newPts[nextIdx], y:newV.y};
+      setRooms(prev=>prev.map((r:any)=>r.id===room.id ? {...r, points:newPts} : r));
+    };
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
   const handleRoomResize = (e: React.MouseEvent, room: any, handle: string) => {
@@ -815,7 +968,7 @@ export default function SignalFlowPage() {
     setRooms(prev=>prev.map(r=>r.id===roomId?{...r,label:newLabel}:r));
     setEditingRoom(null);
   };
-  const deleteRoom = (roomId: string) => { pushUndo(); setRooms(prev=>prev.filter(r=>r.id!==roomId)); if(selectedRoom===roomId) setSelectedRoom(null); };
+  const deleteRoom = (roomId: string) => { pushUndo(); setRooms(prev=>prev.filter(r=>r.id!==roomId)); if(selectedRoom===roomId) setSelectedRoom(null); setSelectedRoomEdge(null); };
   const setRoomColor = (roomId: string, color: string) => {
     pushUndo();
     setRooms(prev=>prev.map(r=>r.id===roomId?{...r,color}:r));
@@ -932,7 +1085,8 @@ export default function SignalFlowPage() {
         });
         const roomHits = new Set<any>();
         rooms.forEach((r: any) => {
-          const b = { x1: r.x, y1: r.y, x2: r.x + r.w, y2: r.y + r.h };
+          const bb = roomBBox(r);
+          const b = { x1: bb.x, y1: bb.y, x2: bb.x + bb.w, y2: bb.y + bb.h };
           // Crossing mode: ignore a location the box is entirely inside of — dragging
           // within a location to grab its contents shouldn't select the location itself
           const boxInsideRoom = x1 >= b.x1 && x2 <= b.x2 && y1 >= b.y1 && y2 <= b.y2;
@@ -985,7 +1139,7 @@ export default function SignalFlowPage() {
       return;
     }
     if(isEmpty){
-      setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+      setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null); setSelectedAnnotId(null); clearMarqueeSel();
       if (e.button === 0) startMarquee(e); // pan via middle-drag or scroll wheel
     }
   };
@@ -1086,14 +1240,14 @@ export default function SignalFlowPage() {
     const inGroup = selectedIds.has(dev.id);
     if (inGroup) { setSelected(null); }
     else { setSelected(dev.id); clearMarqueeSel(); }
-    setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null);
+    setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z, startY = e.clientY/z;
     const ids = inGroup ? new Set(selectedIds) : new Set([dev.id]);
     const origins = new Map<any,{x:number;y:number}>(devicesRef.current.filter((d:any)=>ids.has(d.id)).map((d:any)=>[d.id,{x:d.x,y:d.y}]));
     // Selected annotations and locations ride along with a group drag
     const origAnns = new Map<any,any>(inGroup ? annotations.filter((a:any)=>selectedAnnIds.has(a.id)).map((a:any)=>[a.id,a]) : []);
-    const origRooms = new Map<any,{x:number;y:number}>(inGroup ? rooms.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
+    const origRooms = new Map<any,any>(inGroup ? rooms.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,r]) : []);
     // Manually-routed cables (with fixed bend points) where BOTH endpoints are part
     // of this drag move rigidly along with their waypoints, preserving the exact
     // shape. Cables where only ONE endpoint is dragged keep their waypoints fixed
@@ -1130,7 +1284,7 @@ export default function SignalFlowPage() {
       }));
       if (origRooms.size) setRooms(prev=>prev.map((r:any)=>{
         const o = origRooms.get(r.id);
-        return o ? {...r, x: o.x + dx, y: o.y + dy} : r;
+        return o ? translateRoom(o, dx, dy) : r;
       }));
     };
     const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
@@ -1150,7 +1304,7 @@ export default function SignalFlowPage() {
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
     if (e.button !== 0) return;
     setSelectedAnnotId(a.id); clearMarqueeSel();
-    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null);
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z, startY = e.clientY/z;
     const orig = { ...a };
@@ -1231,6 +1385,22 @@ export default function SignalFlowPage() {
       pushUndo();
       setAnnotations(prev=>prev.filter((a:any)=>a.id!==selectedAnnotId));
       setSelectedAnnotId(null);
+    } else if(selectedRoomEdge!==null){
+      const room = roomsRef.current.find((r:any)=>r.id===selectedRoomEdge.roomId);
+      if (room?.points?.length) {
+        pushUndo();
+        if (room.points.length <= 3) {
+          // Can't have a 2-vertex polygon — delete the whole location instead
+          setRooms(prev=>prev.filter((r:any)=>r.id!==room.id));
+          if (selectedRoom===room.id) setSelectedRoom(null);
+        } else {
+          // Deleting an edge merges it into its neighbor by dropping one of its
+          // two vertices — the polygon reconnects around the gap.
+          const removeIdx = (selectedRoomEdge.index+1) % room.points.length;
+          setRooms(prev=>prev.map((r:any)=>r.id===room.id ? {...r, points:r.points.filter((_:any,i:number)=>i!==removeIdx)} : r));
+        }
+      }
+      setSelectedRoomEdge(null);
     } else if(selectedRoom!==null){
       deleteRoom(selectedRoom); // deleteRoom pushes its own undo snapshot
     } else if(selectedConn!==null){
@@ -1243,7 +1413,7 @@ export default function SignalFlowPage() {
       setDevices(prev=>prev.filter((d:any)=>d.id!==selected));
       setSelected(null);
     }
-  }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds, selectedConnIds]);
+  }, [selected, selectedConn, selectedRoom, selectedRoomEdge, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds, selectedConnIds]);
 
   // Nudge the current selection by (dx,dy) canvas units — arrow-key equivalent of
   // dragging. Groups rapid repeats (held key / fast taps) into a single undo step.
@@ -1270,7 +1440,7 @@ export default function SignalFlowPage() {
       setDevices(prev=>prev.map((d:any)=> devIds.has(d.id) ? {...d, x:d.x+dx, y:d.y+dy} : d));
     }
     if (annIds.size) setAnnotations(prev=>prev.map((a:any)=> annIds.has(a.id) ? translateAnnotation(a,dx,dy) : a));
-    if (roomIds.size) setRooms(prev=>prev.map((r:any)=> roomIds.has(r.id) ? {...r, x:r.x+dx, y:r.y+dy} : r));
+    if (roomIds.size) setRooms(prev=>prev.map((r:any)=> roomIds.has(r.id) ? translateRoom(r,dx,dy) : r));
   }, [selected, selectedIds, selectedAnnIds, selectedRoomIds, selectedAnnotId, selectedRoom]);
   const nudgeSelectedRef = useRef(nudgeSelected);
   nudgeSelectedRef.current = nudgeSelected;
@@ -1409,6 +1579,20 @@ export default function SignalFlowPage() {
       setLiveAnnot({type:"shape", sub:"polyline", pts:[...drawRef.current.pts!], color:toolColor, sw:strokeW});
       return;
     }
+    if (activeTool === "location") {
+      // click-to-add-corners, same as the polyline shape tool above — each
+      // click locks in the current (already orthogonally-snapped) live end as
+      // a fixed corner; the shape never bends on its own between clicks.
+      // Clicking inside the snap zone around the first corner closes the
+      // shape instead of adding a duplicate corner on top of it.
+      const rd = roomDrawRef.current;
+      if (rd?.nearStart) { finishLocationPolyline(); return; }
+      if (rd) rd.corners.push(rd.liveEnd);
+      else roomDrawRef.current = { corners: [{x, y}], liveEnd: {x, y}, nearStart: false, trackFrom: null };
+      drawRef.current = {sx: x, sy: y};
+      setLiveRoomPts([...roomDrawRef.current!.corners]);
+      return;
+    }
     drawRef.current = {sx: x, sy: y, pts: (activeTool === "pencil" || (activeTool === "highlight" && hlSubtype === "freehand")) ? [{x, y}] : undefined};
   };
 
@@ -1427,6 +1611,41 @@ export default function SignalFlowPage() {
       drawRef.current.pts!.push({x, y});
       const d = drawRef.current.pts!.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
       setLiveAnnot({type:"pencil", d, color:toolColor, sw:strokeW});
+    } else if (activeTool === "location") {
+      // Live rubber-band segment from the last placed corner — snapped to
+      // whichever axis it currently leans toward, but not committed until
+      // the next click, so it can freely reorient while you aim it. Once
+      // there are enough corners for a valid shape, getting close to the
+      // first corner snaps the preview to a proper orthogonal close instead.
+      const rd = roomDrawRef.current;
+      if (rd) {
+        const first = rd.corners[0];
+        const snapR = LOCATION_SNAP_PX / viewRef.current.zoom;
+        rd.nearStart = rd.corners.length >= 3 && Math.hypot(x-first.x, y-first.y) <= snapR;
+        if (rd.nearStart) {
+          rd.liveEnd = first;
+          rd.trackFrom = null;
+          const fixup = closingFixupCorner(rd.corners);
+          setLiveRoomPts(fixup ? [...rd.corners, fixup, first] : [...rd.corners, first]);
+        } else {
+          const last = rd.corners[rd.corners.length-1];
+          const axis: "h"|"v" = Math.abs(x-last.x) > Math.abs(y-last.y) ? "h" : "v";
+          let liveEnd = axis === "h" ? {x, y:last.y} : {x:last.x, y};
+          // Point tracking: if the free coordinate lines up with an earlier
+          // corner of this same shape, snap onto it exactly and remember which
+          // corner it's tracking, so a perpendicular guide line can be drawn
+          // between them — same idea as CAD object-snap tracking.
+          const trackTol = LOCATION_TRACK_PX / viewRef.current.zoom;
+          let trackFrom: {x:number;y:number} | null = null;
+          for (const c of rd.corners.slice(0, -1)) {
+            if (axis === "h" && Math.abs(c.x-x) <= trackTol) { liveEnd = {x:c.x, y:last.y}; trackFrom = c; break; }
+            if (axis === "v" && Math.abs(c.y-y) <= trackTol) { liveEnd = {x:last.x, y:c.y}; trackFrom = c; break; }
+          }
+          rd.liveEnd = liveEnd;
+          rd.trackFrom = trackFrom;
+          setLiveRoomPts([...rd.corners, rd.liveEnd]);
+        }
+      }
     } else if (activeTool === "highlight") {
       if (hlSubtype === "freehand") {
         drawRef.current.pts!.push({x, y});
@@ -1463,7 +1682,10 @@ export default function SignalFlowPage() {
   const handleToolUp = () => {
     if (!drawRef.current) return;
     // polylines accumulate points across clicks; they commit on double-click
+    // Locations, like polylines, accumulate corners across clicks — they
+    // commit on double-click/Enter/right-click via finishLocationPolyline.
     if (activeTool === "shape" && shapeSubtype === "polyline") return;
+    if (activeTool === "location") return;
     if (liveAnnot) {
       pushUndo();
       setAnnotations(prev=>[...prev, {...liveAnnot, id:`a${annotIdRef.current++}`}]);
@@ -1489,9 +1711,11 @@ export default function SignalFlowPage() {
   };
 
   // Mirrored into a ref so the window keydown handler (mounted once, with
-  // stale closures) can finish an in-progress polyline on Enter/Escape
+  // stale closures) can finish an in-progress polyline/location on Enter/Escape
   const polylineKeyRef = useRef({ active: false, finish: () => {} });
-  polylineKeyRef.current = { active: activeTool === "shape" && shapeSubtype === "polyline", finish: finishPolyline };
+  polylineKeyRef.current = activeTool === "location"
+    ? { active: !!roomDrawRef.current, finish: finishLocationPolyline }
+    : { active: activeTool === "shape" && shapeSubtype === "polyline" && !!drawRef.current?.pts, finish: finishPolyline };
   // Same staleness fix for the Enter-finishes-current-command shortcut
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
@@ -1560,7 +1784,7 @@ export default function SignalFlowPage() {
   // Enter (AutoCAD-style): keep what's been drawn/typed so far and exit the tool,
   // rather than discarding it. Triggered by Enter and by right-click on the canvas.
   const finishActiveTool = () => {
-    if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
+    if (polylineKeyRef.current.active) polylineKeyRef.current.finish();
     if (textInputRef.current) commitTextRef.current();
     setActiveTool(null);
     setLiveAnnot(null);
@@ -1659,9 +1883,9 @@ export default function SignalFlowPage() {
         return;
       }
       if(e.key === "Escape") {
-        // finish (not discard) an in-progress polyline — the drawn segments stay
-        if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
-        setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); clearMarqueeSel(); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
+        // finish (not discard) an in-progress polyline or location — the drawn segments stay
+        if (polylineKeyRef.current.active) polylineKeyRef.current.finish();
+        setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null); clearMarqueeSel(); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); setLiveRoomPts(null); drawRef.current=null; roomDrawRef.current=null;
         // Escape keeps (commits) any in-progress text rather than discarding it
         if (textInputRef.current) commitTextRef.current();
         return;
@@ -1689,7 +1913,7 @@ export default function SignalFlowPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteSelected]);
 
-  const clearAll = () => { pushUndo(); setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel(); nextId.current=1; annotIdRef.current=1; };
+  const clearAll = () => { pushUndo(); setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedRoomEdge(null); setSelectedAnnotId(null); clearMarqueeSel(); nextId.current=1; annotIdRef.current=1; };
 
   // A manually-routed cable always leaves/enters a port perpendicular to the
   // device edge it's on — never at an angle that would cut back through the box.
@@ -1761,7 +1985,7 @@ export default function SignalFlowPage() {
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
     if (e.button !== 0) return;
     setSelectedConn(conn.id); setSelectedConnSegment({connId:conn.id, index:segIndex});
-    setSelected(null); setSelectedRoom(null); clearMarqueeSel();
+    setSelected(null); setSelectedRoom(null); setSelectedRoomEdge(null); clearMarqueeSel();
     const a = pts[segIndex], b = pts[segIndex+1];
     const horizontal = Math.abs(a.y-b.y) < 0.5;
     const baseInterior = pts.slice(1,-1).map(p=>({...p}));
@@ -1972,7 +2196,7 @@ export default function SignalFlowPage() {
   const zoomExtentsSF = () => {
     const pts: { x: number; y: number }[] = [];
     devices.forEach((d: any) => { pts.push({ x: d.x, y: d.y }, { x: d.x + d.w, y: d.y + d.h }); });
-    rooms.forEach((r: any) => { pts.push({ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h }); });
+    rooms.forEach((r: any) => { if (r.points?.length) pts.push(...r.points); else { const bb = roomBBox(r); pts.push({ x: bb.x, y: bb.y }, { x: bb.x + bb.w, y: bb.y + bb.h }); } });
     if (!pts.length) return;
     const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
     const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
@@ -2050,6 +2274,21 @@ export default function SignalFlowPage() {
     });
   };
 
+  // Toggleable toolbar button (highlighted while its tool is active) — shared
+  // by the Create group (Location) and the Annotate group (Text/Shape/etc).
+  const toolBtn = (id: typeof activeTool, title: string, icon: React.ReactNode, label: React.ReactNode) => {
+    const isActive = activeTool === id;
+    return (
+      <button key={id} onClick={()=>{if(textInput)commitText();setActiveTool(isActive?null:id);}} title={title}
+        style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 10px",background:isActive?"rgba(139,92,246,0.12)":"transparent",border:`1px solid ${isActive?"#8b5cf6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+        onMouseEnter={e=>{if(!isActive){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
+        onMouseLeave={e=>{if(!isActive){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
+        {icon}
+        <span style={{fontSize:9,color:isActive?"#8b5cf6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>{label}</span>
+      </button>
+    );
+  };
+
   return (
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px - 85px)",overflow:"hidden"}}>
 
@@ -2070,15 +2309,21 @@ export default function SignalFlowPage() {
                 </svg>
                 <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Equipment</span>
               </button>
-              <button onClick={addRoom} title="Add Location boundary"
+              <button onClick={addRoom} title="Create Rectangular Location"
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:56}}
                 onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+                  <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2"/>
                 </svg>
-                <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Location</span>
+                <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Rectangular<br/>Location</span>
               </button>
+              {toolBtn("location","Create Polygonal Location — click to place each corner",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="location"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4 L20 4 L20 20 L11 20 L11 13 L4 13 Z" strokeDasharray="2.5 2"/>
+                </svg>,
+                <>Polygonal<br/>Location</>
+              )}
             </div>
             <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Create</span>
           </div>
@@ -2087,53 +2332,37 @@ export default function SignalFlowPage() {
           <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
 
           {/* Annotate group */}
-          {(()=>{
-            const toolBtn = (id: typeof activeTool, title: string, icon: React.ReactNode, label: string) => {
-              const isActive = activeTool === id;
-              return (
-                <button key={id} onClick={()=>{if(textInput)commitText();setActiveTool(isActive?null:id);}} title={title}
-                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 10px",background:isActive?"rgba(139,92,246,0.12)":"transparent",border:`1px solid ${isActive?"#8b5cf6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
-                  onMouseEnter={e=>{if(!isActive){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
-                  onMouseLeave={e=>{if(!isActive){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
-                  {icon}
-                  <span style={{fontSize:9,color:isActive?"#8b5cf6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>{label}</span>
-                </button>
-              );
-            };
-            return (
-              <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
-                <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
-                  {toolBtn("text","Add Text",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="text"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
-                    "Text"
-                  )}
-                  {toolBtn("shape","Draw Shape",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="shape"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M7 3.5 L10.5 9.5 H3.5 Z"/>
-                      <path d="M14.5 8 C14.5 5 16.5 3.5 19.5 4"/>
-                      <path d="M17.5 2.5 L19.8 4.05 L18.2 6.3"/>
-                      <circle cx="7" cy="17.5" r="3.5"/>
-                      <rect x="14" y="14" width="7" height="7" rx="1.8"/>
-                    </svg>,
-                    "Shape"
-                  )}
-                  {toolBtn("pencil","Freehand Draw",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="pencil"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>,
-                    "Pencil"
-                  )}
-                  {toolBtn("highlight","Highlight",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="highlight"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><rect x="9" y="9" width="13" height="13" rx="2" fill={activeTool==="highlight"?"#fbbf2440":"none"}/></svg>,
-                    "Highlight"
-                  )}
-                  {toolBtn("eraser","Erase Annotation",
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="eraser"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-1.5 1.5"/><path d="M6.5 17.5l5-5"/></svg>,
-                    "Eraser"
-                  )}
-                </div>
-                <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
-              </div>
-            );
-          })()}
+          <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+            <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+              {toolBtn("text","Add Text",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="text"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
+                "Text"
+              )}
+              {toolBtn("shape","Draw Shape",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="shape"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 3.5 L10.5 9.5 H3.5 Z"/>
+                  <path d="M14.5 8 C14.5 5 16.5 3.5 19.5 4"/>
+                  <path d="M17.5 2.5 L19.8 4.05 L18.2 6.3"/>
+                  <circle cx="7" cy="17.5" r="3.5"/>
+                  <rect x="14" y="14" width="7" height="7" rx="1.8"/>
+                </svg>,
+                "Shape"
+              )}
+              {toolBtn("pencil","Freehand Draw",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="pencil"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>,
+                "Pencil"
+              )}
+              {toolBtn("highlight","Highlight",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="highlight"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><rect x="9" y="9" width="13" height="13" rx="2" fill={activeTool==="highlight"?"#fbbf2440":"none"}/></svg>,
+                "Highlight"
+              )}
+              {toolBtn("eraser","Erase Annotation",
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={activeTool==="eraser"?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-1.5 1.5"/><path d="M6.5 17.5l5-5"/></svg>,
+                "Eraser"
+              )}
+            </div>
+            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
+          </div>
 
           {/* Tool options live in the floating palette on the canvas */}
 
@@ -2196,7 +2425,7 @@ export default function SignalFlowPage() {
           </button>
         </div>
         {/* Tool palette — GoodNotes-style floating toolbar on the left edge of the canvas */}
-        {activeTool && activeTool !== "text" && (
+        {activeTool && activeTool !== "text" && activeTool !== "location" && (
           <div data-html2canvas-ignore="true"
             style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",zIndex:10,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 6px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:14,boxShadow:"0 4px 18px rgba(0,0,0,0.18)",maxHeight:"calc(100% - 24px)",overflowY:"auto"}}>
             {/* Shape subtypes */}
@@ -2271,6 +2500,12 @@ export default function SignalFlowPage() {
             Click to add points — hold Shift for straight lines, Enter, right-click, or double-click to finish
           </div>
         )}
+        {/* Location drawing hint */}
+        {activeTool === "location" && (
+          <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",zIndex:10,padding:"5px 12px",background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",borderRadius:5,color:"#8b5cf6",fontSize:11,whiteSpace:"nowrap"}}>
+            Click to place each corner (walls snap to 90°, and track into line with earlier corners) — click the highlighted start point, or press Enter/right-click/double-click, to close the shape
+          </div>
+        )}
         {refreshNotice && (
           <div data-html2canvas-ignore="true" style={{position:"absolute",top:44,left:"50%",transform:"translateX(-50%)",zIndex:11,maxWidth:520,padding:"7px 12px",background:refreshNotice.kind==="ok"?"rgba(34,197,94,0.14)":"rgba(239,68,68,0.14)",border:`1px solid ${refreshNotice.kind==="ok"?"rgba(34,197,94,0.4)":"rgba(239,68,68,0.4)"}`,borderRadius:6,color:refreshNotice.kind==="ok"?"#22c55e":"#ef4444",fontSize:11,textAlign:"center"}}>
             {refreshNotice.message}
@@ -2296,7 +2531,7 @@ export default function SignalFlowPage() {
           onPointerUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
           onPointerLeave={activeTool==="eraser"?()=>setEraserCursor(null):undefined}
           onContextMenu={e=>{if(activeTool){e.preventDefault();finishActiveTool();}}}
-          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null); setSelectedConnSegment(null);setSelectedRoom(null);clearMarqueeSel();}}}
+          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}if(activeTool==="location"&&roomDrawRef.current){finishLocationPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null); setSelectedConnSegment(null);setSelectedRoom(null); setSelectedRoomEdge(null);clearMarqueeSel();}}}
           style={{cursor:activeTool==="text"?"text":activeTool==="eraser"?"none":activeTool?"crosshair":marquee?"crosshair":"default", touchAction:"none", userSelect:"none", WebkitUserSelect:"none", WebkitTouchCallout:"none"} as React.CSSProperties}>
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -2319,6 +2554,73 @@ export default function SignalFlowPage() {
           {/* Room Boundaries */}
           {rooms.map((room:any)=>{
             const isSel = selectedRoom===room.id || selectedRoomIds.has(room.id);
+            if (room.points?.length) {
+              // Freeform (custom-drawn) location — a closed polygon, edited edge by edge
+              const pts: {x:number;y:number}[] = room.points;
+              const bb = roomBBox(room);
+              const rx = bb.x+panOffset.x, ry = bb.y+panOffset.y;
+              const polyStr = pts.map((p:any)=>`${(p.x+panOffset.x).toFixed(1)},${(p.y+panOffset.y).toFixed(1)}`).join(" ");
+              return (
+                <g key={room.id}>
+                  <polygon points={polyStr} fill={room.color+"08"} stroke="none" onPointerDown={(e)=>handleRoomBodyMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default"}} />
+                  {pts.map((p:any,i:number)=>{
+                    const q = pts[(i+1)%pts.length];
+                    const x1=p.x+panOffset.x, y1=p.y+panOffset.y, x2=q.x+panOffset.x, y2=q.y+panOffset.y;
+                    const edgeSel = selectedRoomEdge?.roomId===room.id && selectedRoomEdge?.index===i;
+                    return (
+                      <g key={i}>
+                        {edgeSel && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={6} strokeOpacity={0.5}/>}
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={room.color+(isSel?"88":"44")} strokeWidth={isSel?2.5:1.5} strokeDasharray={isSel?"8 4":"6 4"} />
+                        {/* Grabbing the edge line itself (as opposed to its midpoint
+                            grip) moves the whole location — the "move" cursor here
+                            should actually move everything, not just this one wall. */}
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={10/view.zoom} pointerEvents="stroke"
+                          style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"move"}}
+                          onPointerDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} />
+                      </g>
+                    );
+                  })}
+                  {isSel && pts.map((p:any,i:number)=>{
+                    // Midpoint grip — same drag as the invisible edge hit-line, just
+                    // given a visible handle (like the rectangle location's edge grips)
+                    const q = pts[(i+1)%pts.length];
+                    const hs = 4/view.zoom;
+                    const mx = (p.x+q.x)/2, my = (p.y+q.y)/2;
+                    const horizontal = Math.abs(p.y-q.y) < 0.5;
+                    return <rect key={`m${i}`} x={mx+panOffset.x-hs} y={my+panOffset.y-hs} width={hs*2} height={hs*2} fill={room.color} stroke="#fff" strokeWidth={1} rx={1} opacity={0.7}
+                      style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":(horizontal?"ns-resize":"ew-resize")}}
+                      onPointerDown={(e)=>handleRoomEdgeMouseDown(e,room,i)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} />;
+                  })}
+                  {isSel && pts.map((p:any,i:number)=>{
+                    const hs = 4/view.zoom;
+                    // Diagonal resize cursor, same convention as a rectangle's corner
+                    // handles — figured out from which way each adjacent wall runs,
+                    // since a polygon corner isn't always "top-left" etc. like a rect.
+                    const n = pts.length;
+                    const prevPt = pts[(i-1+n)%n], nextPt = pts[(i+1)%n];
+                    const prevIsHoriz = Math.abs(prevPt.y-p.y) < 0.5;
+                    const horizN = prevIsHoriz ? prevPt : nextPt;
+                    const vertN = prevIsHoriz ? nextPt : prevPt;
+                    const signX = Math.sign(horizN.x-p.x) || 1;
+                    const signY = Math.sign(vertN.y-p.y) || 1;
+                    const diagCursor = signX*signY > 0 ? "nwse-resize" : "nesw-resize";
+                    return <rect key={`v${i}`} x={p.x+panOffset.x-hs} y={p.y+panOffset.y-hs} width={hs*2} height={hs*2} fill={room.color} stroke="#fff" strokeWidth={1} rx={1}
+                      style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":diagCursor}}
+                      onPointerDown={(e)=>handleRoomVertexMouseDown(e,room,i)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} />;
+                  })}
+                  <rect x={rx} y={ry-1} width={Math.max(100,room.label.length*9+24)} height={24} rx={3} fill={room.color+"22"} stroke={room.color+"55"} strokeWidth={1} onPointerDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"move"}} />
+                  {editingRoom===room.id ? (
+                    <foreignObject x={rx+4} y={ry+1} width={Math.max(160,room.label.length*9+30)} height={22}>
+                      <input autoFocus defaultValue={room.label} onBlur={(e)=>finishRoomEdit(room.id,(e.target as HTMLInputElement).value)} onKeyDown={(e)=>{if(e.key==="Enter")finishRoomEdit(room.id,(e.target as HTMLInputElement).value);}} style={{width:"100%",padding:"2px 6px",background:"rgb(var(--forge-surface))",border:"1px solid "+room.color,borderRadius:3,color:"rgb(var(--text-body))",fontSize:11,fontWeight:600,fontFamily:"Inter, sans-serif",outline:"none",boxSizing:"border-box",height:"20px"}} />
+                    </foreignObject>
+                  ) : (
+                    <text x={rx+12} y={ry+15} fontSize={11} fill={room.color} fontFamily="Inter, sans-serif" fontWeight={700} style={{cursor:"pointer"}} onDoubleClick={()=>setEditingRoom(room.id)} onPointerDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)}>
+                      {room.label}
+                    </text>
+                  )}
+                </g>
+              );
+            }
             const rx = room.x+panOffset.x, ry = room.y+panOffset.y;
             const handleSize = 8;
             return (
@@ -2344,6 +2646,22 @@ export default function SignalFlowPage() {
               </g>
             );
           })}
+          {/* Live preview while tracing a new custom location boundary */}
+          {activeTool === "location" && liveRoomPts && liveRoomPts.length > 1 && (
+            <polyline points={liveRoomPts.map((p:any)=>`${(p.x+panOffset.x).toFixed(1)},${(p.y+panOffset.y).toFixed(1)}`).join(" ")} fill="none" stroke="#8b5cf6" strokeWidth={2} strokeDasharray={roomDrawRef.current?.nearStart ? undefined : "4 3"} opacity={0.85} pointerEvents="none"/>
+          )}
+          {/* Snap indicator — hovering here closes the shape at the start corner */}
+          {activeTool === "location" && roomDrawRef.current?.nearStart && (
+            <circle cx={roomDrawRef.current.corners[0].x+panOffset.x} cy={roomDrawRef.current.corners[0].y+panOffset.y} r={7} fill="none" stroke="#8b5cf6" strokeWidth={2} pointerEvents="none"/>
+          )}
+          {/* Point-tracking guide — the new corner is aligned with an earlier one */}
+          {activeTool === "location" && roomDrawRef.current?.trackFrom && (()=>{
+            const from = roomDrawRef.current!.trackFrom!, to = roomDrawRef.current!.liveEnd;
+            return <g pointerEvents="none">
+              <line x1={from.x+panOffset.x} y1={from.y+panOffset.y} x2={to.x+panOffset.x} y2={to.y+panOffset.y} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="2 3"/>
+              <circle cx={from.x+panOffset.x} cy={from.y+panOffset.y} r={4} fill="none" stroke="#f59e0b" strokeWidth={1.5}/>
+            </g>;
+          })()}
 
           {/* Connections */}
           {connections.map(renderConnection)}
