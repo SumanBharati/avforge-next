@@ -164,6 +164,10 @@ export default function SignalFlowPage() {
   const [connecting, setConnecting] = useState<any>(null);
   const [selected, setSelected] = useState<any>(null);
   const [selectedConn, setSelectedConn] = useState<any>(null);
+  // A single interior bend segment of a manually-routed cable, selected by clicking
+  // it directly — draggable perpendicular to its own orientation, or nudgeable with
+  // the matching arrow keys, independent of selecting the whole connection.
+  const [selectedConnSegment, setSelectedConnSegment] = useState<{connId:any;index:number}|null>(null);
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [rooms, setRooms] = useState<any[]>([]);
   const [editingRoom, setEditingRoom] = useState<any>(null);
@@ -233,26 +237,52 @@ export default function SignalFlowPage() {
   const annotationsRef = useRef<any[]>([]);
   annotationsRef.current = annotations;
   const undoStackRef = useRef<{devices:any[];connections:any[];rooms:any[];annotations:any[]}[]>([]);
+  // Ctrl+Shift+Z / Ctrl+Y redo: holds states popped off the undo stack. Any new
+  // mutation (pushUndo) invalidates this — same as every other undo/redo model —
+  // since redoing into a branch that a fresh edit just diverged from makes no sense.
+  const redoStackRef = useRef<{devices:any[];connections:any[];rooms:any[];annotations:any[]}[]>([]);
   const pushUndo = () => {
     undoStackRef.current = [
       ...undoStackRef.current.slice(-49),
       { devices: devicesRef.current, connections: connectionsRef.current, rooms: roomsRef.current, annotations: annotationsRef.current },
     ];
+    redoStackRef.current = [];
   };
   const undo = () => {
     const stack = undoStackRef.current;
     if (!stack.length) return;
     const snap = stack[stack.length - 1];
     undoStackRef.current = stack.slice(0, -1);
+    redoStackRef.current = [
+      ...redoStackRef.current.slice(-49),
+      { devices: devicesRef.current, connections: connectionsRef.current, rooms: roomsRef.current, annotations: annotationsRef.current },
+    ];
     setDevices(snap.devices);
     setConnections(snap.connections);
     setRooms(snap.rooms);
     setAnnotations(snap.annotations);
     // Selections may point at items that no longer exist after the restore
-    setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+  };
+  const redo = () => {
+    const stack = redoStackRef.current;
+    if (!stack.length) return;
+    const snap = stack[stack.length - 1];
+    redoStackRef.current = stack.slice(0, -1);
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-49),
+      { devices: devicesRef.current, connections: connectionsRef.current, rooms: roomsRef.current, annotations: annotationsRef.current },
+    ];
+    setDevices(snap.devices);
+    setConnections(snap.connections);
+    setRooms(snap.rooms);
+    setAnnotations(snap.annotations);
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
   };
   const undoRef = useRef(undo);
   undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
   const [liveAnnot, setLiveAnnot] = useState<any>(null);
   const [textInput, setTextInput] = useState<{cssX:number,cssY:number,svgX:number,svgY:number,clientX:number,clientY:number}|null>(null);
   const [textValue, setTextValue] = useState("");
@@ -704,7 +734,7 @@ export default function SignalFlowPage() {
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     // With an annotation tool active, draw over the location instead of moving it
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
-    setSelectedRoom(room.id); setSelected(null); setSelectedConn(null);
+    setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z - room.x - panOffset.x;
     const startY = e.clientY/z - room.y - panOffset.y;
@@ -715,9 +745,10 @@ export default function SignalFlowPage() {
       const ny = me.clientY/z - startY - panOffset.y;
       setRooms(prev=>prev.map(r=>r.id===room.id?{...r,x:nx,y:ny}:r));
     };
-    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-    window.addEventListener("mousemove",onMove);
-    window.addEventListener("mouseup",onUp);
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
   // Location body: left-drag marquee-selects devices inside it (same as empty canvas),
@@ -727,15 +758,15 @@ export default function SignalFlowPage() {
     if (connecting && e.button === 0) { addConnectionWaypoint(e); return; }
     // With an annotation tool active, draw over the location instead of selecting it
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
-    if (e.button !== 0) { setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); return; }
-    setSelectedRoom(null); setSelected(null); setSelectedConn(null); setSelectedAnnotId(null); clearMarqueeSel();
+    if (e.button !== 0) { setSelectedRoom(room.id); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); return; }
+    setSelectedRoom(null); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedAnnotId(null); clearMarqueeSel();
     const sx = e.clientX, sy = e.clientY;
     startMarquee(e);
     const onUp = (me: MouseEvent) => {
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointerup", onUp);
       if (Math.abs(me.clientX - sx) < 4 && Math.abs(me.clientY - sy) < 4) setSelectedRoom(room.id);
     };
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointerup", onUp);
   };
 
   const handleRoomResize = (e: React.MouseEvent, room: any, handle: string) => {
@@ -759,9 +790,10 @@ export default function SignalFlowPage() {
         return {...r,x,y,w,h};
       }));
     };
-    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-    window.addEventListener("mousemove",onMove);
-    window.addEventListener("mouseup",onUp);
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
   const handleRoomContextMenu = (e: React.MouseEvent, room: any) => {
@@ -819,9 +851,10 @@ export default function SignalFlowPage() {
     const onMove = (me: MouseEvent) => {
       setView(v=>({...v, x: startVX + (me.clientX - startMX), y: startVY + (me.clientY - startMY)}));
     };
-    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-    window.addEventListener("mousemove",onMove);
-    window.addEventListener("mouseup",onUp);
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
   // Axis-aligned bbox of an annotation in world coords (null = not selectable)
@@ -876,8 +909,9 @@ export default function SignalFlowPage() {
       setMarquee({ sx: start.x, sy: start.y, cx: cur.x, cy: cur.y });
     };
     const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       const minDrag = 4 / viewRef.current.zoom;
       if (Math.abs(cur.x - start.x) > minDrag || Math.abs(cur.y - start.y) > minDrag) {
         const isWindow = cur.x >= start.x;
@@ -935,8 +969,9 @@ export default function SignalFlowPage() {
       }
       setMarquee(null);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
@@ -950,7 +985,7 @@ export default function SignalFlowPage() {
       return;
     }
     if(isEmpty){
-      setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
+      setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel();
       if (e.button === 0) startMarquee(e); // pan via middle-drag or scroll wheel
     }
   };
@@ -981,6 +1016,68 @@ export default function SignalFlowPage() {
     return () => document.removeEventListener("wheel", onWheel, { capture: true } as any);
   }, []);
 
+  // Two-finger pinch-to-zoom + pan for touch — there's no wheel gesture on a
+  // touchscreen, so this is the touch equivalent of the ctrl+wheel zoom above.
+  // Tracked at document level (capture) so it keeps working even while a finger
+  // moves over a device/annotation that has its own pointer handlers.
+  useEffect(() => {
+    const pointers = new Map<number, {x:number;y:number}>();
+    let prevDist = 0, prevMid = {x:0,y:0};
+    const dist = (a:{x:number;y:number}, b:{x:number;y:number}) => Math.hypot(a.x-b.x, a.y-b.y);
+    const mid = (a:{x:number;y:number}, b:{x:number;y:number}) => ({x:(a.x+b.x)/2, y:(a.y+b.y)/2});
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      const wrap = document.getElementById("sf-canvas-export");
+      if (!wrap || !wrap.contains(e.target as Node)) return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if (pointers.size === 2) {
+        const [a,b] = [...pointers.values()];
+        prevDist = dist(a,b);
+        prevMid = mid(a,b);
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if (pointers.size !== 2 || canvasLockedRef.current) return;
+      e.preventDefault();
+      const wrap = document.getElementById("sf-canvas-export");
+      if (!wrap) return;
+      const [a,b] = [...pointers.values()];
+      const newDist = dist(a,b), newMid = mid(a,b);
+      const rect = wrap.getBoundingClientRect();
+      const v = viewRef.current;
+      const zoom = Math.min(4, Math.max(0.25, v.zoom * (prevDist > 0 ? newDist/prevDist : 1)));
+      const scale = zoom / v.zoom;
+      const mx = newMid.x - rect.left, my = newMid.y - rect.top;
+      setView({
+        zoom,
+        x: mx - (mx - v.x) * scale + (newMid.x - prevMid.x),
+        y: my - (my - v.y) * scale + (newMid.y - prevMid.y),
+      });
+      prevDist = newDist; prevMid = newMid;
+    };
+    const onUpOrCancel = (e: PointerEvent) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.delete(e.pointerId);
+      if (pointers.size === 2) {
+        const [a,b] = [...pointers.values()];
+        prevDist = dist(a,b);
+        prevMid = mid(a,b);
+      }
+    };
+    document.addEventListener("pointerdown", onDown, { capture: true });
+    document.addEventListener("pointermove", onMove, { passive: false, capture: true });
+    document.addEventListener("pointerup", onUpOrCancel, { capture: true });
+    document.addEventListener("pointercancel", onUpOrCancel, { capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", onDown, { capture: true } as any);
+      document.removeEventListener("pointermove", onMove, { capture: true } as any);
+      document.removeEventListener("pointerup", onUpOrCancel, { capture: true } as any);
+      document.removeEventListener("pointercancel", onUpOrCancel, { capture: true } as any);
+    };
+  }, []);
+
   const handleDeviceMouseDown = (e: React.MouseEvent, dev: any) => {
     e.stopPropagation();
     // With an annotation tool active, draw over the device instead of dragging it
@@ -989,7 +1086,7 @@ export default function SignalFlowPage() {
     const inGroup = selectedIds.has(dev.id);
     if (inGroup) { setSelected(null); }
     else { setSelected(dev.id); clearMarqueeSel(); }
-    setSelectedConn(null); setSelectedRoom(null);
+    setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z, startY = e.clientY/z;
     const ids = inGroup ? new Set(selectedIds) : new Set([dev.id]);
@@ -997,25 +1094,32 @@ export default function SignalFlowPage() {
     // Selected annotations and locations ride along with a group drag
     const origAnns = new Map<any,any>(inGroup ? annotations.filter((a:any)=>selectedAnnIds.has(a.id)).map((a:any)=>[a.id,a]) : []);
     const origRooms = new Map<any,{x:number;y:number}>(inGroup ? rooms.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
-    // Manually-routed cables (with fixed bend points) touching a moved device fall
-    // back to live auto-routing once the move actually starts — rigidly translating
-    // the old bend instead can leave a nonsensical detour when only one end of the
-    // cable is part of this drag. Auto-routing always tracks the current ports
-    // correctly; a bend can be re-added afterward if the shape still matters.
-    const affectedConnIds = new Set<any>(
-      connectionsRef.current
-        .filter((c:any)=>c.waypoints?.length && (ids.has(c.from.deviceId)||ids.has(c.to.deviceId)))
-        .map((c:any)=>c.id)
-    );
+    // Manually-routed cables (with fixed bend points) where BOTH endpoints are part
+    // of this drag move rigidly along with their waypoints, preserving the exact
+    // shape. Cables where only ONE endpoint is dragged keep their waypoints fixed
+    // in place — orthoPointsForConn grows a fresh elbow (and detours around the
+    // box if needed) to the new port position on its own, so the cable stays
+    // orthogonal instead of rigidly translating into a
+    // nonsensical detour (the old bug) or degrading into the bezier "no waypoints"
+    // curve (dropping the waypoints outright).
+    const fullMoveConnIds = new Set<any>();
+    const origWaypoints = new Map<any, {x:number;y:number}[]>();
+    connectionsRef.current.forEach((c:any) => {
+      if (c.waypoints?.length && ids.has(c.from.deviceId) && ids.has(c.to.deviceId)) {
+        fullMoveConnIds.add(c.id);
+        origWaypoints.set(c.id, c.waypoints.map((w:any)=>({...w})));
+      }
+    });
     let undoPushed = false;
     const onMove = (me: MouseEvent) => {
-      if (!undoPushed) {
-        undoPushed = true;
-        pushUndo();
-        if (affectedConnIds.size) setConnections((prev:any[])=>prev.map((c:any)=>affectedConnIds.has(c.id) ? {...c, waypoints:[]} : c));
-      }
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
       const dx = me.clientX/z - startX;
       const dy = me.clientY/z - startY;
+      if (fullMoveConnIds.size) setConnections((prev:any[])=>prev.map((c:any)=>{
+        if (!fullMoveConnIds.has(c.id)) return c;
+        const orig = origWaypoints.get(c.id)!;
+        return {...c, waypoints: orig.map(w=>({x:w.x+dx,y:w.y+dy}))};
+      }));
       setDevices(prev=>prev.map((d:any)=>{
         const o = origins.get(d.id);
         return o ? {...d, x: o.x + dx, y: o.y + dy} : d;
@@ -1029,60 +1133,38 @@ export default function SignalFlowPage() {
         return o ? {...r, x: o.x + dx, y: o.y + dy} : r;
       }));
     };
-    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-    window.addEventListener("mousemove",onMove);
-    window.addEventListener("mouseup",onUp);
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
-  // Drag a single annotation (text/shape/pencil/highlight) — or, if it's part of an
-  // existing multi-select, the whole selected group of annotations/devices/rooms.
+  // Drag a single annotation (text/shape/pencil/highlight). Clicking or dragging
+  // an annotation directly always isolates just that one — even if it happened to
+  // be part of a leftover marquee group — so selecting one text can never leave
+  // other, unrelated annotations stuck showing as selected too. A marquee-selected
+  // group is still draggable as a whole, just by grabbing a device in it instead
+  // (see handleDeviceMouseDown), or nudged together with the arrow keys.
   const handleAnnotMouseDown = (e: React.MouseEvent, a: any) => {
     e.stopPropagation();
     if (activeTool && e.button === 0) { handleToolDown(e); return; }
     if (e.button !== 0) return;
-    const inGroup = selectedAnnIds.has(a.id);
-    if (inGroup) { setSelectedAnnotId(null); }
-    else { setSelectedAnnotId(a.id); clearMarqueeSel(); }
-    setSelected(null); setSelectedConn(null); setSelectedRoom(null);
+    setSelectedAnnotId(a.id); clearMarqueeSel();
+    setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null);
     const z = viewRef.current.zoom;
     const startX = e.clientX/z, startY = e.clientY/z;
-    const annIds = inGroup ? new Set(selectedAnnIds) : new Set([a.id]);
-    const origAnns = new Map<any,any>(annotationsRef.current.filter((x:any)=>annIds.has(x.id)).map((x:any)=>[x.id,x]));
-    const origDevs = new Map<any,{x:number;y:number}>(inGroup ? devicesRef.current.filter((d:any)=>selectedIds.has(d.id)).map((d:any)=>[d.id,{x:d.x,y:d.y}]) : []);
-    const origRooms = new Map<any,{x:number;y:number}>(inGroup ? roomsRef.current.filter((r:any)=>selectedRoomIds.has(r.id)).map((r:any)=>[r.id,{x:r.x,y:r.y}]) : []);
-    // Manually-routed cables touching a device in this group fall back to live
-    // auto-routing once the move actually starts (see handleDeviceMouseDown for why
-    // a rigid translate of the old bend isn't safe here).
-    const affectedConnIds = new Set<any>(
-      origDevs.size ? connectionsRef.current
-        .filter((c:any)=>c.waypoints?.length && (origDevs.has(c.from.deviceId)||origDevs.has(c.to.deviceId)))
-        .map((c:any)=>c.id) : []
-    );
+    const orig = { ...a };
     let undoPushed = false;
     const onMove = (me: MouseEvent) => {
-      if (!undoPushed) {
-        undoPushed = true;
-        pushUndo();
-        if (affectedConnIds.size) setConnections((prev:any[])=>prev.map((c:any)=>affectedConnIds.has(c.id) ? {...c, waypoints:[]} : c));
-      }
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
       const dx = me.clientX/z - startX;
       const dy = me.clientY/z - startY;
-      setAnnotations(prev=>prev.map((x:any)=>{
-        const o = origAnns.get(x.id);
-        return o ? translateAnnotation(o, dx, dy) : x;
-      }));
-      if (origDevs.size) setDevices(prev=>prev.map((d:any)=>{
-        const o = origDevs.get(d.id);
-        return o ? {...d, x: o.x + dx, y: o.y + dy} : d;
-      }));
-      if (origRooms.size) setRooms(prev=>prev.map((r:any)=>{
-        const o = origRooms.get(r.id);
-        return o ? {...r, x: o.x + dx, y: o.y + dy} : r;
-      }));
+      setAnnotations(prev=>prev.map((x:any)=> x.id===a.id ? translateAnnotation(orig, dx, dy) : x));
     };
-    const onUp = () => { window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-    window.addEventListener("mousemove",onMove);
-    window.addEventListener("mouseup",onUp);
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
   };
 
   const handlePortClick = (e: React.MouseEvent, device: any, port: any) => {
@@ -1154,7 +1236,7 @@ export default function SignalFlowPage() {
     } else if(selectedConn!==null){
       pushUndo();
       setConnections(prev=>prev.filter((c:any)=>c.id!==selectedConn));
-      setSelectedConn(null);
+      setSelectedConn(null); setSelectedConnSegment(null);
     } else if(selected!==null){
       pushUndo();
       setConnections(prev=>prev.filter((c:any)=>c.from.deviceId!==selected&&c.to.deviceId!==selected));
@@ -1162,6 +1244,36 @@ export default function SignalFlowPage() {
       setSelected(null);
     }
   }, [selected, selectedConn, selectedRoom, selectedAnnotId, selectedIds, selectedAnnIds, selectedRoomIds, selectedConnIds]);
+
+  // Nudge the current selection by (dx,dy) canvas units — arrow-key equivalent of
+  // dragging. Groups rapid repeats (held key / fast taps) into a single undo step.
+  const lastNudgeRef = useRef(0);
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    const devIds = selectedIds.size>0 ? selectedIds : (selected!==null ? new Set([selected]) : new Set());
+    const annIds = selectedAnnIds.size>0 ? selectedAnnIds : (selectedAnnotId!==null ? new Set([selectedAnnotId]) : new Set());
+    const roomIds = selectedRoomIds.size>0 ? selectedRoomIds : (selectedRoom!==null ? new Set([selectedRoom]) : new Set());
+    if (devIds.size===0 && annIds.size===0 && roomIds.size===0) return;
+
+    const now = Date.now();
+    if (now - lastNudgeRef.current > 400) pushUndo();
+    lastNudgeRef.current = now;
+
+    if (devIds.size) {
+      // See handleDeviceMouseDown: cables with both endpoints in the moving set
+      // translate rigidly with their waypoints; single-endpoint cables keep their
+      // waypoints fixed so the route stays orthogonal instead of curving.
+      const fullMoveConnIds = new Set<any>();
+      connectionsRef.current.forEach((c:any) => {
+        if (c.waypoints?.length && devIds.has(c.from.deviceId) && devIds.has(c.to.deviceId)) fullMoveConnIds.add(c.id);
+      });
+      if (fullMoveConnIds.size) setConnections(prev=>prev.map((c:any)=>fullMoveConnIds.has(c.id) ? {...c, waypoints: c.waypoints.map((w:any)=>({x:w.x+dx,y:w.y+dy}))} : c));
+      setDevices(prev=>prev.map((d:any)=> devIds.has(d.id) ? {...d, x:d.x+dx, y:d.y+dy} : d));
+    }
+    if (annIds.size) setAnnotations(prev=>prev.map((a:any)=> annIds.has(a.id) ? translateAnnotation(a,dx,dy) : a));
+    if (roomIds.size) setRooms(prev=>prev.map((r:any)=> roomIds.has(r.id) ? {...r, x:r.x+dx, y:r.y+dy} : r));
+  }, [selected, selectedIds, selectedAnnIds, selectedRoomIds, selectedAnnotId, selectedRoom]);
+  const nudgeSelectedRef = useRef(nudgeSelected);
+  nudgeSelectedRef.current = nudgeSelected;
 
   const getSVGCoords = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -1479,20 +1591,20 @@ export default function SignalFlowPage() {
     const isSel = !isLive && (selectedAnnotId === a.id || selectedAnnIds.has(a.id));
     const selRing = isSel ? {filter:"drop-shadow(0 0 3px #8b5cf6)"} : {};
     if (a.type === "pencil") return (
-      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
+      <path key={key} d={a.d} fill="none" stroke={a.color||"#374151"} strokeWidth={a.sw||2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}} onPointerDown={e=>handleAnnotMouseDown(e,a)}/>
     );
     if (a.type === "highlight") {
       if (a.sub === "freehand") return (
-        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
+        <path key={key} d={a.d} fill="none" stroke={a.color||"#fbbf24"} strokeWidth={16} strokeLinecap="round" strokeLinejoin="round" opacity={0.4} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}} onPointerDown={e=>handleAnnotMouseDown(e,a)}/>
       );
       return (
-        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={e=>handleAnnotMouseDown(e,a)}/>
+        <rect key={key} x={a.x} y={a.y} width={a.w||0} height={a.h||0} fill={a.color||"#fbbf24"} opacity={0.35} rx={3} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={e=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}} onPointerDown={e=>handleAnnotMouseDown(e,a)}/>
       );
     }
     if (a.type === "shape") {
       const {sub,x1,y1,x2,y2,color,sw} = a;
       const stroke = color||"#374151"; const sw2 = sw||2;
-      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}, onMouseDown:(e:any)=>handleAnnotMouseDown(e,a)};
+      const props = {stroke, strokeWidth:sw2, fill:"none", style:{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}, onClick:(e:any)=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}, onMouseDown:(e:any)=>handleAnnotMouseDown(e,a)};
       if (sub==="rect") return <rect key={key} x={Math.min(x1,x2)} y={Math.min(y1,y2)} width={Math.abs(x2-x1)} height={Math.abs(y2-y1)} rx={3} {...props}/>;
       if (sub==="circle") { const cx=(x1+x2)/2,cy=(y1+y2)/2,rx2=Math.abs(x2-x1)/2,ry=Math.abs(y2-y1)/2; return <ellipse key={key} cx={cx} cy={cy} rx={rx2} ry={ry} {...props}/>; }
       if (sub==="triangle") {
@@ -1504,7 +1616,7 @@ export default function SignalFlowPage() {
       if (sub==="arrow") {
         const ang=Math.atan2(y2-y1,x2-x1), hl=14, ha=Math.PI/6;
         const ax1=x2-hl*Math.cos(ang-ha), ay1=y2-hl*Math.sin(ang-ha), ax2=x2-hl*Math.cos(ang+ha), ay2=y2-hl*Math.sin(ang+ha);
-        return <g key={key} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}} onMouseDown={(e)=>handleAnnotMouseDown(e,a)}>
+        return <g key={key} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"pointer",...selRing}} onClick={(e)=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}} onPointerDown={(e)=>handleAnnotMouseDown(e,a)}>
           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw2} strokeLinecap="round"/>
           <polygon points={`${x2},${y2} ${ax1},${ay1} ${ax2},${ay2}`} fill={stroke}/>
         </g>;
@@ -1512,8 +1624,8 @@ export default function SignalFlowPage() {
     }
     if (a.type === "text") return (
       <text key={key} x={a.x} y={a.y} fontSize={a.size||14} fill={a.color||"#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold?"700":"400"} fontStyle={a.italic?"italic":"normal"} textAnchor={a.align==="center"?"middle":a.align==="right"?"end":"start"} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default",...selRing}}
-        onClick={e=>{e.stopPropagation();if(!activeTool)setSelectedAnnotId(a.id);}}
-        onMouseDown={e=>handleAnnotMouseDown(e,a)}
+        onClick={e=>{e.stopPropagation();if(!activeTool){setSelectedAnnotId(a.id);clearMarqueeSel();}}}
+        onPointerDown={e=>handleAnnotMouseDown(e,a)}
         onDoubleClick={e=>{e.stopPropagation();openTextEditor(a,e.clientX,e.clientY);}}
         onContextMenu={e=>{e.preventDefault();e.stopPropagation();if(activeTool){finishActiveTool();return;}setSelectedAnnotId(a.id);setAnnotContextMenu({x:e.clientX,y:e.clientY,annotId:a.id});}}
       >{a.text}</text>
@@ -1530,6 +1642,12 @@ export default function SignalFlowPage() {
         undoRef.current();
         return;
       }
+      // Redo: Ctrl+Shift+Z (Mac/cross-platform convention) or Ctrl+Y (Windows convention)
+      if((e.ctrlKey || e.metaKey) && !e.altKey && ((e.shiftKey && e.key.toLowerCase() === "z") || (!e.shiftKey && e.key.toLowerCase() === "y")) && !isTyping) {
+        e.preventDefault();
+        redoRef.current();
+        return;
+      }
       if((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "c" && !isTyping) {
         e.preventDefault();
         copySelectedDevicesRef.current();
@@ -1543,7 +1661,7 @@ export default function SignalFlowPage() {
       if(e.key === "Escape") {
         // finish (not discard) an in-progress polyline — the drawn segments stay
         if (polylineKeyRef.current.active && drawRef.current?.pts) polylineKeyRef.current.finish();
-        setSelected(null); setSelectedConn(null); setSelectedRoom(null); clearMarqueeSel(); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
+        setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); clearMarqueeSel(); setConnecting(null); setConnectCursor(null); setActiveTool(null); setLiveAnnot(null); drawRef.current=null;
         // Escape keeps (commits) any in-progress text rather than discarding it
         if (textInputRef.current) commitTextRef.current();
         return;
@@ -1552,6 +1670,14 @@ export default function SignalFlowPage() {
         // Enter finishes the current command and exits the tool (AutoCAD-style)
         e.preventDefault();
         finishActiveToolRef.current();
+        return;
+      }
+      if((e.key==="ArrowUp"||e.key==="ArrowDown"||e.key==="ArrowLeft"||e.key==="ArrowRight") && !isTyping && !activeToolRef.current) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key==="ArrowLeft" ? -step : e.key==="ArrowRight" ? step : 0;
+        const dy = e.key==="ArrowUp" ? -step : e.key==="ArrowDown" ? step : 0;
+        if (!nudgeConnSegmentRef.current(dx, dy)) nudgeSelectedRef.current(dx, dy);
         return;
       }
       if(e.key !== "Delete" && e.key !== "Backspace") return;
@@ -1563,20 +1689,58 @@ export default function SignalFlowPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteSelected]);
 
-  const clearAll = () => { pushUndo(); setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel(); nextId.current=1; annotIdRef.current=1; };
+  const clearAll = () => { pushUndo(); setDevices([]); setConnections([]); setRooms([]); setAnnotations([]); setSelected(null); setSelectedConn(null); setSelectedConnSegment(null); setSelectedRoom(null); setSelectedAnnotId(null); clearMarqueeSel(); nextId.current=1; annotIdRef.current=1; };
 
-  // Expand endpoint + waypoints into an axis-aligned point list, inserting
-  // elbows where consecutive points aren't aligned (e.g. after a device moves)
-  const buildOrthoPoints = (p1:{x:number,y:number}, waypoints:{x:number,y:number}[], p2:{x:number,y:number}) => {
-    const pts: {x:number,y:number}[] = [p1];
+  // A manually-routed cable always leaves/enters a port perpendicular to the
+  // device edge it's on — never at an angle that would cut back through the box.
+  // Without this, a bend left over from before a device moved can end up on the
+  // wrong side of the port's new position, so the last leg approaches "backwards"
+  // and visually clips through the box instead of routing around it.
+  const PORT_STUB = 18;
+  const getPortStub = (port: any, pos: {x:number,y:number}) => ({
+    x: pos.x + (port?.side === "left" ? -PORT_STUB : PORT_STUB),
+    y: pos.y,
+  });
+  // If the incoming point is on the wrong side of the port's device box for a
+  // straight approach (e.g. a bend left over from before the device moved past
+  // it), a single elbow would cut straight through the box and hide the cable
+  // inside it — used for both the source's departure and the destination's
+  // arrival. Detour above or below the box instead — whichever is closer to
+  // the incoming point — before turning into the port's exit stub.
+  const DEVICE_CLEARANCE = 12;
+  const approachPort = (from:{x:number,y:number}, device:any, port:any, portPos:{x:number,y:number}) => {
+    const stub = getPortStub(port, portPos);
+    // The direct approach's horizontal leg is drawn at the incoming point's own
+    // height, so it can only cut through the box if that height actually falls
+    // within the box's vertical span — a bend well above/below it is never at risk.
+    const wrongSide = port.side === "left" ? from.x > device.x : from.x < device.x + device.w;
+    // Inward margin, not outward: a point already a few px clear of the box (even
+    // just outside its edge) needs no detour at all — only flag it when the height
+    // is genuinely inside the box, otherwise an already-fine line gets a pointless
+    // few-pixel dip/rise that reads as a stray hook instead of a real detour.
+    const yOverlaps = from.y > device.y + 2 && from.y < device.y + device.h - 2;
+    const crossesBox = wrongSide && yOverlaps;
+    if (!crossesBox) {
+      const pts: {x:number,y:number}[] = [];
+      if (Math.abs(stub.x-from.x) > 0.5 && Math.abs(stub.y-from.y) > 0.5) pts.push({x:stub.x, y:from.y});
+      pts.push(stub, portPos);
+      return pts;
+    }
+    const detourY = from.y <= device.y + device.h/2 ? device.y - DEVICE_CLEARANCE : device.y + device.h + DEVICE_CLEARANCE;
+    return [{x:from.x, y:detourY}, {x:stub.x, y:detourY}, stub, portPos];
+  };
+  const orthoPointsForConn = (p1:{x:number,y:number}, fromDev:any, fromPort:any, waypoints:{x:number,y:number}[], p2:{x:number,y:number}, toDev:any, toPort:any) => {
+    // Same box-avoidance applies leaving the source port as arriving at the
+    // destination — approachPort walks from the first waypoint back to p1, so
+    // reversing that path gives the departure with the source's own box avoided.
+    const pts: {x:number,y:number}[] = approachPort(waypoints[0], fromDev, fromPort, p1).reverse();
     for (const w of waypoints) {
       const last = pts[pts.length-1];
       if (Math.abs(w.x-last.x) > 0.5 && Math.abs(w.y-last.y) > 0.5) pts.push({x:w.x, y:last.y});
       pts.push(w);
     }
     const last = pts[pts.length-1];
-    if (Math.abs(p2.x-last.x) > 0.5 && Math.abs(p2.y-last.y) > 0.5) pts.push({x:last.x, y:p2.y});
-    pts.push(p2);
+    pts.push(...approachPort(last, toDev, toPort, p2));
     // Drop collinear middle points — removes redundant joints and the
     // double-back "spike" left when a bend slightly overshoots the port line
     for (let i = pts.length-2; i > 0; i--) {
@@ -1586,6 +1750,71 @@ export default function SignalFlowPage() {
     }
     return pts;
   };
+
+  // Drag one interior bend segment of a manually-routed cable, perpendicular to
+  // its own orientation only (a horizontal segment moves vertically and vice
+  // versa) — the same idea as reroute-by-dragging-the-middle in Visio/Lucidchart.
+  // The two segments touching a port (its perpendicular exit/entry stub) are
+  // excluded — those must stay perpendicular to the device edge, not draggable.
+  const handleConnSegmentMouseDown = (e: React.MouseEvent, conn: any, pts: {x:number,y:number}[], segIndex: number) => {
+    e.stopPropagation();
+    if (activeTool && e.button === 0) { handleToolDown(e); return; }
+    if (e.button !== 0) return;
+    setSelectedConn(conn.id); setSelectedConnSegment({connId:conn.id, index:segIndex});
+    setSelected(null); setSelectedRoom(null); clearMarqueeSel();
+    const a = pts[segIndex], b = pts[segIndex+1];
+    const horizontal = Math.abs(a.y-b.y) < 0.5;
+    const baseInterior = pts.slice(1,-1).map(p=>({...p}));
+    const z = viewRef.current.zoom;
+    const startX = e.clientX/z, startY = e.clientY/z;
+    let undoPushed = false;
+    const onMove = (me: MouseEvent) => {
+      if (!undoPushed) { undoPushed = true; pushUndo(); }
+      const delta = horizontal ? (me.clientY/z - startY) : (me.clientX/z - startX);
+      const interior = baseInterior.map((p,idx)=> (idx===segIndex-1||idx===segIndex)
+        ? (horizontal ? {x:p.x, y:p.y+delta} : {x:p.x+delta, y:p.y})
+        : p);
+      setConnections(prev=>prev.map((c:any)=>c.id===conn.id ? {...c, waypoints: interior} : c));
+    };
+    const onUp = () => { window.removeEventListener("pointermove",onMove); window.removeEventListener("pointerup",onUp); window.removeEventListener("pointercancel",onUp); };
+    window.addEventListener("pointermove",onMove);
+    window.addEventListener("pointerup",onUp);
+    window.addEventListener("pointercancel",onUp);
+  };
+
+  // Arrow-key equivalent of the drag above, for whichever segment was last
+  // clicked. Returns false (letting the caller fall back to moving the regular
+  // device/annotation/location selection) when no segment is selected, its
+  // connection/shape no longer matches, or the key doesn't apply to its axis.
+  const nudgeConnSegment = (dx: number, dy: number) => {
+    const sel = selectedConnSegment;
+    if (!sel) return false;
+    const conn = connectionsRef.current.find((c:any)=>c.id===sel.connId);
+    if (!conn?.waypoints?.length) return false;
+    const fromDev = devicesRef.current.find((d:any)=>d.id===conn.from.deviceId);
+    const toDev = devicesRef.current.find((d:any)=>d.id===conn.to.deviceId);
+    const fromPort = fromDev?.ports.find((p:any)=>p.id===conn.from.portId);
+    const toPort = toDev?.ports.find((p:any)=>p.id===conn.to.portId);
+    if (!fromDev||!toDev||!fromPort||!toPort) return false;
+    const p1 = getPortPos(fromDev,fromPort), p2 = getPortPos(toDev,toPort);
+    const pts = orthoPointsForConn(p1, fromDev, fromPort, conn.waypoints, p2, toDev, toPort);
+    const i = sel.index;
+    if (i < 1 || i > pts.length-3) return false;
+    const a = pts[i], b = pts[i+1];
+    const horizontal = Math.abs(a.y-b.y) < 0.5;
+    const delta = horizontal ? dy : dx;
+    if (!delta) return false;
+    const now = Date.now();
+    if (now - lastNudgeRef.current > 400) pushUndo();
+    lastNudgeRef.current = now;
+    const interior = pts.slice(1,-1).map((p,idx)=> (idx===i-1||idx===i)
+      ? (horizontal ? {x:p.x, y:p.y+delta} : {x:p.x+delta, y:p.y})
+      : p);
+    setConnections(prev=>prev.map((c:any)=>c.id===conn.id ? {...c, waypoints: interior} : c));
+    return true;
+  };
+  const nudgeConnSegmentRef = useRef(nudgeConnSegment);
+  nudgeConnSegmentRef.current = nudgeConnSegment;
 
   // Flatten the auto-routed bezier into a polyline (for crossing detection only)
   const flattenBezier = (p1:{x:number,y:number}, p2:{x:number,y:number}) => {
@@ -1609,7 +1838,7 @@ export default function SignalFlowPage() {
     const toPort = toDev.ports.find((p:any)=>p.id===conn.to.portId);
     if(!fromPort||!toPort) return null;
     const p1 = getPortPos(fromDev,fromPort), p2 = getPortPos(toDev,toPort);
-    return conn.waypoints?.length ? buildOrthoPoints(p1, conn.waypoints, p2) : flattenBezier(p1, p2);
+    return conn.waypoints?.length ? orthoPointsForConn(p1, fromDev, fromPort, conn.waypoints, p2, toDev, toPort) : flattenBezier(p1, p2);
   };
 
   // Build a path for an orthogonal polyline, inserting semicircular "hops"
@@ -1677,8 +1906,9 @@ export default function SignalFlowPage() {
     const sig = resolveConnSignal(conn, fromPort, toPort);
     const isSelected = selectedConn===conn.id || selectedConnIds.has(conn.id);
     let path: string, mx: number, my: number;
+    let pts: {x:number,y:number}[] | null = null;
     if (conn.waypoints?.length) {
-      const pts = buildOrthoPoints(p1, conn.waypoints, p2);
+      pts = orthoPointsForConn(p1, fromDev, fromPort, conn.waypoints, p2, toDev, toPort);
       // Hop over other connections' lines; between two manual lines, the newer hops
       const myIdx = connections.findIndex((c:any)=>c.id===conn.id);
       const obstacleSegs: Array<[{x:number,y:number},{x:number,y:number}]> = [];
@@ -1700,13 +1930,28 @@ export default function SignalFlowPage() {
     const labelH = 14;
     return (
       <g key={conn.id}
-        onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelected(null);clearMarqueeSel();}}
-        onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();setSelectedConn(conn.id);setConnContextMenu({x:e.clientX,y:e.clientY,connId:conn.id});}}
+        onClick={(e)=>{e.stopPropagation();setSelectedConn(conn.id);setSelectedConnSegment(null);setSelected(null);clearMarqueeSel();}}
+        onContextMenu={(e)=>{e.preventDefault();e.stopPropagation();setSelectedConn(conn.id);setSelectedConnSegment(null);setConnContextMenu({x:e.clientX,y:e.clientY,connId:conn.id});}}
         style={{cursor:"pointer"}}>
         {/* Keep the visible cable thin while giving it a forgiving click target. */}
         <path d={path} fill="none" stroke="transparent" strokeWidth={12/view.zoom} pointerEvents="stroke" />
         {isSelected && <path d={path} fill="none" stroke="#fff" strokeWidth={5} strokeOpacity={0.3} />}
         <path d={path} fill="none" stroke={sig.color} strokeWidth={isSelected?3:2} strokeOpacity={0.8} />
+        {/* Drag handles for the interior bend segments (not the port-hugging stubs
+            at index 0 or the last) — grab and drag to reroute, like Visio/Lucidchart. */}
+        {pts && pts.length >= 4 && Array.from({length: pts.length-3}, (_,k)=>k+1).map(i => {
+          const a = pts![i], b = pts![i+1];
+          const horizontal = Math.abs(a.y-b.y) < 0.5;
+          const segSelected = selectedConnSegment?.connId===conn.id && selectedConnSegment?.index===i;
+          return (
+            <g key={`seg-${i}`}>
+              {segSelected && <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#fff" strokeWidth={6} strokeOpacity={0.5} />}
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} fill="none" stroke="transparent" strokeWidth={10/view.zoom} pointerEvents="stroke"
+                style={{cursor: horizontal ? "ns-resize" : "ew-resize"}}
+                onPointerDown={(e)=>handleConnSegmentMouseDown(e, conn, pts!, i)} />
+            </g>
+          );
+        })}
         <rect x={mx-labelW/2} y={my-labelH/2} width={labelW} height={labelH} rx={3} fill="rgb(var(--forge-surface))" stroke={sig.color} strokeWidth={1} opacity={0.95}/>
         <text x={mx} y={my+3} textAnchor="middle" fontSize={8} fill={sig.color} fontFamily="'JetBrains Mono', monospace" fontWeight={600}>{sig.name}</text>
         <circle cx={p1.x} cy={p1.y} r={3} fill={sig.color} />
@@ -1916,6 +2161,20 @@ export default function SignalFlowPage() {
       <div id="sf-canvas-export" style={{flex:1,position:"relative",overflow:"hidden",background:"rgb(var(--forge-bg))"}}>
         {/* Canvas lock / zoom controls */}
         <div data-html2canvas-ignore="true" style={{position:"absolute",top:10,right:10,zIndex:10,display:"flex",alignItems:"center",gap:6}}>
+          {/* Undo/redo as on-screen buttons — the Ctrl+Z/Ctrl+Y shortcuts need a
+              physical keyboard, so touch/tablet users have no other way to reach them. */}
+          <button onClick={()=>undo()} title="Undo (Ctrl+Z)"
+            style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 7"/>
+            </svg>
+          </button>
+          <button onClick={()=>redo()} title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+            style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 7"/>
+            </svg>
+          </button>
           {!canvasLocked && view.zoom !== 1 && (
             <button onClick={()=>setView({x:0,y:0,zoom:1})} title="Reset zoom & position"
               style={{padding:"4px 9px",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-subtle))",fontSize:11,fontFamily:"'JetBrains Mono', monospace",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
@@ -2032,13 +2291,13 @@ export default function SignalFlowPage() {
         )}
 
         {/* SVG Canvas */}
-        <svg ref={canvasRef} width="100%" height="100%" onMouseDown={handleCanvasMouseDown}
-          onMouseMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
-          onMouseUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
-          onMouseLeave={activeTool==="eraser"?()=>setEraserCursor(null):undefined}
+        <svg ref={canvasRef} width="100%" height="100%" onPointerDown={handleCanvasMouseDown}
+          onPointerMove={connecting?handleConnectMove:(activeTool&&activeTool!=="text"?handleToolMove:undefined)}
+          onPointerUp={activeTool&&activeTool!=="text"?handleToolUp:undefined}
+          onPointerLeave={activeTool==="eraser"?()=>setEraserCursor(null):undefined}
           onContextMenu={e=>{if(activeTool){e.preventDefault();finishActiveTool();}}}
-          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null);setSelectedRoom(null);clearMarqueeSel();}}}
-          style={{cursor:activeTool==="text"?"text":activeTool==="eraser"?"none":activeTool?"crosshair":marquee?"crosshair":"default"}}>
+          onDoubleClick={e=>{if(activeTool==="shape"&&shapeSubtype==="polyline"&&drawRef.current?.pts){finishPolyline();return;}const t=e.target as Element;if(t===canvasRef.current||t.tagName==="svg"||t.tagName==="rect"&&t.getAttribute("fill")==="url(#grid)"){setSelected(null);setSelectedConn(null); setSelectedConnSegment(null);setSelectedRoom(null);clearMarqueeSel();}}}
+          style={{cursor:activeTool==="text"?"text":activeTool==="eraser"?"none":activeTool?"crosshair":marquee?"crosshair":"default", touchAction:"none", userSelect:"none", WebkitUserSelect:"none", WebkitTouchCallout:"none"} as React.CSSProperties}>
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgb(var(--border))" strokeWidth="0.5" opacity="0.4"/>
@@ -2064,23 +2323,23 @@ export default function SignalFlowPage() {
             const handleSize = 8;
             return (
               <g key={room.id}>
-                <rect x={rx} y={ry} width={room.w} height={room.h} rx={3} fill={room.color+"08"} stroke={room.color+(isSel?"88":"44")} strokeWidth={isSel?2.5:1.5} strokeDasharray={isSel?"8 4":"6 4"} onMouseDown={(e)=>handleRoomBodyMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default"}} />
-                <rect x={rx} y={ry-1} width={Math.min(room.w,Math.max(100,room.label.length*9+24))} height={24} rx={3} fill={room.color+"22"} stroke={room.color+"55"} strokeWidth={1} onMouseDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"move"}} />
+                <rect x={rx} y={ry} width={room.w} height={room.h} rx={3} fill={room.color+"08"} stroke={room.color+(isSel?"88":"44")} strokeWidth={isSel?2.5:1.5} strokeDasharray={isSel?"8 4":"6 4"} onPointerDown={(e)=>handleRoomBodyMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"default"}} />
+                <rect x={rx} y={ry-1} width={Math.min(room.w,Math.max(100,room.label.length*9+24))} height={24} rx={3} fill={room.color+"22"} stroke={room.color+"55"} strokeWidth={1} onPointerDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"move"}} />
                 {editingRoom===room.id ? (
                   <foreignObject x={rx+4} y={ry+1} width={Math.max(160,room.label.length*9+30)} height={22}>
                     <input autoFocus defaultValue={room.label} onBlur={(e)=>finishRoomEdit(room.id,(e.target as HTMLInputElement).value)} onKeyDown={(e)=>{if(e.key==="Enter")finishRoomEdit(room.id,(e.target as HTMLInputElement).value);}} style={{width:"100%",padding:"2px 6px",background:"rgb(var(--forge-surface))",border:"1px solid "+room.color,borderRadius:3,color:"rgb(var(--text-body))",fontSize:11,fontWeight:600,fontFamily:"Inter, sans-serif",outline:"none",boxSizing:"border-box",height:"20px"}} />
                   </foreignObject>
                 ) : (
-                  <text x={rx+12} y={ry+15} fontSize={11} fill={room.color} fontFamily="Inter, sans-serif" fontWeight={700} style={{cursor:"pointer"}} onDoubleClick={()=>setEditingRoom(room.id)} onMouseDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)}>
+                  <text x={rx+12} y={ry+15} fontSize={11} fill={room.color} fontFamily="Inter, sans-serif" fontWeight={700} style={{cursor:"pointer"}} onDoubleClick={()=>setEditingRoom(room.id)} onPointerDown={(e)=>handleRoomMouseDown(e,room)} onContextMenu={(e)=>handleRoomContextMenu(e,room)}>
                     {room.label}
                   </text>
                 )}
                 {isSel && <>
-                  <rect x={rx+room.w-handleSize} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.7} style={{cursor:"se-resize"}} onMouseDown={(e)=>handleRoomResize(e,room,"se")} />
-                  <rect x={rx+room.w-handleSize} y={ry} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.5} style={{cursor:"ne-resize"}} onMouseDown={(e)=>handleRoomResize(e,room,"ne")} />
-                  <rect x={rx} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.5} style={{cursor:"sw-resize"}} onMouseDown={(e)=>handleRoomResize(e,room,"sw")} />
-                  <rect x={rx+room.w/2-handleSize/2} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.4} style={{cursor:"s-resize"}} onMouseDown={(e)=>handleRoomResize(e,room,"s")} />
-                  <rect x={rx+room.w-handleSize} y={ry+room.h/2-handleSize/2} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.4} style={{cursor:"e-resize"}} onMouseDown={(e)=>handleRoomResize(e,room,"e")} />
+                  <rect x={rx+room.w-handleSize} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.7} style={{cursor:"se-resize"}} onPointerDown={(e)=>handleRoomResize(e,room,"se")} />
+                  <rect x={rx+room.w-handleSize} y={ry} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.5} style={{cursor:"ne-resize"}} onPointerDown={(e)=>handleRoomResize(e,room,"ne")} />
+                  <rect x={rx} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.5} style={{cursor:"sw-resize"}} onPointerDown={(e)=>handleRoomResize(e,room,"sw")} />
+                  <rect x={rx+room.w/2-handleSize/2} y={ry+room.h-handleSize} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.4} style={{cursor:"s-resize"}} onPointerDown={(e)=>handleRoomResize(e,room,"s")} />
+                  <rect x={rx+room.w-handleSize} y={ry+room.h/2-handleSize/2} width={handleSize} height={handleSize} fill={room.color} rx={2} opacity={0.4} style={{cursor:"e-resize"}} onPointerDown={(e)=>handleRoomResize(e,room,"e")} />
                 </>}
               </g>
             );
@@ -2113,7 +2372,7 @@ export default function SignalFlowPage() {
             const leftPorts = dev.ports.filter((p:any)=>p.side==="left");
             const rightPorts = dev.ports.filter((p:any)=>p.side==="right");
             return (
-              <g key={dev.id} onMouseDown={(e)=>handleDeviceMouseDown(e,dev)} onContextMenu={(e)=>handleDeviceContextMenu(e,dev)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"grab"}}>
+              <g key={dev.id} onPointerDown={(e)=>handleDeviceMouseDown(e,dev)} onContextMenu={(e)=>handleDeviceContextMenu(e,dev)} style={{cursor:activeTool==="eraser"?"none":activeTool?"crosshair":"grab"}}>
                 {isSel && <rect x={dev.x+panOffset.x-4} y={dev.y+panOffset.y-4} width={dev.w+8} height={dev.h+8} rx={9} fill="rgba(139,92,246,0.06)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="5 3" />}
                 <rect x={dev.x+panOffset.x+2} y={dev.y+panOffset.y+2} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--text-faint))" opacity={0.15} />
                 <rect x={dev.x+panOffset.x} y={dev.y+panOffset.y} width={dev.w} height={dev.h} rx={6} fill="rgb(var(--forge-surface))" stroke={isSel?"#8b5cf6":"#4b5563"} strokeWidth={isSel?2:1.5} />
@@ -2164,7 +2423,7 @@ export default function SignalFlowPage() {
                   const toggleX = dev.x + panOffset.x + dev.w - 43;
                   return (
                     <g
-                      onMouseDown={(e)=>e.stopPropagation()}
+                      onPointerDown={(e)=>e.stopPropagation()}
                       onClick={(e)=>{
                         e.stopPropagation();
                         pushUndo();
