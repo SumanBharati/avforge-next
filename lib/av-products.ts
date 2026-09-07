@@ -13,7 +13,7 @@ export interface AVProduct {
   margin: number | null;
   markup: number | null;
   color: string;
-  ports: Array<{ side: string; signal: string; dir: string; label: string }>;
+  ports: Array<{ side: string; signal: string; dir: string; label: string; connector?: string }>;
   // Power & electrical
   amp_draw: number | null;
   voltage: number | null;
@@ -92,6 +92,22 @@ export async function getProductCount(): Promise<number> {
     .from("av_products")
     .select("*", { count: "exact", head: true });
   return count ?? 0;
+}
+
+// Products flagged as PoE-powered in power_supply_type (e.g. "PoE+ (IEEE 802.3at)"),
+// for the PoE Budget calculator's device picker. power_supply_type is free text
+// entered per product, not a dedicated PoE-class field yet — that's a future
+// database improvement — so this is a best-effort filter/classification on it.
+export async function getPoeProducts(): Promise<AVProduct[]> {
+  const { data, error } = await supabase
+    .from("av_products")
+    .select("*")
+    .not("power_watts", "is", null)
+    .ilike("power_supply_type", "%poe%")
+    .order("manufacturer")
+    .order("model_name");
+  if (error) throw error;
+  return data ?? [];
 }
 
 export async function listProducts(opts: {

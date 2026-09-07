@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment } from "react";
 
 const INTERCONNECTS = [
   ["RCA", "RCA", "Unbalanced", "Signal → signal; shield → shield"],
@@ -59,20 +59,7 @@ const INTERCONNECT_DIAGRAMS: Record<string, { src: string; alt: string }> = {
   },
 };
 
-type WiringMode = "series" | "parallel" | "series-parallel";
-
 export default function AudioReferenceTools() {
-  const [mode, setMode] = useState<WiringMode>("parallel");
-  const [impedance, setImpedance] = useState(8);
-  const [speakers, setSpeakers] = useState(2);
-
-  const total = useMemo(() => {
-    if (mode === "series") return impedance * speakers;
-    if (mode === "parallel") return impedance / speakers;
-    const branchSize = Math.sqrt(speakers);
-    return Number.isInteger(branchSize) ? (impedance * branchSize) / branchSize : null;
-  }, [impedance, mode, speakers]);
-
   return (
     <section className="mt-8 space-y-7">
       <div>
@@ -110,19 +97,6 @@ export default function AudioReferenceTools() {
           </table>
         </div>
         <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-subtle">Never apply phantom power through an unbalanced adapter. Transformer-balanced, impedance-balanced, and cross-coupled outputs can require different unbalancing methods.</div>
-      </div>
-
-      <div>
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-faint">Speaker Impedance</div>
-        <div className="rounded-xl border border-border bg-forge-surface/30 p-4">
-          <div className="mb-4 flex flex-wrap gap-2">{(["parallel", "series", "series-parallel"] as WiringMode[]).map(value => <button key={value} onClick={() => setMode(value)} className={`rounded-lg border px-3 py-1.5 text-[12px] capitalize ${mode === value ? "border-blue-400 bg-blue-500/10 text-blue-400" : "border-border text-subtle"}`}>{value.replace("-", " / ")}</button>)}</div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-[12px] text-secondary">Each speaker (Ω)<input className="forge-input mt-1" type="number" min="1" step="0.5" value={impedance} onChange={e => setImpedance(Math.max(0.5, Number(e.target.value) || 0.5))} /></label>
-            <label className="text-[12px] text-secondary">Speaker count<input className="forge-input mt-1" type="number" min="2" step="1" value={speakers} onChange={e => setSpeakers(Math.max(2, Math.floor(Number(e.target.value) || 2)))} /></label>
-          </div>
-          <div className="mt-4 rounded-lg border border-border bg-forge-card px-4 py-3"><span className="text-[12px] text-subtle">Computed load: </span><span className="font-mono text-lg font-semibold text-blue-400">{total === null ? "Requires a square speaker count" : `${Number(total.toFixed(3))} Ω`}</span></div>
-          <p className="mt-2 text-[11px] text-faint">Series adds impedances. Equal parallel loads divide impedance by speaker count. The series/parallel result assumes an equal square grid (4, 9, 16…). Confirm the amplifier’s permitted load before connecting.</p>
-        </div>
       </div>
 
     </section>

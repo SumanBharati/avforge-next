@@ -1,19 +1,75 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalcSection, ResultCard, StatusBanner, CalcPageWrapper } from '@/components/calc';
-import { POE_DEVICES } from '@/lib/calc-data';
+import { getPoeProducts } from '@/lib/av-products';
+import { getOrgPoeItems } from '@/lib/equipment-library';
+import { useOrg } from '@/components/OrgProvider';
 
 interface CustomDevice { name: string; volts: number; mah: number; qty: number; }
 interface PresetEntry  { name: string; qty: number; }
 interface SwitchEntry  { model: string; capacity: number; }
+interface PoeOption    { name: string; draw: number; standard: string; source: 'AV Forge' | 'Org'; }
 
 const cellInput: React.CSSProperties = { padding: '5px 6px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 4, color: 'rgb(var(--text-body))', fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center', width: '100%', boxSizing: 'border-box' };
 const nameInput: React.CSSProperties = { ...cellInput, textAlign: 'left' };
 const thSt: React.CSSProperties = { padding: '6px 6px', fontSize: 9, fontWeight: 700, color: 'rgb(var(--text-muted))', textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '2px solid rgb(var(--border))', textAlign: 'center' };
 const addBtn = 'mt-2 w-full rounded-md border border-dashed border-blue-500/40 bg-blue-500/10 py-1.5 text-[11px] text-blue-400 transition-colors hover:bg-blue-500/20';
 
+// power_supply_type is free text (e.g. "PoE+ (IEEE 802.3at)"), not a dedicated
+// PoE-class field yet — that's a future database improvement. This pulls out
+// an explicit 802.3xx mention where present, falls back to a PoE/PoE+/PoE++
+// wording match, and as a last resort (org library items have no supply-type
+// text at all) guesses from the device's own wattage against the standard
+// device-side power classes.
+function classifyPoeStandard(watts: number, supplyType?: string | null): string {
+  const text = supplyType || '';
+  const explicit = text.match(/802\.3(af|at|bt)/i);
+  if (explicit) return `802.3${explicit[1].toLowerCase()}`;
+  if (/poe\+\+/i.test(text)) return '802.3bt';
+  if (/poe\+/i.test(text)) return '802.3at';
+  if (/\bpoe\b/i.test(text)) return '802.3af';
+  if (watts <= 12.95) return '802.3af';
+  if (watts <= 25.5) return '802.3at';
+  if (watts <= 51) return '802.3bt';
+  return '802.3bt (Type 4)';
+}
+
 export default function PoEBudgetPage() {
+  const { activeOrg } = useOrg();
+  const [libraryDevices, setLibraryDevices] = useState<PoeOption[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingLibrary(true);
+    Promise.all([
+      getPoeProducts().catch(() => []),
+      activeOrg ? getOrgPoeItems(activeOrg.id).catch(() => []) : Promise.resolve([]),
+    ]).then(([forgeItems, orgItems]) => {
+      if (cancelled) return;
+      const forgeOptions: PoeOption[] = forgeItems
+        .filter((p) => (p.power_watts ?? 0) > 0)
+        .map((p) => ({
+          name: `${p.manufacturer} ${p.model_name}`,
+          draw: p.power_watts as number,
+          standard: classifyPoeStandard(p.power_watts as number, p.power_supply_type),
+          source: 'AV Forge',
+        }));
+      const orgOptions: PoeOption[] = orgItems
+        .filter((p) => (p.power_watts ?? 0) > 0)
+        .map((p) => ({
+          name: `${p.manufacturer} ${p.model}`,
+          draw: p.power_watts as number,
+          standard: classifyPoeStandard(p.power_watts as number, null),
+          source: 'Org',
+        }));
+      setLibraryDevices([...forgeOptions, ...orgOptions]);
+      setLoadingLibrary(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeOrg]);
+
   const [devices, setDevices] = useState<CustomDevice[]>([
     { name: 'Decoder A', volts: 48, mah: 140, qty: 12 },
     { name: 'Encoder B', volts: 48, mah: 185, qty: 4 },
@@ -21,9 +77,17 @@ export default function PoEBudgetPage() {
   const [switches, setSwitches] = useState<SwitchEntry[]>([
     { model: 'NETGEAR M4350-48G4X', capacity: 1440 },
   ]);
-  const [presetDevices, setPresetDevices] = useState<PresetEntry[]>([
-    { name: POE_DEVICES[0].name, qty: 1 },
-  ]);
+  const [presetDevices, setPresetDevices] = useState<PresetEntry[]>([]);
+
+  // Seed one example row once the library finishes loading, same as the old
+  // static-list default — but only if the user hasn't already added/removed rows.
+  const [presetSeeded, setPresetSeeded] = useState(false);
+  useEffect(() => {
+    if (!presetSeeded && !loadingLibrary && libraryDevices.length > 0) {
+      setPresetDevices([{ name: libraryDevices[0].name, qty: 1 }]);
+      setPresetSeeded(true);
+    }
+  }, [loadingLibrary, libraryDevices, presetSeeded]);
 
   const updateDev = (i: number, f: keyof CustomDevice, v: string) => {
     const n = [...devices]; n[i] = { ...n[i], [f]: f === 'name' ? v : parseFloat(v) || 0 }; setDevices(n);
@@ -37,7 +101,7 @@ export default function PoEBudgetPage() {
 
   const devicesWithWatts = devices.map(d => ({ ...d, watts: (d.mah * d.volts) / 1000 }));
   const customTotal = devicesWithWatts.reduce((s, d) => s + d.watts * d.qty, 0);
-  const presetItems = presetDevices.map(d => { const db = POE_DEVICES.find(p => p.name === d.name); return { ...d, draw: db ? db.draw : 0 }; });
+  const presetItems = presetDevices.map(d => { const db = libraryDevices.find(p => p.name === d.name); return { ...d, draw: db ? db.draw : 0 }; });
   const presetTotal = presetItems.reduce((s, d) => s + d.draw * d.qty, 0);
   const totalDraw = customTotal + presetTotal;
   const totalPorts = devices.reduce((s, d) => s + d.qty, 0) + presetDevices.reduce((s, d) => s + d.qty, 0);
@@ -107,23 +171,34 @@ export default function PoEBudgetPage() {
 
           {/* Preset Library */}
           <CalcSection title="Devices (From Library)">
-            <div className="mb-1.5 grid grid-cols-[1fr_50px_30px] gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
-              <span>Device</span><span className="text-center">Qty</span><span></span>
+            <div className="mb-1.5 text-[10px] leading-relaxed text-faint">
+              Pulled from the AV Forge Equipment Library and your organization&apos;s library — any device with a known wattage and a PoE power supply. PoE standard (af/at/bt) is inferred from the power supply notes where available; a future update will store it as its own field.
             </div>
-            {presetItems.map((d, i) => (
-              <div key={i} className="mb-2 grid grid-cols-[1fr_50px_30px] items-center gap-1.5">
-                <select value={d.name} onChange={e => updatePreset(i, 'name', e.target.value)}
-                  style={{ padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 11, width: '100%' }}>
-                  {POE_DEVICES.map(p => <option key={p.name} value={p.name}>{p.name} ({p.draw}W, {p.standard})</option>)}
-                </select>
-                <input type="number" value={d.qty} min={0} onChange={e => updatePreset(i, 'qty', e.target.value)}
-                  style={{ padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 12, textAlign: 'center', width: '100%' }} />
-                <button onClick={() => setPresetDevices(presetDevices.filter((_, j) => j !== i))} className="text-base text-red-400 hover:text-red-300">×</button>
-              </div>
-            ))}
-            <button onClick={() => setPresetDevices([...presetDevices, { name: POE_DEVICES[0].name, qty: 1 }])} className={addBtn}>
-              + Add Library Device
-            </button>
+            {loadingLibrary ? (
+              <div className="py-3 text-center text-[11px] text-subtle">Loading library devices…</div>
+            ) : libraryDevices.length === 0 ? (
+              <div className="py-3 text-center text-[11px] text-subtle">No PoE-powered devices found in your libraries yet.</div>
+            ) : (
+              <>
+                <div className="mb-1.5 grid grid-cols-[1fr_50px_30px] gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                  <span>Device</span><span className="text-center">Qty</span><span></span>
+                </div>
+                {presetItems.map((d, i) => (
+                  <div key={i} className="mb-2 grid grid-cols-[1fr_50px_30px] items-center gap-1.5">
+                    <select value={d.name} onChange={e => updatePreset(i, 'name', e.target.value)}
+                      style={{ padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 11, width: '100%' }}>
+                      {libraryDevices.map(p => <option key={`${p.source}:${p.name}`} value={p.name}>{p.name} ({p.draw}W, {p.standard})</option>)}
+                    </select>
+                    <input type="number" value={d.qty} min={0} onChange={e => updatePreset(i, 'qty', e.target.value)}
+                      style={{ padding: '6px 8px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 5, color: 'rgb(var(--text-body))', fontSize: 12, textAlign: 'center', width: '100%' }} />
+                    <button onClick={() => setPresetDevices(presetDevices.filter((_, j) => j !== i))} className="text-base text-red-400 hover:text-red-300">×</button>
+                  </div>
+                ))}
+                <button onClick={() => setPresetDevices([...presetDevices, { name: libraryDevices[0].name, qty: 1 }])} className={addBtn}>
+                  + Add Library Device
+                </button>
+              </>
+            )}
           </CalcSection>
 
           {/* Switches */}

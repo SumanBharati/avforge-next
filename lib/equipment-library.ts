@@ -47,3 +47,20 @@ export async function getOrgLibraryItemById(id: string): Promise<OrgEquipmentIte
   if (error) throw error;
   return data ?? null;
 }
+
+// For the PoE Budget calculator's device picker. equipment_library has no
+// PoE-specific field yet (unlike av_products' power_supply_type), so a known
+// wattage is the best available signal — a future database improvement should
+// add real PoE tagging here too.
+export async function getOrgPoeItems(orgId: string): Promise<OrgEquipmentItem[]> {
+  if (!orgId) return [];
+  const { data, error } = await supabase
+    .from("equipment_library")
+    .select("*")
+    .eq("org_id", orgId)
+    .not("power_watts", "is", null)
+    .order("manufacturer")
+    .order("model");
+  if (error) throw error;
+  return data ?? [];
+}

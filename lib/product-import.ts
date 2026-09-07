@@ -33,7 +33,7 @@ function parsePorts(value:unknown,rowNumber:number,errors:string[]):AVProduct["p
     }
     const connector=parts[1];
     const label=parts.slice(2).join(":");
-    return {side,signal:inferSignal(connector,label),dir:side==="left"?"in":"out",label};
+    return {side,signal:inferSignal(connector,label),dir:side==="left"?"in":"out",label,connector};
   }).filter(Boolean) as AVProduct["ports"];
 }
 

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
+import { loadToolData } from "@/lib/tool-data";
+import { getProductById } from "@/lib/av-products";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 
 
@@ -19,11 +22,23 @@ interface LineItem {
   laborRate: number;
 }
 
+interface Section {
+  id: string;
+  name: string;
+  items: LineItem[];
+  scopeOfWork: string;
+  // Present only for a section auto-created from a Site Survey room — ties it
+  // back to that room so its Design Engineering tools can populate/re-sync it.
+  roomId?: string;
+  // Whether an auto-populate attempt has already run for this section (even if
+  // it found nothing) — prevents re-populating a section the user emptied out.
+  bomSynced?: boolean;
+}
+
 interface ProposalData {
   clientName: string;
   projectName: string;
-  scopeOfWork: string;
-  sections: { id: string; name: string; items: LineItem[] }[];
+  sections: Section[];
   taxRate: number;
   marginPercent: number;
 }
@@ -82,18 +97,41 @@ function newItem(): LineItem {
   };
 }
 
-function newSection(name = "New Section"): { id: string; name: string; items: LineItem[] } {
-  return { id: crypto.randomUUID(), name, items: [] };
+function newSection(name = "New Section"): Section {
+  return { id: crypto.randomUUID(), name, items: [], scopeOfWork: "" };
 }
 
 const defaultProposal: ProposalData = {
   clientName: "",
   projectName: "",
-  scopeOfWork: "",
-  sections: [newSection("Bill of Materials")],
+  sections: [],
   taxRate: 8.25,
   marginPercent: 30,
 };
+
+// Reads a proposal saved before sections carried their own scope/room-sync
+// fields, so old data still loads exactly as it was left. Pre-existing
+// sections are marked as already synced — auto-population only ever applies
+// to a brand-new section for a room that never had one.
+function migrateProposal(raw: any): ProposalData {
+  const legacyScope = typeof raw?.scopeOfWork === "string" ? raw.scopeOfWork : "";
+  const rawSections = Array.isArray(raw?.sections) ? raw.sections : [];
+  const sections: Section[] = rawSections.map((s: any, i: number) => ({
+    id: s.id || crypto.randomUUID(),
+    name: s.name || "Section",
+    roomId: s.roomId,
+    bomSynced: s.bomSynced ?? true,
+    scopeOfWork: typeof s.scopeOfWork === "string" ? s.scopeOfWork : (i === 0 ? legacyScope : ""),
+    items: Array.isArray(s.items) ? s.items : [],
+  }));
+  return {
+    clientName: raw?.clientName || "",
+    projectName: raw?.projectName || "",
+    sections,
+    taxRate: typeof raw?.taxRate === "number" ? raw.taxRate : 8.25,
+    marginPercent: typeof raw?.marginPercent === "number" ? raw.marginPercent : 30,
+  };
+}
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -105,6 +143,96 @@ interface Room {
   data: Record<string, string>;
 }
 
+// Pulls together whatever's already been designed for a room — Signal Flow
+// devices (richest: manufacturer/model/category/price), Room Designer
+// placements (generic category + name only, no pricing yet), and Rack Builder
+// items (enriched from the AV Forge Library when added from there) — into a
+// single grouped, editable line-item list. Identical items are combined so
+// e.g. ten ceiling speakers show as one row with qty 10, not ten rows.
+async function fetchRoomBomItems(projectId: string, roomId: string): Promise<LineItem[]> {
+  type Bucket = { category: string; manufacturer: string; model: string; description: string; unitCost: number; qty: number };
+  const buckets = new Map<string, Bucket>();
+  const add = (b: Omit<Bucket, "qty">, qty = 1) => {
+    const key = `${b.category}|${b.manufacturer}|${b.model}|${b.description}`;
+    const existing = buckets.get(key);
+    if (existing) existing.qty += qty;
+    else buckets.set(key, { ...b, qty });
+  };
+
+  try {
+    const sf = await loadToolData("signal-flow", roomId, projectId);
+    const devices = (sf?.devices as any[]) || [];
+    for (const d of devices) {
+      const mfr = d.mfr && d.mfr !== "Generic" ? d.mfr : "";
+      const model = d.model && d.model !== "—" ? d.model : "";
+      add({
+        category: d.cat || d.category || "Miscellaneous",
+        manufacturer: mfr,
+        model,
+        description: d.type || [mfr, model].filter(Boolean).join(" ") || "Device",
+        unitCost: Number(d.price) || 0,
+      });
+    }
+  } catch {
+    // No Signal Flow diagram saved for this room yet
+  }
+
+  try {
+    const { data: rd } = await supabase
+      .from("room_designs")
+      .select("data")
+      .eq("project_id", projectId)
+      .eq("room_id", roomId)
+      .maybeSingle();
+    const devices = ((rd?.data as any)?.devices as any[]) || [];
+    for (const d of devices) {
+      if (d.type === "furniture") continue;
+      add({ category: d.type || "Miscellaneous", manufacturer: "", model: "", description: d.name || "Device", unitCost: 0 });
+    }
+  } catch {
+    // No Room Designer layout saved for this room yet
+  }
+
+  try {
+    const rp = await loadToolData("rack-planner", roomId, projectId);
+    const items = (rp?.items as any[]) || [];
+    const enriched = await Promise.all(items.map(async (item) => {
+      if (item.productId) {
+        try {
+          const product = await getProductById(item.productId);
+          if (product) {
+            return {
+              category: product.category || "Rack Equipment",
+              manufacturer: product.manufacturer || "",
+              model: product.model_name || "",
+              description: product.type || "",
+              unitCost: product.price || 0,
+            };
+          }
+        } catch {
+          // Fall through to the manual-entry shape below
+        }
+      }
+      return { category: "Rack Equipment", manufacturer: "", model: "", description: item.name || "Rack item", unitCost: 0 };
+    }));
+    enriched.forEach((e) => add(e));
+  } catch {
+    // No Rack Builder plan saved for this room yet
+  }
+
+  return Array.from(buckets.values()).map((b) => ({
+    id: crypto.randomUUID(),
+    category: b.category,
+    manufacturer: b.manufacturer,
+    model: b.model,
+    description: b.description,
+    qty: b.qty,
+    unitCost: b.unitCost,
+    laborHours: 0,
+    laborRate: 85,
+  }));
+}
+
 export default function ProposalPage({ params }: { params: { id: string } }) {
   const { activeOrg } = useOrg();
   const [proposal, setProposal] = useState<ProposalData>(defaultProposal);
@@ -112,7 +240,6 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
   const [saved, setSaved] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
   const [modalTab, setModalTab] = useState<"library" | "create">("library");
@@ -120,52 +247,88 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
   const [newEquip, setNewEquip] = useState<Omit<EquipmentEntry, "id">>({
     category: CATEGORIES[0], manufacturer: "", model: "", description: "", unitCost: 0,
   });
+  const [pendingResync, setPendingResync] = useState<{ sectionId: string; roomId: string; name: string } | null>(null);
+  const [resyncing, setResyncing] = useState(false);
 
   // Load
   useEffect(() => {
+    let cancelled = false;
+
     // Load project name
     supabase.from("projects").select("name").eq("id", params.id).single()
-      .then(({ data }) => { if (data) setProjectName(data.name || ""); });
+      .then(({ data }) => { if (!cancelled && data) setProjectName(data.name || ""); });
 
     // Load equipment library (org-scoped)
     if (activeOrg) {
       supabase.auth.getUser().then(async ({ data: { user } }) => {
-        if (!user) return;
+        if (!user || cancelled) return;
         const { data } = await supabase.from("equipment_library").select("*").eq("org_id", activeOrg.id);
+        if (cancelled) return;
         if (data && data.length > 0) {
           setLibrary(data.map(d => ({ id: d.id, category: d.category, manufacturer: d.manufacturer, model: d.model, description: d.description || "", unitCost: Number(d.unit_cost) })));
         } else {
           // Seed default library for this org
           const rows = DEFAULT_LIBRARY.map(e => ({ org_id: activeOrg.id, user_id: user.id, category: e.category, manufacturer: e.manufacturer, model: e.model, description: e.description, unit_cost: e.unitCost }));
           await supabase.from("equipment_library").insert(rows);
-          setLibrary(DEFAULT_LIBRARY);
+          if (!cancelled) setLibrary(DEFAULT_LIBRARY);
         }
       });
     }
 
-    // Load rooms from survey
-    supabase.from("site_surveys").select("data").eq("project_id", params.id).single()
-      .then(({ data: surveyRow }) => {
-        const survey = surveyRow?.data as { buildings?: { rooms?: Room[] }[] } | null;
-        const building = survey?.buildings?.[0];
-        if (building?.rooms?.length) {
-          setRooms(building.rooms as Room[]);
-          setActiveRoom(building.rooms[0].id);
-        }
-      });
+    // Rooms and the existing proposal must both resolve before deciding which
+    // rooms are missing a section — reconciling too early risks duplicates.
+    Promise.all([
+      supabase.from("site_surveys").select("data").eq("project_id", params.id).single(),
+      supabase.from("proposals").select("data").eq("project_id", params.id).single(),
+    ]).then(([{ data: surveyRow }, { data: proposalRow }]) => {
+      if (cancelled) return;
+      const survey = surveyRow?.data as { buildings?: { rooms?: Room[] }[] } | null;
+      const surveyRooms = (survey?.buildings?.[0]?.rooms || []) as Room[];
+      setRooms(surveyRooms);
 
-    // Load proposal
-    supabase.from("proposals").select("data").eq("project_id", params.id).single()
-      .then(({ data: row }) => {
-        if (row?.data) {
-          const data = row.data as ProposalData;
-          setProposal(data);
-          if (data.sections?.length > 0) setActiveSection(data.sections[0].id);
-        } else {
-          setActiveSection(defaultProposal.sections[0].id);
-        }
-      });
-  }, [params.id]);
+      let data: ProposalData = proposalRow?.data
+        ? migrateProposal(proposalRow.data)
+        : { ...defaultProposal, sections: [] };
+
+      if (surveyRooms.length === 0 && data.sections.length === 0) {
+        data = { ...data, sections: [newSection("Bill of Materials")] };
+      }
+
+      // A section for every survey room that doesn't have one yet — named
+      // after the room, scope copied from its Site Survey entry, ready to be
+      // auto-populated from that room's design tools below.
+      const missingRooms = surveyRooms.filter((r) => !data.sections.some((s) => s.roomId === r.id));
+      if (missingRooms.length > 0) {
+        const added = missingRooms.map((r) => ({
+          ...newSection(r.data?.room_name || r.name),
+          roomId: r.id,
+          scopeOfWork: r.data?.scope_of_work || "",
+        }));
+        data = { ...data, sections: [...data.sections, ...added] };
+      }
+
+      setProposal(data);
+      setActiveSection((prev) => prev || data.sections[0]?.id || "");
+
+      // Populate line items for any room-tied section that hasn't been synced
+      // yet — in the background, so the page doesn't block on N tool queries.
+      data.sections
+        .filter((s) => s.roomId && !s.bomSynced)
+        .forEach((section) => {
+          fetchRoomBomItems(params.id, section.roomId!).then((items) => {
+            if (cancelled) return;
+            setProposal((p) => ({
+              ...p,
+              sections: p.sections.map((s) =>
+                s.id === section.id ? { ...s, items: [...s.items, ...items], bomSynced: true } : s
+              ),
+            }));
+          });
+        });
+    });
+
+    return () => { cancelled = true; };
+  }, [params.id, activeOrg]);
 
   const handleSave = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -199,6 +362,25 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
       ...p,
       sections: p.sections.map((s) => (s.id === sectionId ? { ...s, name } : s)),
     }));
+  }
+
+  function updateSectionScope(sectionId: string, scopeOfWork: string) {
+    setProposal((p) => ({
+      ...p,
+      sections: p.sections.map((s) => (s.id === sectionId ? { ...s, scopeOfWork } : s)),
+    }));
+  }
+
+  async function confirmResync() {
+    if (!pendingResync) return;
+    setResyncing(true);
+    const items = await fetchRoomBomItems(params.id, pendingResync.roomId);
+    setProposal((p) => ({
+      ...p,
+      sections: p.sections.map((s) => (s.id === pendingResync.sectionId ? { ...s, items, bomSynced: true } : s)),
+    }));
+    setResyncing(false);
+    setPendingResync(null);
   }
 
   // Item helpers
@@ -282,6 +464,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
 
   // Calculations
   const currentSection = proposal.sections.find((s) => s.id === activeSection);
+  const extraSections = proposal.sections.filter((s) => !s.roomId);
 
   const allItems = proposal.sections.flatMap((s) => s.items);
   const totalEquipment = allItems.reduce((sum, i) => sum + i.qty * i.unitCost, 0);
@@ -344,11 +527,12 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
             <div className="flex flex-col gap-0.5">
               {rooms.map((room) => {
                 const roomName = room.data?.room_name || room.name;
-                const isActive = activeRoom === room.id;
+                const section = proposal.sections.find((s) => s.roomId === room.id);
+                const isActive = !!section && activeSection === section.id;
                 return (
                   <button
                     key={room.id}
-                    onClick={() => setActiveRoom(room.id)}
+                    onClick={() => section && setActiveSection(section.id)}
                     className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
                       isActive
                         ? "bg-forge-surface/60 font-semibold text-heading"
@@ -364,6 +548,37 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
               })}
             </div>
           )}
+
+          {extraSections.length > 0 && (
+            <>
+              <div className="mb-2 mt-5 px-3">
+                <h2 className="text-sm font-bold text-heading">Other Sections</h2>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {extraSections.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setActiveSection(s.id)}
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
+                      activeSection === s.id
+                        ? "bg-forge-surface/60 font-semibold text-heading"
+                        : "text-muted hover:bg-forge-surface/30 hover:text-secondary"
+                    }`}
+                  >
+                    <span className="truncate">{s.name}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <button
+            onClick={addSection}
+            className="mt-4 flex items-center gap-1.5 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-blue-400 transition-colors hover:bg-blue-500/10"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            Add Section
+          </button>
         </aside>
 
         {/* Main content */}
@@ -381,8 +596,21 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                   <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">
                     {currentSection.items.length} item{currentSection.items.length !== 1 ? "s" : ""}
                   </span>
+                  {currentSection.roomId && (
+                    <span className="rounded-md bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-400">
+                      From Design Engineering
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {currentSection.roomId && (
+                    <button
+                      onClick={() => setPendingResync({ sectionId: currentSection.id, roomId: currentSection.roomId!, name: currentSection.name })}
+                      className="rounded-lg px-3 py-1.5 text-[12px] text-blue-400 transition-colors hover:bg-blue-500/10"
+                    >
+                      Re-sync from Design Tools
+                    </button>
+                  )}
                   {proposal.sections.length > 1 && (
                     <button
                       onClick={() => removeSection(currentSection.id)}
@@ -426,6 +654,9 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                               {CATEGORIES.map((c) => (
                                 <option key={c} value={c} className="bg-forge-bg">{c}</option>
                               ))}
+                              {!CATEGORIES.includes(item.category) && (
+                                <option value={item.category} className="bg-forge-bg">{item.category}</option>
+                              )}
                             </select>
                           </td>
                           <td className="px-1 py-1">
@@ -524,12 +755,17 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
               <div className="mt-8">
                 <h3 className="mb-2 text-sm font-bold text-heading">Scope of Work</h3>
                 <textarea
-                  value={proposal.scopeOfWork}
-                  onChange={(e) => setProposal((p) => ({ ...p, scopeOfWork: e.target.value }))}
+                  value={currentSection.scopeOfWork}
+                  onChange={(e) => updateSectionScope(currentSection.id, e.target.value)}
                   placeholder="Describe the scope of work, deliverables, exclusions, and assumptions..."
                   rows={6}
                   className="forge-input w-full resize-y text-[13px]"
                 />
+                {currentSection.roomId && (
+                  <p className="mt-1.5 text-[11px] text-faint">
+                    Copied from this room&apos;s Site Survey entry by default — edit freely here without affecting the survey.
+                  </p>
+                )}
               </div>
 
             </div>
@@ -708,6 +944,17 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
             </div>
           </div>
         </div>
+      )}
+
+      {pendingResync && (
+        <ConfirmDialog
+          title="Re-sync from Design Tools"
+          message={<>Replace every line item in <span className="font-semibold text-heading">{pendingResync.name}</span> with a fresh pull from Room Designer, Signal Flow, and Rack Builder for this room? Any manual edits to this section&apos;s items will be lost.</>}
+          confirmLabel="Re-sync"
+          busy={resyncing}
+          onCancel={() => setPendingResync(null)}
+          onConfirm={confirmResync}
+        />
       )}
     </div>
   );

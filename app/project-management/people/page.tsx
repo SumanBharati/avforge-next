@@ -93,7 +93,7 @@ export default function PeoplePage() {
             <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
               <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            Add Person Outside Organization
+            Add an External Resource
           </button>
         </div>
       </div>

@@ -128,11 +128,11 @@ export async function POST(request: NextRequest) {
 
       if (ctx.proposal) {
         contextBlock += `\n\n### Proposal Data`;
-        if (ctx.proposal.scopeOfWork) contextBlock += `\nScope: ${sanitize(ctx.proposal.scopeOfWork, 1000)}`;
         if (ctx.proposal.taxRate) contextBlock += `\nTax Rate: ${sanitize(ctx.proposal.taxRate)}%`;
         if (ctx.proposal.marginPercent) contextBlock += `\nMargin: ${sanitize(ctx.proposal.marginPercent)}%`;
         for (const section of ctx.proposal.sections || []) {
           contextBlock += `\nSection: ${sanitize(section.name)}`;
+          if (section.scopeOfWork) contextBlock += `\n  Scope: ${sanitize(section.scopeOfWork, 1000)}`;
           for (const item of section.items || []) {
             contextBlock += `\n  - ${sanitize(item.qty)}x ${sanitize(item.manufacturer)} ${sanitize(item.model)} (${sanitize(item.category)}) @ $${sanitize(item.unitCost)}`;
           }

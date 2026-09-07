@@ -1,15 +1,19 @@
 import { supabase } from "./supabase";
 
-export async function loadToolData(tool: string, roomId?: string | null): Promise<Record<string, unknown> | null> {
+// projectId is optional and only needed when calling from outside a design-tool
+// page (which otherwise infers it from its own ?project= URL query param) — e.g.
+// the Proposal page reading another tool's saved data for a given room by its
+// project route param instead.
+export async function loadToolData(tool: string, roomId?: string | null, projectId?: string | null): Promise<Record<string, unknown> | null> {
   const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-  const projectId = params.get("project");
-  if (!projectId) return null;
+  const pid = projectId || params.get("project");
+  if (!pid) return null;
 
   const rid = roomId || params.get("room") || "default";
   const { data } = await supabase
     .from("tool_data")
     .select("data")
-    .eq("project_id", projectId)
+    .eq("project_id", pid)
     .eq("tool", tool)
     .eq("room_id", rid)
     .single();

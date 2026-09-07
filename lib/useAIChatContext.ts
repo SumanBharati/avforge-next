@@ -29,9 +29,9 @@ export interface AIChatContext {
   proposal?: {
     clientName?: string;
     projectName?: string;
-    scopeOfWork?: string;
     sections?: {
       name: string;
+      scopeOfWork?: string;
       items: {
         category: string;
         manufacturer: string;
@@ -131,9 +131,11 @@ export function useAIChatContext(): AIChatContext {
           ctx.proposal = {
             clientName: p.clientName,
             projectName: p.projectName,
-            scopeOfWork: p.scopeOfWork,
             sections: p.sections?.map((s: any) => ({
               name: s.name,
+              // Older saved proposals kept one scope at the top level instead
+              // of per-section — fall back to that for the first section only.
+              scopeOfWork: s.scopeOfWork ?? (p.sections[0] === s ? p.scopeOfWork : undefined),
               items: (s.items || []).map((item: any) => ({
                 category: item.category,
                 manufacturer: item.manufacturer,

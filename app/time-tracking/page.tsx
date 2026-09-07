@@ -32,6 +32,9 @@ export default function TimeTrackingPage() {
   const [pendingDeleteRow, setPendingDeleteRow] = useState<{ projectId: string; phaseId: string | null; label: string } | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTaskName, setEditingTaskName] = useState("");
+  const [showManageTasks, setShowManageTasks] = useState(false);
+  const [manageNewTaskName, setManageNewTaskName] = useState("");
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<AdHocTask | null>(null);
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(cursor, i));
@@ -193,7 +196,19 @@ export default function TimeTrackingPage() {
   function createNewTask() {
     const name = newTaskName.trim();
     if (!name || !selectedPerson) return;
-    const task: AdHocTask = { id: uid(), name, createdAt: new Date().toISOString() };
+    // Reuse an existing ad-hoc task with the same name instead of creating a
+    // second one — otherwise the picker ends up listing duplicate "Admin" tasks.
+    const existingTask = adHocTasks.find((t) => t.name.trim().toLowerCase() === name.toLowerCase());
+    if (existingTask && rows.some((r) => r.projectId === existingTask.id && !r.phaseId)) {
+      setShowPicker(false);
+      setPickerSearch("");
+      setPickerSelected(null);
+      setPickedPhase("");
+      setShowNewTaskForm(false);
+      setNewTaskName("");
+      return;
+    }
+    const task: AdHocTask = existingTask ?? { id: uid(), name, createdAt: new Date().toISOString() };
     const today = toISODate(new Date());
     const entry: TimeEntry = {
       id: uid(),
@@ -207,7 +222,7 @@ export default function TimeTrackingPage() {
     };
     update((prev) => ({
       ...prev,
-      adHocTasks: [...(prev.adHocTasks ?? []), task],
+      adHocTasks: existingTask ? (prev.adHocTasks ?? []) : [...(prev.adHocTasks ?? []), task],
       timeEntries: [...prev.timeEntries, entry],
     }));
     setShowPicker(false);
@@ -261,6 +276,29 @@ export default function TimeTrackingPage() {
       ? (store.adHocTasks ?? [])
       : (store.adHocTasks ?? []).filter((t) => t.id !== projectId);
     update({ ...store, timeEntries: remainingEntries, adHocTasks: nextAdHocTasks });
+  }
+
+  // "Manage Tasks" operates on the ad-hoc task list itself (not the org-level
+  // projects, which come from the projects database and are managed there).
+  function addManagedTask() {
+    const name = manageNewTaskName.trim();
+    if (!name) return;
+    const exists = adHocTasks.some((t) => t.name.trim().toLowerCase() === name.toLowerCase());
+    if (exists) { setManageNewTaskName(""); return; }
+    const task: AdHocTask = { id: uid(), name, createdAt: new Date().toISOString() };
+    update((prev) => ({ ...prev, adHocTasks: [...(prev.adHocTasks ?? []), task] }));
+    setManageNewTaskName("");
+  }
+
+  // Unlike deleteRow (which only clears the current person's row), this removes
+  // the task and every person's logged time against it — it's a global delete,
+  // so it's confirmed via pendingDeleteTask before running.
+  function deleteManagedTask(taskId: string) {
+    update((prev) => ({
+      ...prev,
+      adHocTasks: (prev.adHocTasks ?? []).filter((t) => t.id !== taskId),
+      timeEntries: prev.timeEntries.filter((e) => e.projectId !== taskId),
+    }));
   }
 
   const weekTotal = weekDays.reduce(
@@ -506,16 +544,22 @@ export default function TimeTrackingPage() {
           </div>
         )}
 
-        {rows.length > 0 && (
-          <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-end gap-2">
+          {rows.length > 0 && (
             <button
               onClick={openAddRow}
               className="rounded-lg border border-border bg-forge-surface/40 px-3 py-1.5 text-xs font-semibold text-muted hover:text-body"
             >
               + Add row
             </button>
-          </div>
-        )}
+          )}
+          <button
+            onClick={() => { setEditingTaskId(null); setManageNewTaskName(""); setShowManageTasks(true); }}
+            className="rounded-lg border border-border bg-forge-surface/40 px-3 py-1.5 text-xs font-semibold text-muted hover:text-body"
+          >
+            Manage Tasks
+          </button>
+        </div>
       </div>
 
       {showPicker && (
@@ -676,6 +720,110 @@ export default function TimeTrackingPage() {
           onConfirm={() => {
             deleteRow(pendingDeleteRow.projectId, pendingDeleteRow.phaseId);
             setPendingDeleteRow(null);
+          }}
+        />
+      )}
+
+      {showManageTasks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowManageTasks(false)} />
+          <div className="relative w-full max-w-[440px] animate-fade-in rounded-xl border border-border bg-forge-surface p-6 shadow-2xl">
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-heading">Manage Tasks</h3>
+              <button
+                onClick={() => setShowManageTasks(false)}
+                className="rounded-lg p-1.5 text-subtle transition-colors hover:bg-forge-card hover:text-secondary"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <p className="mb-4 text-xs text-subtle">
+              Ad-hoc tasks created here for time tracking, separate from projects — those come from your organization&apos;s project list.
+            </p>
+            <div className="mb-4 flex gap-2">
+              <input
+                value={manageNewTaskName}
+                onChange={(e) => setManageNewTaskName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addManagedTask(); }}
+                placeholder="New task name..."
+                className="forge-input h-9 flex-1 text-sm"
+              />
+              <button
+                onClick={addManagedTask}
+                disabled={!manageNewTaskName.trim()}
+                className="forge-btn-primary px-3 text-[13px] disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            <div className="max-h-[320px] overflow-y-auto rounded-lg border border-border">
+              {adHocTasks.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-subtle">No ad-hoc tasks yet</div>
+              ) : (
+                adHocTasks.map((t) => {
+                  const isEditing = editingTaskId === t.id;
+                  return (
+                    <div key={t.id} className="flex items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={editingTaskName}
+                          onChange={(e) => setEditingTaskName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { renameTask(t.id, editingTaskName); setEditingTaskId(null); }
+                            if (e.key === "Escape") setEditingTaskId(null);
+                          }}
+                          onBlur={() => { renameTask(t.id, editingTaskName); setEditingTaskId(null); }}
+                          className="forge-input h-8 flex-1 text-sm"
+                        />
+                      ) : (
+                        <span className="flex-1 truncate text-sm text-body">{t.name}</span>
+                      )}
+                      <button
+                        onClick={() => { setEditingTaskId(t.id); setEditingTaskName(t.name); }}
+                        className="rounded p-1.5 text-subtle hover:bg-forge-card hover:text-body"
+                        title="Rename"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                          <path d="M11 2l3 3-8 8-3.5 1 1-3.5 8-8Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => setPendingDeleteTask(t)}
+                        className="rounded p-1.5 text-subtle hover:bg-red-500/10 hover:text-red-500"
+                        title="Delete"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                          <path d="M3 4h10M6.5 4V2.5h3V4M4.5 4l.5 9.5h6l.5-9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setShowManageTasks(false)}
+                className="rounded-lg px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:text-body"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDeleteTask && (
+        <ConfirmDialog
+          title="Delete task"
+          message={<>Delete <span className="font-semibold text-heading">{pendingDeleteTask.name}</span>? This removes it and all logged hours against it for everyone.</>}
+          onCancel={() => setPendingDeleteTask(null)}
+          onConfirm={() => {
+            deleteManagedTask(pendingDeleteTask.id);
+            setPendingDeleteTask(null);
           }}
         />
       )}

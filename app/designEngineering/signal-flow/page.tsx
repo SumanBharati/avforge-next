@@ -492,22 +492,32 @@ export default function SignalFlowPage() {
     return [mfrText, modelText].filter(Boolean).length===2 ? 36 : 26;
   };
 
+  // A port's connector type (e.g. "RJ45", "3-Pole Captive Screw Connector") is
+  // shown under its signal-name label in parentheses, when the library has it —
+  // ports parsed only as side:signal:dir:label (no connector column) won't. It's
+  // a second line rather than appended in-line so a long connector name doesn't
+  // blow out the device box's width.
+  const portConnectorLine = (port: any) =>
+    port?.connector && String(port.connector).trim() ? `(${port.connector})` : null;
+  const hasConnectorInfo = (d: any) => (d.ports||[]).some((p:any)=>portConnectorLine(p));
+
   // Size a device box so all port rows fit, left/right labels can't collide,
   // and the rack-mounted control has a dedicated footer.
-  // Port labels are 8px monospace (~4.9px/char); each port row needs ~17px
-  // (a bit more than the label's own height so cable-type tags on close
-  // ports don't overlap each other).
+  // Port labels are 8px monospace (~4.9px/char); each port row normally needs
+  // ~17px, or ~27px when a connector line is shown underneath it.
   const sizeDevice = (d: any) => {
     const left = (d.ports||[]).filter((p:any)=>p.side==="left");
     const right = (d.ports||[]).filter((p:any)=>p.side==="right");
     const rows = Math.max(left.length, right.length, 1);
-    const maxL = left.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
-    const maxR = right.reduce((m:number,p:any)=>Math.max(m,(p.label||"").length),0);
+    const lineLens = (p:any) => [String(p.label||"").length, (portConnectorLine(p)||"").length];
+    const maxL = left.reduce((m:number,p:any)=>Math.max(m,...lineLens(p)),0);
+    const maxR = right.reduce((m:number,p:any)=>Math.max(m,...lineLens(p)),0);
     const mfrText = d.mfr&&d.mfr!=="Generic"?d.mfr:null;
     const modelText = d.model&&d.model!=="—"?d.model:null;
     const topPad = getTopPad(d);
+    const rowH = hasConnectorInfo(d) ? 27 : 17;
     const w = Math.max(120, d.w||0, (maxL+maxR)*4.9 + 44, Math.max((mfrText||"").length,(modelText||"").length)*7 + 24, (d.type||"").length*4.5 + 20);
-    const h = Math.max(78, d.h||0, topPad + 17*(rows+1) + DEVICE_FOOTER_H);
+    const h = Math.max(78, d.h||0, topPad + rowH*(rows+1) + DEVICE_FOOTER_H);
     return {...d, w, h};
   };
 
@@ -2395,13 +2405,13 @@ export default function SignalFlowPage() {
           <button onClick={()=>undo()} title="Undo (Ctrl+Z)"
             style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 7"/>
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
             </svg>
           </button>
           <button onClick={()=>redo()} title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
             style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 7v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 7"/>
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
             </svg>
           </button>
           {!canvasLocked && view.zoom !== 1 && (
@@ -2714,10 +2724,12 @@ export default function SignalFlowPage() {
                   const px = dev.x+panOffset.x;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
                   const isConn = connecting && connecting.portId!==port.id;
+                  const connLine = portConnectorLine(port);
                   return (
                     <g key={port.id} onClick={(e)=>handlePortClick(e,dev,port)} style={{cursor:"pointer"}}>
                       <circle cx={px} cy={py} r={isConn?6:5} fill={sig?sig.color:"rgb(var(--text-subtle))"} stroke="rgb(var(--forge-surface))" strokeWidth={1.5} opacity={isConn?1:0.8} />
-                      <text x={px+10} y={py+3} fontSize={8} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono', monospace">{port.label}</text>
+                      <text x={px+10} y={connLine?py-2:py+3} fontSize={8} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono', monospace">{port.label}</text>
+                      {connLine && <text x={px+10} y={py+8} fontSize={7} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono', monospace">{connLine}</text>}
                     </g>
                   );
                 })}
@@ -2727,10 +2739,12 @@ export default function SignalFlowPage() {
                   const px = dev.x+panOffset.x+dev.w;
                   const sig = SIGNAL_TYPES.find(s=>s.id===port.signal);
                   const isConn = connecting && connecting.portId!==port.id;
+                  const connLine = portConnectorLine(port);
                   return (
                     <g key={port.id} onClick={(e)=>handlePortClick(e,dev,port)} style={{cursor:"pointer"}}>
                       <circle cx={px} cy={py} r={isConn?6:5} fill={sig?sig.color:"rgb(var(--text-subtle))"} stroke="rgb(var(--forge-surface))" strokeWidth={1.5} opacity={isConn?1:0.8} />
-                      <text x={px-10} y={py+3} fontSize={8} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono', monospace" textAnchor="end">{port.label}</text>
+                      <text x={px-10} y={connLine?py-2:py+3} fontSize={8} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono', monospace" textAnchor="end">{port.label}</text>
+                      {connLine && <text x={px-10} y={py+8} fontSize={7} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono', monospace" textAnchor="end">{connLine}</text>}
                     </g>
                   );
                 })}

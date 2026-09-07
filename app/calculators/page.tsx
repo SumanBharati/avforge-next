@@ -47,12 +47,12 @@ export default function CalculatorsPage() {
     { id: 'led-pitch',        name: 'LED Pixel Pitch',    icon: <VideoWallIcon />, desc: 'Optimal viewing distance for LED walls' },
     { id: 'speaker-coverage', name: 'Speaker Coverage',   icon: '🔊', desc: 'EPR-based speaker aiming calculator' },
     { id: 'speaker-wire',     name: 'Speaker Wire Gauge', icon: '🔧', desc: 'NEC/AVIXA minimum AWG for any speaker run' },
+    { id: 'speaker-impedance', name: 'Speaker Impedance', icon: '🎚️', desc: 'Series, parallel, and series/parallel load calculator' },
     { id: 'pag-nag',          name: 'PAG / NAG',          icon: '🎤', desc: 'Potential acoustic gain stability' },
     { id: '70v-tap',          name: '70V Tap',            icon: '⚡', desc: 'Transformer tap and wattage calculator' },
     { id: 'conduit-fill',     name: 'Conduit Fill',       icon: '🔌', desc: 'NEC conduit fill with jam ratio check' },
     { id: 'rack-heat',        name: 'Rack Heat Load',     icon: '🌡️', desc: 'BTU/hr thermal calculation' },
     { id: 'unit-converter',   name: 'Unit Converter',     icon: '🔄', desc: 'AV-specific unit conversions' },
-    { id: 'poe-database',     name: 'PoE Device Database', icon: '📦', desc: 'Per-device PoE class and draw reference' },
     { id: 'poe-budget',       name: 'PoE Budget',         icon: '🔋', desc: 'IEEE af/at/bt power budgeting' },
     { id: 'dante-bandwidth',  name: 'Dante Bandwidth',    icon: '📶', desc: 'Per-flow Dante/AES67 bandwidth' },
   ];
