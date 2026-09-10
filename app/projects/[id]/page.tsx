@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { duplicateProject } from "@/lib/duplicate-project";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
 import { useOrg } from "@/components/OrgProvider";
 import ProjectDetailSkeleton from "@/components/skeletons/ProjectDetailSkeleton";
@@ -328,6 +329,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   const [editZipCode, setEditZipCode] = useState("");
   const [editClientEmail, setEditClientEmail] = useState("");
   const [editClientPhone, setEditClientPhone] = useState("");
+  const [duplicating, setDuplicating] = useState(false);
 
   async function handleCloseProject(reason: "lost" | "completed") {
     const phase = reason === "lost" ? "lost" : "completed";
@@ -339,6 +341,21 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   async function handleDeleteProject() {
     await supabase.from("projects").delete().eq("id", params.id);
     router.push("/projects");
+  }
+
+  async function handleDuplicateProject() {
+    setDuplicating(true);
+    const result = await duplicateProject(params.id);
+    if ("error" in result) {
+      alert(`Couldn't duplicate this project: ${result.error}`);
+      setDuplicating(false);
+      return;
+    }
+    if (result.warnings.length) {
+      console.warn("Project duplicated with some data not fully copied:", result.warnings);
+      alert(`"${project?.name} (1)" was created, but some data didn't fully copy over:\n\n${result.warnings.join("\n")}\n\nYou may want to check it against the original.`);
+    }
+    router.push(`/projects/${result.id}`);
   }
 
   async function handleEditProject() {
@@ -431,6 +448,14 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                     Edit Project
+                  </button>
+                  <button
+                    disabled={duplicating}
+                    onClick={() => { setMenuOpen(false); handleDuplicateProject(); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-forge-surface/80 disabled:opacity-50"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    {duplicating ? "Duplicating…" : "Duplicate Project"}
                   </button>
                   <button
                     onClick={() => { setCloseProjectModal(true); setMenuOpen(false); }}

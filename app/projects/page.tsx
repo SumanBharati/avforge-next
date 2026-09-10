@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { duplicateProject } from "@/lib/duplicate-project";
 import { useOrg } from "@/components/OrgProvider";
 import ProjectsPageSkeleton from "@/components/skeletons/ProjectsPageSkeleton";
 
@@ -421,11 +422,27 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
   const [closeModal, setCloseModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const phaseInfo = PHASE_STYLES[project.phase] ?? { label: "Site Survey", style: "bg-forge-surface border-border text-secondary" };
 
   async function closeProject(reason: "lost" | "completed") {
     const phase = reason === "lost" ? "lost" : "completed";
     await supabase.from("projects").update({ phase }).eq("id", project.id);
+    window.location.reload();
+  }
+
+  async function handleDuplicate() {
+    setDuplicating(true);
+    const result = await duplicateProject(project.id);
+    if ("error" in result) {
+      alert(`Couldn't duplicate this project: ${result.error}`);
+      setDuplicating(false);
+      return;
+    }
+    if (result.warnings.length) {
+      console.warn("Project duplicated with some data not fully copied:", result.warnings);
+      alert(`"${project.name} (1)" was created, but some data didn't fully copy over:\n\n${result.warnings.join("\n")}\n\nYou may want to check it against the original.`);
+    }
     window.location.reload();
   }
 
@@ -460,6 +477,10 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
                 <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditModal(true); setMenuOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-forge-surface/80">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                   Edit Project
+                </button>
+                <button disabled={duplicating} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(false); handleDuplicate(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-forge-surface/80 disabled:opacity-50">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  {duplicating ? "Duplicating…" : "Duplicate Project"}
                 </button>
                 <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCloseModal(true); setMenuOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-secondary transition-colors hover:bg-forge-surface/80">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
