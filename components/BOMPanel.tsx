@@ -93,6 +93,11 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                         <td style={{ ...tdSt, paddingLeft: 10, color: 'rgb(var(--text-subtle))' }}>{i + 1}</td>
                         <td style={{ ...tdSt, padding: '6px 10px' }}>
                           <div style={{ color: 'rgb(var(--text-body))', fontWeight: 500, fontSize: 11 }}>{item.name}</div>
+                          {item.partNumber && (
+                            <div style={{ color: 'rgb(var(--text-muted))', fontSize: 9.5, fontFamily: "'JetBrains Mono',monospace", marginTop: 1 }}>
+                              PN: {item.partNumber}
+                            </div>
+                          )}
                           <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
                             {item.sources.map(src => (
                               <span key={src} style={{

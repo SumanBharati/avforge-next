@@ -9,6 +9,7 @@ export interface BOMDeviceEntry {
   mfr?: string;
   cat?: string;
   listPrice?: number;
+  partNumber?: string;
 }
 
 export interface BOMLineItem {
@@ -18,6 +19,7 @@ export interface BOMLineItem {
   listPrice: number;
   qty: number;
   sources: BOMSource[];
+  partNumber?: string;
 }
 
 interface BOMContextType {
@@ -81,8 +83,10 @@ export function BOMProvider({ children }: { children: React.ReactNode }) {
           listPrice: d.listPrice || 0,
           qty: 0,
           sources: [],
+          partNumber: d.partNumber || undefined,
         };
       }
+      if (!itemMap[d.name].partNumber && d.partNumber) itemMap[d.name].partNumber = d.partNumber;
       itemMap[d.name].qty++;
       if (!itemMap[d.name].sources.includes(source)) {
         itemMap[d.name].sources.push(source);

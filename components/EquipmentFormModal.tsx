@@ -11,7 +11,7 @@ export interface EquipmentFormValue {
   partNumber: string | null;
   msrp: number | null;
   cost: number | null;
-  ports: Array<{ side: string; signal: string; dir: string; label: string }>;
+  ports: Array<{ side: string; signal: string; dir: string; label: string; connector?: string }>;
   ampDraw: number | null;
   voltage: number | null;
   powerWatts: number | null;
@@ -177,7 +177,7 @@ export default function EquipmentFormModal({
               <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">Ports</div>
               <button
                 type="button"
-                onClick={() => onChange({ ...value, ports: [...value.ports, { side: "right", dir: "out", signal: "", label: "" }] })}
+                onClick={() => onChange({ ...value, ports: [...value.ports, { side: "right", dir: "out", signal: "", label: "", connector: "" }] })}
                 className="text-[11px] font-medium text-blue-400 hover:text-blue-300 transition-colors"
               >
                 + Add port
@@ -216,6 +216,11 @@ export default function EquipmentFormModal({
                       type="text" value={port.label}
                       onChange={(e) => onChange({ ...value, ports: value.ports.map((p, j) => j === i ? { ...p, label: e.target.value } : p) })}
                       className={inputCls} placeholder="label"
+                    />
+                    <input
+                      type="text" value={port.connector || ""}
+                      onChange={(e) => onChange({ ...value, ports: value.ports.map((p, j) => j === i ? { ...p, connector: e.target.value } : p) })}
+                      className={inputCls} placeholder="connector (RJ45, XLR-3…)"
                     />
                     <button
                       type="button"

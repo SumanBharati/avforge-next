@@ -239,6 +239,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
   const [activeSection, setActiveSection] = useState<string>("");
   const [saved, setSaved] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [projectJobNumber, setProjectJobNumber] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
@@ -255,8 +256,8 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
     let cancelled = false;
 
     // Load project name
-    supabase.from("projects").select("name").eq("id", params.id).single()
-      .then(({ data }) => { if (!cancelled && data) setProjectName(data.name || ""); });
+    supabase.from("projects").select("name, job_number").eq("id", params.id).single()
+      .then(({ data }) => { if (!cancelled && data) { setProjectName(data.name || ""); setProjectJobNumber(data.job_number || ""); } });
 
     // Load equipment library (org-scoped)
     if (activeOrg) {
@@ -487,6 +488,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               {projectName}
+              {projectJobNumber && <span className="text-subtle/60"> · #{projectJobNumber}</span>}
             </Link>
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">

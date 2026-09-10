@@ -34,14 +34,15 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
   const [expandedRooms, setExpandedRooms] = useState<Set<string>>(new Set());
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>("");
+  const [jobNumber, setJobNumber] = useState<string>("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!projectIdParam) return;
     setProjectId(projectIdParam);
 
-    supabase.from("projects").select("name").eq("id", projectIdParam).single()
-      .then(({ data }) => { if (data) setProjectName(data.name || ""); });
+    supabase.from("projects").select("name, job_number").eq("id", projectIdParam).single()
+      .then(({ data }) => { if (data) { setProjectName(data.name || ""); setJobNumber(data.job_number || ""); } });
 
     supabase.from("site_surveys").select("data").eq("project_id", projectIdParam).single()
       .then(({ data: surveyRow }) => {
@@ -79,6 +80,7 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
               <Link href={`/projects/${projectId}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
                 {projectName}
+                {jobNumber && <span className="text-subtle/60"> · #{jobNumber}</span>}
               </Link>
             )}
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">

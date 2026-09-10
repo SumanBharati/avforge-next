@@ -849,6 +849,7 @@ export default function ProcurementPage({ params }: { params: { id: string } }) 
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               {project.name}
+              {project.job_number && <span className="text-subtle/60"> · #{project.job_number}</span>}
             </Link>
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-rose-400">

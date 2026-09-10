@@ -27,11 +27,12 @@ export default function ProjectEngineeringLayout({
   const [rooms, setRooms] = useState<Room[]>([]);
   const [expandedRooms, setExpandedRooms] = useState<Set<string>>(new Set());
   const [projectName, setProjectName] = useState<string>("");
+  const [jobNumber, setJobNumber] = useState<string>("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    supabase.from("projects").select("name").eq("id", params.id).single()
-      .then(({ data }) => { if (data) setProjectName(data.name || ""); });
+    supabase.from("projects").select("name, job_number").eq("id", params.id).single()
+      .then(({ data }) => { if (data) { setProjectName(data.name || ""); setJobNumber(data.job_number || ""); } });
 
     supabase.from("site_surveys").select("data").eq("project_id", params.id).single()
       .then(({ data: surveyRow }) => {
@@ -66,6 +67,7 @@ export default function ProjectEngineeringLayout({
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               {projectName}
+              {jobNumber && <span className="text-subtle/60"> · #{jobNumber}</span>}
             </Link>
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400">

@@ -1101,11 +1101,12 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                 {selected.ports && selected.ports.length > 0 ? (
                   <div className="space-y-2">
                     {selected.ports.map((port, i) => (
-                      <div key={i} className="grid grid-cols-4 gap-2 rounded-md border border-border bg-forge-surface/40 px-2.5 py-1.5 text-[12px]">
+                      <div key={i} className="grid grid-cols-5 gap-2 rounded-md border border-border bg-forge-surface/40 px-2.5 py-1.5 text-[12px]">
                         <span className="text-body capitalize">{port.side}</span>
                         <span className="text-body uppercase">{port.dir}</span>
                         <span className="text-body">{port.signal || <span className="text-faint">—</span>}</span>
                         <span className="text-body">{port.label || <span className="text-faint">—</span>}</span>
+                        <span className="text-body">{port.connector || <span className="text-faint">—</span>}</span>
                       </div>
                     ))}
                   </div>

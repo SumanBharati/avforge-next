@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { rankByFuzzyMatch, sanitizeIlikeWord } from "@/lib/fuzzy-search";
 
 export interface OrgEquipmentItem {
   id: string;
@@ -13,7 +14,7 @@ export interface OrgEquipmentItem {
   msrp: number | null;
   cost: number | null;
   color: string | null;
-  ports: Array<{ side: string; signal: string; dir: string; label: string }>;
+  ports: Array<{ side: string; signal: string; dir: string; label: string; connector?: string }>;
   amp_draw: number | null;
   voltage: number | null;
   power_watts: number | null;
@@ -26,16 +27,34 @@ export interface OrgEquipmentItem {
   weight_lb: number | null;
 }
 
+const SEARCHABLE_LIBRARY_COLUMNS = ["manufacturer", "model", "category", "part_number", "description"];
+
+// Fuzzy, multi-field search across Manufacturer, Model, Category, Part number,
+// and Description. See searchProducts (lib/av-products.ts) for the same
+// broaden-then-rank approach applied to the org's own equipment library.
 export async function searchOrgLibrary(query: string, orgId: string, limit = 30): Promise<OrgEquipmentItem[]> {
-  if (!query.trim() || !orgId) return [];
-  const words = query.trim().split(/\s+/);
-  let q = supabase.from("equipment_library").select("*").eq("org_id", orgId);
-  for (const w of words) {
-    q = q.or(`manufacturer.ilike.%${w}%,model.ilike.%${w}%,description.ilike.%${w}%,category.ilike.%${w}%`);
-  }
-  const { data, error } = await q.order("manufacturer").order("model").limit(limit);
+  const trimmed = query.trim();
+  if (!trimmed || !orgId) return [];
+  const words = trimmed.split(/\s+/).map(sanitizeIlikeWord).filter(Boolean);
+  if (words.length === 0) return [];
+
+  const orFilter = words
+    .flatMap((w) => SEARCHABLE_LIBRARY_COLUMNS.map((col) => `${col}.ilike.%${w}%`))
+    .join(",");
+  const { data, error } = await supabase.from("equipment_library").select("*").eq("org_id", orgId).or(orFilter).limit(500);
   if (error) throw error;
-  return data ?? [];
+  let candidates = data ?? [];
+
+  if (candidates.length < 5) {
+    const { data: broad, error: broadError } = await supabase.from("equipment_library").select("*").eq("org_id", orgId).limit(500);
+    if (broadError) throw broadError;
+    const seen = new Set(candidates.map((c: any) => c.id));
+    for (const row of broad ?? []) if (!seen.has(row.id)) candidates.push(row);
+  }
+
+  return rankByFuzzyMatch(trimmed, candidates, (i: any) => [
+    i.manufacturer, i.model, i.category, i.part_number, i.description,
+  ], limit);
 }
 
 export async function getOrgLibraryItemById(id: string): Promise<OrgEquipmentItem | null> {

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { rankByFuzzyMatch, sanitizeIlikeWord } from "@/lib/fuzzy-search";
 
 export interface AVProduct {
   id: string;
@@ -44,16 +45,39 @@ export interface AVProduct {
   rd_icon: string | null;       // icon identifier: monitor | confbar | soundbar | emoji
 }
 
+const SEARCHABLE_PRODUCT_COLUMNS = ["manufacturer", "model_name", "category", "part_number", "type", "notes"];
+
+// Fuzzy, multi-field search: matches on Manufacturer, Model, Category, Part
+// number, and Description (the "notes" column) — not just exact model numbers.
+// A broad ILIKE fetch first gathers candidates (any word matching any field),
+// with a fallback to a larger unfiltered pool when that finds too few, then
+// results are ranked by close-match relevance so near-misses (typos, partial
+// numbers, words in a different order) still surface.
 export async function searchProducts(query: string, limit = 30): Promise<AVProduct[]> {
-  if (!query.trim()) return [];
-  const words = query.trim().split(/\s+/);
-  let q = supabase.from("av_products").select("*");
-  for (const w of words) {
-    q = q.or(`type.ilike.%${w}%,manufacturer.ilike.%${w}%,model_name.ilike.%${w}%,category.ilike.%${w}%,part_number.ilike.%${w}%`);
-  }
-  const { data, error } = await q.order("manufacturer").order("type").limit(limit);
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const words = trimmed.split(/\s+/).map(sanitizeIlikeWord).filter(Boolean);
+  if (words.length === 0) return [];
+
+  const orFilter = words
+    .flatMap((w) => SEARCHABLE_PRODUCT_COLUMNS.map((col) => `${col}.ilike.%${w}%`))
+    .join(",");
+  const { data, error } = await supabase.from("av_products").select("*").or(orFilter).limit(500);
   if (error) throw error;
-  return data ?? [];
+  let candidates = data ?? [];
+
+  // No word matched any field as a literal substring anywhere (e.g. every word
+  // has a typo) — widen to a general pool so fuzzy scoring still has a chance.
+  if (candidates.length < 5) {
+    const { data: broad, error: broadError } = await supabase.from("av_products").select("*").limit(500);
+    if (broadError) throw broadError;
+    const seen = new Set(candidates.map((c: any) => c.id));
+    for (const row of broad ?? []) if (!seen.has(row.id)) candidates.push(row);
+  }
+
+  return rankByFuzzyMatch(trimmed, candidates, (p: any) => [
+    p.manufacturer, p.model_name, p.category, p.part_number, p.type, p.notes,
+  ], limit);
 }
 
 export async function getProductById(id: string): Promise<AVProduct | null> {
