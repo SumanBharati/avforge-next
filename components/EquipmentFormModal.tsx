@@ -1,6 +1,7 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useRef, useState } from "react";
+import { compressPhotoFile, extractEquipmentFromPhotos } from "@/lib/ai-equipment-extract";
 
 export interface EquipmentFormValue {
   manufacturer: string;
@@ -38,6 +39,7 @@ export default function EquipmentFormModal({
   categories,
   notesLabel = "Description",
   saveLabel = "Save Item",
+  showAIImport = false,
 }: {
   title: string;
   value: EquipmentFormValue;
@@ -49,9 +51,62 @@ export default function EquipmentFormModal({
   categories: string[];
   notesLabel?: string;
   saveLabel?: string;
+  showAIImport?: boolean;
 }) {
   const categoryListId = useId();
   const rackMountedId = useId();
+  const [aiPhotos, setAiPhotos] = useState<string[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  const aiFileRef = useRef<HTMLInputElement>(null);
+
+  async function handleAiFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setAiError(null);
+    const room = Math.max(0, 6 - aiPhotos.length);
+    const toAdd = Array.from(files).slice(0, room);
+    try {
+      const compressed = await Promise.all(toAdd.map((f) => compressPhotoFile(f)));
+      setAiPhotos((prev) => [...prev, ...compressed]);
+    } catch {
+      setAiError("Couldn't read one of those photos.");
+    }
+  }
+
+  async function handleAnalyzePhotos() {
+    if (aiPhotos.length === 0) return;
+    setAnalyzing(true);
+    setAiError(null);
+    setAiNote(null);
+    const result = await extractEquipmentFromPhotos(aiPhotos, categories);
+    setAnalyzing(false);
+    if ("error" in result) {
+      setAiError(result.error);
+      return;
+    }
+    const d = result.data;
+    onChange({
+      ...value,
+      manufacturer: value.manufacturer.trim() ? value.manufacturer : (d.manufacturer || value.manufacturer),
+      model: value.model.trim() ? value.model : (d.model || value.model),
+      category: value.category.trim() ? value.category : (d.category || value.category),
+      notes: value.notes.trim() ? value.notes : (d.notes || value.notes),
+      partNumber: value.partNumber ? value.partNumber : (d.partNumber ?? value.partNumber),
+      ports: value.ports.length > 0 ? value.ports : (d.ports?.length ? d.ports : value.ports),
+      ampDraw: value.ampDraw ?? d.ampDraw ?? value.ampDraw,
+      voltage: value.voltage ?? d.voltage ?? value.voltage,
+      powerWatts: value.powerWatts ?? d.powerWatts ?? value.powerWatts,
+      btuHr: value.btuHr ?? d.btuHr ?? value.btuHr,
+      rackMounted: value.rackMounted || d.rackMounted,
+      rackUnits: value.rackUnits ?? d.rackUnits ?? value.rackUnits,
+      widthIn: value.widthIn ?? d.widthIn ?? value.widthIn,
+      heightIn: value.heightIn ?? d.heightIn ?? value.heightIn,
+      depthIn: value.depthIn ?? d.depthIn ?? value.depthIn,
+      weightLb: value.weightLb ?? d.weightLb ?? value.weightLb,
+    });
+    if (d.aiNotes) setAiNote(d.aiNotes);
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -65,6 +120,54 @@ export default function EquipmentFormModal({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {showAIImport && (
+            <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-violet-400">
+                  <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z" />
+                </svg>
+                <span className="text-[12px] font-semibold text-heading">Fill in with AI</span>
+                <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">Beta</span>
+              </div>
+              <p className="mb-3 text-[11px] text-subtle">Upload a few photos — front panel, rear/connector panel, and any power or spec label — and AI will fill in fields it can read. Review everything before saving.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {aiPhotos.map((src, i) => (
+                  <div key={i} className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt="" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setAiPhotos((prev) => prev.filter((_, j) => j !== i))}
+                      className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                  </div>
+                ))}
+                {aiPhotos.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={() => aiFileRef.current?.click()}
+                    className="flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-violet-500/40 text-violet-300 transition-colors hover:border-violet-500/70 hover:bg-violet-500/10"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    <span className="text-[9px]">Photo</span>
+                  </button>
+                )}
+                <input ref={aiFileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { handleAiFiles(e.target.files); e.target.value = ""; }} />
+                <button
+                  type="button"
+                  onClick={handleAnalyzePhotos}
+                  disabled={aiPhotos.length === 0 || analyzing}
+                  className="ml-auto rounded-lg bg-violet-600 px-3 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
+                >
+                  {analyzing ? "Analyzing…" : "Analyze Photos"}
+                </button>
+              </div>
+              {aiError && <p className="mt-2 text-[11px] text-red-400">{aiError}</p>}
+              {aiNote && <p className="mt-2 text-[11px] text-amber-400">⚠ {aiNote}</p>}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Manufacturer *</label>

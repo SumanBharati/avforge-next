@@ -102,6 +102,12 @@ export async function upsertProducts(
   return { count: data?.length ?? 0 };
 }
 
+export async function createProduct(product: Omit<AVProduct, "id">): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase.from("av_products").insert(product).select("id").single();
+  if (error) return { error: error.message };
+  return { id: data?.id };
+}
+
 export async function deleteProduct(id: string): Promise<void> {
   await supabase.from("av_products").delete().eq("id", id);
 }

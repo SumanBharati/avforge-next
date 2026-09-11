@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { deleteProduct, getFilterOptions, getProductCount, listProducts, updateProduct, type AVProduct } from "@/lib/av-products";
+import { createProduct, deleteProduct, getFilterOptions, getProductCount, listProducts, updateProduct, type AVProduct } from "@/lib/av-products";
 import { type OrgEquipmentItem } from "@/lib/equipment-library";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
@@ -633,6 +633,47 @@ function applyFormValueToAVProduct(base: AVProduct, v: EquipmentFormValue): AVPr
   };
 }
 
+const emptyAVProduct = (): AVProduct => ({
+  id: "",
+  manufacturer: "",
+  model_name: "",
+  category: "",
+  type: "",
+  price: 0,
+  part_number: null,
+  msrp: null,
+  cost: null,
+  margin: null,
+  markup: null,
+  color: "",
+  ports: [],
+  amp_draw: null,
+  voltage: null,
+  power_watts: null,
+  btu_hr: null,
+  rack_mounted: false,
+  rack_units: null,
+  width_in: null,
+  height_in: null,
+  depth_in: null,
+  diameter_in: null,
+  weight_lb: null,
+  rack_mountable_detail: null,
+  rack_ear_included: null,
+  rack_ear_detail: null,
+  shelf_required: null,
+  shelf_requirement: null,
+  voltage_detail: null,
+  current_detail: null,
+  power_supply_type: null,
+  notes: null,
+  rd_type: null,
+  rd_wall: null,
+  rd_width_ft: null,
+  rd_height_ft: null,
+  rd_icon: null,
+});
+
 function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const { activeOrg } = useOrg();
   const [products, setProducts] = useState<AVProduct[]>([]);
@@ -648,6 +689,8 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const [selected, setSelected] = useState<AVProduct | null>(null);
   const [editingProduct, setEditingProduct] = useState<AVProduct | null>(null);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [newProduct, setNewProduct] = useState<AVProduct | null>(null);
+  const [savingNewProduct, setSavingNewProduct] = useState(false);
   const [pendingDeleteProduct, setPendingDeleteProduct] = useState<AVProduct | null>(null);
   const [deletingProduct, setDeletingProduct] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -875,6 +918,19 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
     setEditingProduct(null);
   }
 
+  async function handleSaveNewProduct() {
+    if (!newProduct || !newProduct.manufacturer.trim() || !newProduct.model_name.trim()) return;
+    setSavingNewProduct(true);
+    const { id, ...rest } = newProduct;
+    const { id: insertedId, error } = await createProduct(rest);
+    if (!error && insertedId) {
+      setProducts((prev) => [{ ...newProduct, id: insertedId }, ...prev]);
+      setTotal((prev) => prev + 1);
+      setNewProduct(null);
+    }
+    setSavingNewProduct(false);
+  }
+
   async function handleDeleteProduct() {
     if (!pendingDeleteProduct) return;
     setDeletingProduct(true);
@@ -897,7 +953,19 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           <span className="text-border">/</span>
           <h2 className="text-xl font-bold text-heading">AV Forge Equipment Library</h2>
         </div>
-        <span className="text-[12px] text-subtle">{total} products</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[12px] text-subtle">{total} products</span>
+          <button
+            onClick={() => setNewProduct(emptyAVProduct())}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add Product
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -1215,6 +1283,22 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           saveDisabled={!editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()}
           categories={categories}
           notesLabel="Type"
+        />
+      )}
+
+      {/* Add Modal */}
+      {newProduct && (
+        <EquipmentFormModal
+          title="Add Product"
+          value={avProductToFormValue(newProduct)}
+          onChange={(v) => setNewProduct(applyFormValueToAVProduct(newProduct, v))}
+          onCancel={() => setNewProduct(null)}
+          onSave={handleSaveNewProduct}
+          saving={savingNewProduct}
+          saveDisabled={!newProduct.manufacturer.trim() || !newProduct.model_name.trim()}
+          categories={categories}
+          notesLabel="Type"
+          showAIImport
         />
       )}
 
@@ -1649,6 +1733,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           saving={saving}
           saveDisabled={!editing.manufacturer.trim() || !editing.model.trim()}
           categories={categories}
+          showAIImport={!("id" in editing)}
         />
       )}
 
