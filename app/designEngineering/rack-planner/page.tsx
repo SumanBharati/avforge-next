@@ -1,11 +1,13 @@
 'use client';
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'next/navigation';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts, type AVProduct } from "@/lib/av-products";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
+import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
 
 type RackItem = {
   sourceDeviceId?: string | number;
@@ -59,6 +61,36 @@ function FloatingPanel({ getAnchor, children }: { getAnchor: () => HTMLElement |
 }
 
 export default function RackPlannerPage() {
+  // The sidebar's room links are plain Next.js <Link>s to this same route with
+  // only ?room= changed — Next does not remount this page for that, so without
+  // reacting to these explicitly, switching rooms left this component's state
+  // pointed at whichever room loaded first, and the autosave below would
+  // silently overwrite the newly-selected room's saved data with the old one's.
+  const searchParams = useSearchParams();
+  const roomParam = searchParams.get("room") || "default";
+  const projectParam = searchParams.get("project") || "";
+  // Chrome-free view for embedding this room's rack elevation elsewhere (the
+  // per-room "Drawings" page) — same technique as Room Designer/Signal
+  // Flow's own exportAsPDF: walk up from the rack visualization to <body>,
+  // hiding every sibling (toolbar, modals, BOM panel, app chrome) along the
+  // way, just applied permanently instead of only for print.
+  const embedMode = searchParams.get("embed") === "1";
+  useEffect(() => {
+    if (!embedMode) return;
+    let node: HTMLElement | null = document.getElementById('rack-canvas-export');
+    while (node && node !== document.body) {
+      const parent: HTMLElement | null = node.parentElement;
+      if (parent) {
+        Array.from(parent.children).forEach(sib => {
+          if (sib !== node && sib instanceof HTMLElement) sib.style.display = 'none';
+        });
+      }
+      node.style.overflow = 'visible';
+      node.style.height = 'auto';
+      node.style.maxHeight = 'none';
+      node = parent;
+    }
+  }, [embedMode]);
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
   const [items, setItems] = useState<RackItem[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -96,9 +128,25 @@ export default function RackPlannerPage() {
     },
   });
 
-  // Load
+  // Load — re-runs whenever the room or project actually changes (not just on
+  // mount), since switching rooms via the sidebar reuses this same component.
   useEffect(() => {
-    Promise.all([loadToolData("rack-planner"), loadToolData("signal-flow")]).then(async ([rackData, signalData]) => {
+    let cancelled = false;
+    // Gate the auto-save effect below closed *before* clearing the rack, so
+    // this reset is never mistaken for an edit and written over the room
+    // we're navigating away from, or over the new room before its real data
+    // has loaded.
+    setLoaded(false);
+    setItems([]);
+    setRackRUCapacity(null);
+    setRackCount(1);
+    setAdditionalRackRUCapacities([]);
+    setRackVoltages([120]);
+    annotate.setAnnotations([]);
+    setSelectedIdxs(new Set());
+    setEditingIdx(null);
+    Promise.all([loadToolData("rack-planner", roomParam, projectParam), loadToolData("signal-flow", roomParam, projectParam)]).then(async ([rackData, signalData]) => {
+      if (cancelled) return;
       const savedItems = Array.isArray(rackData?.items) ? rackData.items as RackItem[] : [];
       const savedBySourceId = new Map(
         savedItems
@@ -118,6 +166,9 @@ export default function RackPlannerPage() {
           return product?{...device,product_id:product.id,amp_draw:product.amp_draw,voltage:product.voltage,power_watts:product.power_watts,btu_hr:product.btu_hr}:device;
         }catch{return device;}
       }));
+      // Re-check after the awaited per-device lookups above — the room may
+      // have changed again while those were in flight.
+      if (cancelled) return;
       const mountedItems = enrichedSignalDevices
         .filter(device => (device.rackMounted ?? device.rack_mounted ?? false) === true)
         .map((device, index): RackItem => {
@@ -167,15 +218,17 @@ export default function RackPlannerPage() {
         return Number.isFinite(saved)&&saved>0?saved:120;
       }));
       if (rackData?.annotations) annotate.setAnnotations(rackData.annotations as any[]);
+      if (cancelled) return;
       setLoaded(true);
     });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [roomParam, projectParam]);
 
   // Auto-save
   const doSave = useCallback((list: RackItem[], anns: any[]) => {
-    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities, rackVoltages });
-  }, [rackRUCapacity,rackCount,additionalRackRUCapacities,rackVoltages]);
+    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities, rackVoltages }, roomParam, projectParam);
+  }, [rackRUCapacity,rackCount,additionalRackRUCapacities,rackVoltages,roomParam,projectParam]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -440,6 +493,42 @@ export default function RackPlannerPage() {
     setRackContextMenu(null);
   };
 
+  // DXF export — each rack as a real 19"-wide frame at 1.75"/RU (standard
+  // rack unit height), so it opens at true scale in AutoCAD. Only items
+  // actually mounted in a rack are included (not unracked/pending items).
+  const exportDXF = () => {
+    const dxf = new DxfWriter();
+    const RACK_W_IN = 19;
+    const RU_IN = 1.75;
+    const RACK_GAP_IN = 30;
+
+    const drawRack = (rackNumber: number, entries: { item: RackItem; index: number }[], displayRUForRack: number, xOffset: number) => {
+      const heightIn = displayRUForRack * RU_IN;
+      dxf.rect(xOffset, 0, RACK_W_IN, heightIn, "RACK");
+      dxf.text(xOffset, heightIn + 8, 10, `Equipment Rack ${rackNumber}`, "RACK");
+      entries.forEach(({ item, index }) => {
+        const startRU = rackNumber === 1 ? rackStartFor(item, index) : (item.rackStartRU ?? 1);
+        const yBottom = (startRU - 1) * RU_IN;
+        const h = item.ru * RU_IN;
+        dxf.rect(xOffset, yBottom, RACK_W_IN, h, "EQUIPMENT");
+        dxf.text(xOffset + 2, yBottom + h / 2, 8, item.name, "EQUIPMENT");
+      });
+    };
+
+    drawRack(1, mountedEntries, displayRU, 0);
+
+    for (let rackOffset = 0; rackOffset < rackCount - 1; rackOffset++) {
+      const rackNumber = rackOffset + 2;
+      const emptyRackRU = Math.max(1, additionalRackRUCapacities[rackOffset] ?? displayRU);
+      const rackEntries = items.map((item, index) => ({ item, index })).filter(({ item }) => item.rackMounted !== false && (item.rackId ?? 1) === rackNumber);
+      const rackHighestRU = rackEntries.reduce((highest, { item }) => Math.max(highest, (item.rackStartRU ?? 1) + item.ru - 1), 0);
+      const rackDisplayRU = Math.max(emptyRackRU, rackHighestRU);
+      drawRack(rackNumber, rackEntries, rackDisplayRU, rackOffset * (RACK_W_IN + RACK_GAP_IN) + (RACK_W_IN + RACK_GAP_IN));
+    }
+
+    downloadDxf(dxf, `Rack Elevation${roomParam && roomParam !== "default" ? " - " + roomParam : ""}`);
+  };
+
   return (
     <div className="animate-fade-in flex" style={{minHeight:"calc(100vh - 157px)"}}>
       {/* Main content */}
@@ -477,11 +566,26 @@ export default function RackPlannerPage() {
             </div>
             <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
           </div>
+          <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
+          <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+            <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+              <button onClick={exportDXF} title="Export rack elevation as DXF (for AutoCAD)"
+                style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:58}}
+                onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
+                onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-subtle))" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap",textAlign:"center"}}>Export<br/>DXF</span>
+              </button>
+            </div>
+            <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Export</span>
+          </div>
         </div>
       </div>
       {annotate.optionsBar && <div style={{display:"flex",justifyContent:"center",marginTop:-12,marginBottom:12}}>{annotate.optionsBar}</div>}
 
-      <div className="flex flex-col gap-5 lg:flex-row">
+      <div id="rack-canvas-export" className="flex flex-col gap-5 lg:flex-row">
         {/* Rack Visualization */}
         <div className="flex-1 overflow-x-auto" style={{position:"relative",width:"100%",minWidth:900,margin:"0 auto"}}>
           <div ref={rackAreaRef} style={{position:"relative",width:rackW+60,margin:"0 auto"}}>

@@ -21,9 +21,9 @@ export async function loadToolData(tool: string, roomId?: string | null, project
   return data?.data as Record<string, unknown> | null;
 }
 
-export async function saveToolData(tool: string, payload: unknown, roomId?: string | null): Promise<void> {
+export async function saveToolData(tool: string, payload: unknown, roomId?: string | null, projectId?: string | null): Promise<void> {
   const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-  const projectId = params.get("project");
+  projectId = projectId || params.get("project");
   if (!projectId) return;
 
   const rid = roomId || params.get("room") || "default";

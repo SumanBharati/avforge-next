@@ -43,6 +43,17 @@ export interface AVProduct {
   rd_width_ft: number | null;   // physical width in feet for floor-plan canvas
   rd_height_ft: number | null;  // physical height/depth in feet
   rd_icon: string | null;       // icon identifier: monitor | confbar | soundbar | emoji
+  // Cameras: lens field of view, in degrees.
+  hfov_deg: number | null;
+  vfov_deg: number | null;
+  // Mics/speakers/sensors: coverage footprint Room Designer draws on the
+  // floor plan — circular (diameter + optional cone angle) or rectangular
+  // (W x D). See equipment_library's identical fields for the full rationale.
+  coverage_pattern: "circular" | "rectangular" | null;
+  coverage_diameter_ft: number | null;
+  coverage_angle_deg: number | null;
+  coverage_width_ft: number | null;
+  coverage_depth_ft: number | null;
 }
 
 const SEARCHABLE_PRODUCT_COLUMNS = ["manufacturer", "model_name", "category", "part_number", "type", "notes"];

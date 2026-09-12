@@ -47,6 +47,12 @@ export default function ProjectsPage() {
   const [filterClient, setFilterClient] = useState("");
   const [filterStage, setFilterStage] = useState("");
   const [filterSales, setFilterSales] = useState("");
+  const [filterPreSales, setFilterPreSales] = useState("");
+  const [filterPostSales, setFilterPostSales] = useState("");
+  const [filterFieldEngineer, setFilterFieldEngineer] = useState("");
+  const [filterProgrammer, setFilterProgrammer] = useState("");
+  const [filterProjectManager, setFilterProjectManager] = useState("");
+  const [projectMembers, setProjectMembers] = useState<{ project_id: string; role: string; full_name: string }[]>([]);
 
   useEffect(() => {
     if (orgLoading) return;
@@ -63,12 +69,28 @@ export default function ProjectsPage() {
       .order("created_at", { ascending: false });
     if (data) setProjects(data);
     setLoading(false);
+
+    if (data?.length) {
+      const { data: members } = await supabase
+        .from("project_members")
+        .select("project_id, role, full_name")
+        .in("project_id", data.map((p) => p.id));
+      if (members) setProjectMembers(members);
+    }
   }
 
   if (loading) return <ProjectsPageSkeleton />;
 
   const uniqueClients = [...new Set(projects.map((p) => p.client_name).filter(Boolean))];
   const uniqueSales = [...new Set(projects.map((p) => p.sales).filter(Boolean))];
+  const membersByRole = (role: string) => [...new Set(projectMembers.filter((m) => m.role === role).map((m) => m.full_name).filter(Boolean))];
+  const uniquePreSales = membersByRole("Pre Sales Engineer");
+  const uniquePostSales = membersByRole("Post Sales Engineer");
+  const uniqueFieldEngineers = membersByRole("Field Engineer");
+  const uniqueProgrammers = membersByRole("Programmer");
+  const uniqueProjectManagers = membersByRole("Project Manager");
+  const projectHasMember = (projectId: string, role: string, name: string) =>
+    projectMembers.some((m) => m.project_id === projectId && m.role === role && m.full_name === name);
 
   const filtered = projects.filter((p) => {
     const matchesSearch =
@@ -77,10 +99,17 @@ export default function ProjectsPage() {
     const matchesClient = !filterClient || p.client_name === filterClient;
     const matchesStage = !filterStage || p.phase === filterStage;
     const matchesSales = !filterSales || p.sales === filterSales;
-    return matchesSearch && matchesClient && matchesStage && matchesSales;
+    const matchesPreSales = !filterPreSales || projectHasMember(p.id, "Pre Sales Engineer", filterPreSales);
+    const matchesPostSales = !filterPostSales || projectHasMember(p.id, "Post Sales Engineer", filterPostSales);
+    const matchesFieldEngineer = !filterFieldEngineer || projectHasMember(p.id, "Field Engineer", filterFieldEngineer);
+    const matchesProgrammer = !filterProgrammer || projectHasMember(p.id, "Programmer", filterProgrammer);
+    const matchesProjectManager = !filterProjectManager || projectHasMember(p.id, "Project Manager", filterProjectManager);
+    return matchesSearch && matchesClient && matchesStage && matchesSales
+      && matchesPreSales && matchesPostSales && matchesFieldEngineer && matchesProgrammer && matchesProjectManager;
   });
 
-  const hasActiveFilters = filterClient || filterStage || filterSales;
+  const hasActiveFilters = filterClient || filterStage || filterSales
+    || filterPreSales || filterPostSales || filterFieldEngineer || filterProgrammer || filterProjectManager;
 
   async function handleCreate(data: { name: string; jobNumber: string; clientName: string; address: string; city: string; state: string; zipCode: string; clientEmail: string; clientPhone: string }) {
     const { data: { user } } = await supabase.auth.getUser();
@@ -199,8 +228,28 @@ export default function ProjectsPage() {
             <option value="">All Stages</option>
             {Object.entries(PHASE_STYLES).map(([key, { label }]) => (<option key={key} value={key}>{label}</option>))}
           </select>
+          <select value={filterPreSales} onChange={(e) => setFilterPreSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Pre Sales Engineers</option>
+            {uniquePreSales.map((n) => (<option key={n} value={n}>{n}</option>))}
+          </select>
+          <select value={filterPostSales} onChange={(e) => setFilterPostSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Post Sales Engineers</option>
+            {uniquePostSales.map((n) => (<option key={n} value={n}>{n}</option>))}
+          </select>
+          <select value={filterFieldEngineer} onChange={(e) => setFilterFieldEngineer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Field Engineers</option>
+            {uniqueFieldEngineers.map((n) => (<option key={n} value={n}>{n}</option>))}
+          </select>
+          <select value={filterProgrammer} onChange={(e) => setFilterProgrammer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Programmers</option>
+            {uniqueProgrammers.map((n) => (<option key={n} value={n}>{n}</option>))}
+          </select>
+          <select value={filterProjectManager} onChange={(e) => setFilterProjectManager(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Project Managers</option>
+            {uniqueProjectManagers.map((n) => (<option key={n} value={n}>{n}</option>))}
+          </select>
           {hasActiveFilters && (
-            <button onClick={() => { setFilterClient(""); setFilterStage(""); setFilterSales(""); }} className="text-xs font-medium text-blue-400 transition-colors hover:text-blue-300">
+            <button onClick={() => { setFilterClient(""); setFilterStage(""); setFilterSales(""); setFilterPreSales(""); setFilterPostSales(""); setFilterFieldEngineer(""); setFilterProgrammer(""); setFilterProjectManager(""); }} className="text-xs font-medium text-blue-400 transition-colors hover:text-blue-300">
               Clear filters
             </button>
           )}
@@ -210,10 +259,10 @@ export default function ProjectsPage() {
       {/* ── Projects table ───────────────────────────── */}
       <div className="overflow-visible rounded-lg border border-border">
         {hasProjects && (
-          <div className="grid grid-cols-[1fr_auto_40px] gap-3 border-b border-border bg-forge-surface/60 px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-secondary md:grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] md:gap-4 md:px-5">
+          <div className="grid grid-cols-[1fr_auto_40px] gap-3 border-b border-border bg-forge-surface/60 px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-secondary md:grid-cols-[0.6fr_1fr_1fr_0.8fr_40px] md:gap-4 md:px-5">
+            <span className="hidden md:block">Job Number</span>
             <span className="hidden md:block">Client Name</span>
             <span>Project Name</span>
-            <span className="hidden md:block">Job Number</span>
             <span>Stage</span>
             <span />
           </div>
@@ -450,10 +499,8 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
     <>
       <Link
         href={`/projects/${project.id}`}
-        className="grid grid-cols-[1fr_auto_40px] items-center gap-3 border-b border-border/50 px-4 py-3.5 transition-colors hover:bg-forge-surface/40 md:grid-cols-[1fr_1fr_0.8fr_0.6fr_40px] md:gap-4 md:px-5"
+        className="grid grid-cols-[1fr_auto_40px] items-center gap-3 border-b border-border/50 px-4 py-3.5 transition-colors hover:bg-forge-surface/40 md:grid-cols-[0.6fr_1fr_1fr_0.8fr_40px] md:gap-4 md:px-5"
       >
-        <div className="hidden text-sm text-secondary md:block">{project.client_name || <span className="text-xs text-faint">&mdash;</span>}</div>
-        <div><div className="text-sm font-semibold text-heading">{project.name}</div></div>
         <div className="hidden md:block">
           {project.job_number ? (
             <span className="font-mono text-xs text-secondary">{project.job_number}</span>
@@ -461,6 +508,8 @@ function ProjectRow({ project, onDelete, onUpdate, existingClients }: { project:
             <span className="text-xs text-faint">&mdash;</span>
           )}
         </div>
+        <div className="hidden text-sm text-secondary md:block">{project.client_name || <span className="text-xs text-faint">&mdash;</span>}</div>
+        <div><div className="text-sm font-semibold text-heading">{project.name}</div></div>
         <div>
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${phaseInfo.style}`}>{phaseInfo.label}</span>
         </div>

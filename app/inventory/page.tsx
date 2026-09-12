@@ -24,6 +24,7 @@ type InventoryItem = {
   condition: "New" | "Good" | "Fair" | "Poor";
   serialNumber: string;
   notes: string;
+  createdAt?: string;
 };
 
 const CATEGORIES: Category[] = ["Display", "Audio", "Control", "Networking", "Cable", "Mount", "Other"];
@@ -46,17 +47,23 @@ const CONDITION_COLORS: Record<string, string> = {
   Poor: "bg-red-500/15 text-red-400",
 };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
+// Maps a Supabase `inventory_items` row (snake_case) to the InventoryItem
+// shape this page's UI already works with (camelCase).
+function inventoryRowToItem(row: any): InventoryItem {
+  return {
+    id: row.id,
+    name: row.name || "",
+    brand: row.brand || "",
+    model: row.model || "",
+    category: (row.category || "Other") as Category,
+    quantity: row.quantity ?? 0,
+    location: row.location || "",
+    condition: (row.condition || "Good") as InventoryItem["condition"],
+    serialNumber: row.serial_number || "",
+    notes: row.notes || "",
+    createdAt: row.created_at,
+  };
 }
-
-const SAMPLE_ITEMS: InventoryItem[] = [
-  { id: uid(), name: "85\" 4K Display", brand: "Samsung", model: "QM85B", category: "Display", quantity: 3, location: "Warehouse A", condition: "New", serialNumber: "", notes: "" },
-  { id: uid(), name: "Ceiling Speaker 6\"", brand: "Sonance", model: "C6R", category: "Audio", quantity: 12, location: "Warehouse A", condition: "Good", serialNumber: "", notes: "" },
-  { id: uid(), name: "4K Video Switcher", brand: "Crestron", model: "DM-MD8X8", category: "Control", quantity: 1, location: "Warehouse B", condition: "Good", serialNumber: "SN-00123", notes: "" },
-  { id: uid(), name: "8-Port PoE Switch", brand: "Cisco", model: "SG350-10P", category: "Networking", quantity: 5, location: "Warehouse A", condition: "New", serialNumber: "", notes: "" },
-  { id: uid(), name: "HDMI 2.1 Cable 10ft", brand: "Monoprice", model: "MP-8K-10", category: "Cable", quantity: 30, location: "Shelf C-4", condition: "New", serialNumber: "", notes: "" },
-];
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -100,19 +107,41 @@ function ArrowLeftIcon() {
 
 const NEWS_ITEMS: { type: string; name: string; date: string; description: string; tags: string[] }[] = [];
 
-const OLD_INVENTORY_ITEMS = [
-  { name: "Epson PowerLite X123",     category: "Projector",               age: "5.2 years", status: "Review",         action: "Check lamp hours and condition" },
-  { name: "Biamp TesiraFORTE AVB",    category: "DSP / Audio Processor",   age: "4.1 years", status: "Legacy",         action: "Confirm firmware and support" },
-  { name: "Crestron DMPS3-4K-150-C", category: "Presentation Switcher",    age: "6.3 years", status: "End of Support", action: "Consider replacement" },
-  { name: "Crown XTi 2002",           category: "Power Amplifier",          age: "5.7 years", status: "Review",         action: "Verify condition and usage" },
-  { name: "Extron DTP CrossPoint 84", category: "Matrix Switcher",          age: "7.8 years", status: "Discontinued",   action: "Plan phased replacement" },
-];
+// "Old Inventory Review" only has one honest signal available — how long an
+// item has sat in inventory since it was added — so status/action stay
+// purely time- and category-based instead of asserting facts we can't know
+// about a specific unit (real EOL/support status would need a manufacturer
+// data feed this app doesn't have).
+const AGING_REVIEW_YEARS = 2;
+const AGING_LONG_HELD_YEARS = 5;
 
-const OLD_INVENTORY_STATUS: Record<string, string> = {
-  "Review":         "bg-amber-500/15 text-amber-600",
-  "Legacy":         "bg-violet-500/15 text-violet-500",
-  "End of Support": "bg-orange-500/15 text-orange-600",
-  "Discontinued":   "bg-red-500/15 text-red-500",
+function inventoryAgeYears(createdAt?: string): number | null {
+  if (!createdAt) return null;
+  const ms = Date.now() - new Date(createdAt).getTime();
+  return ms / (365.25 * 24 * 60 * 60 * 1000);
+}
+
+function formatAgeYears(years: number): string {
+  return `${years.toFixed(1)} yrs`;
+}
+
+function agingStatus(years: number): { label: string; style: string } {
+  return years >= AGING_LONG_HELD_YEARS
+    ? { label: "Long-Held", style: "bg-orange-500/15 text-orange-600" }
+    : { label: "Review", style: "bg-amber-500/15 text-amber-600" };
+}
+
+// Generic, category-level maintenance guidance — not a claim about any
+// specific unit's real support/EOL status, just a sensible check for
+// anything of that type once it's been sitting a while.
+const CATEGORY_AGING_ACTION: Record<string, string> = {
+  Display: "Verify condition and continued need",
+  Audio: "Check condition and calibration",
+  Control: "Confirm firmware and continued support",
+  Networking: "Confirm firmware and continued support",
+  Cable: "Inspect condition and connectors",
+  Mount: "Inspect hardware and continued fit",
+  Other: "Verify condition and continued need",
 };
 
 const NEWS_TYPE_STYLE: Record<string, string> = {
@@ -146,7 +175,6 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
     icon: <BoxIcon size={28} />,
     iconBg: "bg-emerald-500/10",
     iconColor: "text-emerald-400",
-    stat: `${SAMPLE_ITEMS.length} SKUs`,
   },
 ];
 
@@ -154,25 +182,46 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
   const { activeOrg } = useOrg();
   const [avForgeCount, setAvForgeCount] = useState<number | null>(null);
   const [orgCount, setOrgCount] = useState<number | null>(null);
+  const [inventoryCount, setInventoryCount] = useState<number | null>(null);
+  const [agingItems, setAgingItems] = useState<InventoryItem[] | null>(null);
 
   useEffect(() => {
     getProductCount().then(setAvForgeCount).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!activeOrg) { setOrgCount(null); return; }
+    if (!activeOrg) { setOrgCount(null); setInventoryCount(null); setAgingItems(null); return; }
     supabase
       .from("equipment_library")
       .select("*", { count: "exact", head: true })
       .eq("org_id", activeOrg.id)
       .then(({ count }) => setOrgCount(count ?? 0));
+    supabase
+      .from("inventory_items")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", activeOrg.id)
+      .then(({ count }) => setInventoryCount(count ?? 0));
+    // Oldest-first — "Old Inventory Review" only ever looks at items that
+    // have actually been sitting in inventory a while, per inventoryAgeYears.
+    supabase
+      .from("inventory_items")
+      .select("*")
+      .eq("org_id", activeOrg.id)
+      .order("created_at", { ascending: true })
+      .limit(5)
+      .then(({ data }) => setAgingItems((data ?? []).map(inventoryRowToItem)));
   }, [activeOrg?.id]);
 
   const cards = CARDS.map((c) => {
     if (c.key === "avforge" && avForgeCount !== null) return { ...c, stat: `${avForgeCount} products` };
     if (c.key === "org" && orgCount !== null) return { ...c, stat: `${orgCount} items` };
+    if (c.key === "inventory" && inventoryCount !== null) return { ...c, stat: `${inventoryCount} SKUs` };
     return c;
   });
+
+  const oldInventoryItems = (agingItems ?? [])
+    .map((item) => ({ item, years: inventoryAgeYears(item.createdAt) }))
+    .filter((x): x is { item: InventoryItem; years: number } => x.years !== null && x.years >= AGING_REVIEW_YEARS);
 
   return (
     <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
@@ -253,50 +302,58 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
         <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/20">
           <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
             <h3 className="text-[13px] font-bold text-heading">Old Inventory Review</h3>
-            <button className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
+            <button onClick={() => onSelect("inventory")} className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
           </div>
+          {oldInventoryItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-5 py-14 text-center">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" className="mb-3 text-faint" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.91 8.84L8.56 2.23a1.93 1.93 0 00-1.81 0L3.1 4.13a2.12 2.12 0 00-.05 3.69l12.22 6.93a2 2 0 001.94 0L21 12.51a2.12 2.12 0 00-.09-3.67z" />
+                <path d="M3.09 8.84l12.35-6.61a1.93 1.93 0 011.81 0l3.65 1.9a2.12 2.12 0 01.1 3.69L8.73 14.75a2 2 0 01-1.94 0L3.1 12.51a2.12 2.12 0 01-.01-3.67z" />
+              </svg>
+              <p className="text-[13px] font-medium text-subtle">Nothing to review yet</p>
+              <p className="mt-1 text-[12px] text-faint">
+                {agingItems === null ? "Loading…" : `Items sitting in Inventory ${AGING_REVIEW_YEARS}+ years will show up here.`}
+              </p>
+            </div>
+          ) : (
           <div className="overflow-x-auto">
           <table className="w-full min-w-[560px]">
             <thead>
               <tr className="border-b border-border bg-forge-surface/40">
                 <th className="px-5 py-2.5 text-left text-[11px] font-semibold text-muted">Item</th>
-                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Age</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">In Inventory</th>
                 <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Status</th>
                 <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted">Recommended Action</th>
-                <th className="px-3 py-2.5" />
               </tr>
             </thead>
             <tbody>
-              {OLD_INVENTORY_ITEMS.map((item, i) => (
-                <tr key={i} className="border-b border-border/50 transition-colors hover:bg-forge-surface/30">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 shrink-0 rounded-md bg-slate-700/60" />
-                      <div>
-                        <div className="text-[12px] font-semibold text-heading">{item.name}</div>
-                        <div className="text-[11px] text-subtle">{item.category}</div>
+              {oldInventoryItems.map(({ item, years }) => {
+                const status = agingStatus(years);
+                return (
+                  <tr key={item.id} className="border-b border-border/50 transition-colors hover:bg-forge-surface/30">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 shrink-0 rounded-md bg-slate-700/60" />
+                        <div>
+                          <div className="text-[12px] font-semibold text-heading">{item.name || `${item.brand} ${item.model}`.trim() || "Untitled item"}</div>
+                          <div className="text-[11px] text-subtle">{item.category}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-[12px] text-body">{item.age}</td>
-                  <td className="px-3 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${OLD_INVENTORY_STATUS[item.status] ?? "bg-forge-surface text-muted"}`}>
-                      {item.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-[11px] text-subtle">{item.action}</td>
-                  <td className="px-3 py-3">
-                    <button className="rounded-md p-1 text-muted transition-colors hover:text-heading">
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                        <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-3 py-3 text-[12px] text-body">{formatAgeYears(years)}</td>
+                    <td className="px-3 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${status.style}`}>
+                        {status.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-[11px] text-subtle">{CATEGORY_AGING_ACTION[item.category] ?? CATEGORY_AGING_ACTION.Other}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           </div>
+          )}
         </div>
 
       </div>
@@ -307,12 +364,31 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
 // ── Inventory section ────────────────────────────────────────────────────────
 
 function InventoryView({ onBack }: { onBack: () => void }) {
-  const [items, setItems] = useState<InventoryItem[]>(SAMPLE_ITEMS);
+  const { activeOrg } = useOrg();
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterCondition, setFilterCondition] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<InventoryItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!activeOrg) { setLoading(false); return; }
+    setLoading(true);
+    supabase
+      .from("inventory_items")
+      .select("*")
+      .eq("org_id", activeOrg.id)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        setItems((data ?? []).map(inventoryRowToItem));
+        setLoading(false);
+      });
+  }, [activeOrg?.id]);
 
   const filtered = items.filter((item) => {
     const q = search.toLowerCase();
@@ -323,7 +399,7 @@ function InventoryView({ onBack }: { onBack: () => void }) {
   });
 
   function openNew() {
-    setEditing({ id: uid(), name: "", brand: "", model: "", category: "Display", quantity: 1, location: "", condition: "New", serialNumber: "", notes: "" });
+    setEditing({ id: "", name: "", brand: "", model: "", category: "Display", quantity: 1, location: "", condition: "New", serialNumber: "", notes: "" });
     setShowModal(true);
   }
 
@@ -332,18 +408,42 @@ function InventoryView({ onBack }: { onBack: () => void }) {
     setShowModal(true);
   }
 
-  function handleSave() {
-    if (!editing || !editing.name.trim()) return;
-    setItems((prev) => {
-      const exists = prev.find((i) => i.id === editing.id);
-      return exists ? prev.map((i) => i.id === editing.id ? editing : i) : [editing, ...prev];
-    });
+  async function handleSave() {
+    if (!editing || !editing.name.trim() || !activeOrg) return;
+    setSaving(true);
+    const payload = {
+      org_id: activeOrg.id,
+      name: editing.name.trim(),
+      brand: editing.brand,
+      model: editing.model,
+      category: editing.category,
+      quantity: editing.quantity,
+      location: editing.location,
+      condition: editing.condition,
+      serial_number: editing.serialNumber,
+      notes: editing.notes,
+    };
+    if (!editing.id) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setSaving(false); return; }
+      const { data, error } = await supabase.from("inventory_items").insert({ ...payload, user_id: user.id }).select("*").single();
+      if (!error && data) setItems((prev) => [inventoryRowToItem(data), ...prev]);
+    } else {
+      const { error } = await supabase.from("inventory_items").update(payload).eq("id", editing.id);
+      if (!error) setItems((prev) => prev.map((i) => (i.id === editing.id ? editing : i)));
+    }
+    setSaving(false);
     setShowModal(false);
     setEditing(null);
   }
 
-  function handleDelete(id: string) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    const { error } = await supabase.from("inventory_items").delete().eq("id", deleteConfirm.id);
+    setDeleting(false);
+    if (!error) setItems((prev) => prev.filter((i) => i.id !== deleteConfirm.id));
+    setDeleteConfirm(null);
   }
 
   const totalItems = items.reduce((s, i) => s + i.quantity, 0);
@@ -445,7 +545,12 @@ function InventoryView({ onBack }: { onBack: () => void }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan={8} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
+              </tr>
+            )}
+            {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-16 text-center text-[13px] text-subtle">
                   No items found.{" "}
@@ -486,7 +591,7 @@ function InventoryView({ onBack }: { onBack: () => void }) {
                         <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                       </svg>
                     </button>
-                    <button onClick={() => handleDelete(item.id)} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400">
+                    <button onClick={() => setDeleteConfirm(item)} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                         <polyline points="3 6 5 6 21 6" />
                         <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
@@ -569,12 +674,22 @@ function InventoryView({ onBack }: { onBack: () => void }) {
               <button onClick={() => { setShowModal(false); setEditing(null); }} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
                 Cancel
               </button>
-              <button onClick={handleSave} disabled={!editing.name.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
-                Save Item
+              <button onClick={handleSave} disabled={!editing.name.trim() || saving} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
+                {saving ? "Saving…" : "Save Item"}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Delete Item"
+          message={<>Delete <span className="font-semibold text-heading">{deleteConfirm.name}</span> from inventory? This can&apos;t be undone.</>}
+          busy={deleting}
+          onCancel={() => setDeleteConfirm(null)}
+          onConfirm={confirmDelete}
+        />
       )}
     </div>
   );
@@ -594,6 +709,8 @@ function avProductToFormValue(p: AVProduct): EquipmentFormValue {
     partNumber: p.part_number,
     msrp: p.msrp,
     cost: p.cost,
+    margin: p.margin,
+    markup: p.markup,
     ports: p.ports,
     ampDraw: p.amp_draw,
     voltage: p.voltage,
@@ -601,10 +718,18 @@ function avProductToFormValue(p: AVProduct): EquipmentFormValue {
     btuHr: p.btu_hr,
     rackMounted: p.rack_mounted,
     rackUnits: p.rack_units,
+    rackEarsIncluded: p.rack_ear_included ?? false,
     widthIn: p.width_in,
     heightIn: p.height_in,
     depthIn: p.depth_in,
     weightLb: p.weight_lb,
+    hfovDeg: p.hfov_deg,
+    vfovDeg: p.vfov_deg,
+    coveragePattern: p.coverage_pattern,
+    coverageDiameterFt: p.coverage_diameter_ft,
+    coverageAngleDeg: p.coverage_angle_deg,
+    coverageWidthFt: p.coverage_width_ft,
+    coverageDepthFt: p.coverage_depth_ft,
   };
 }
 
@@ -619,6 +744,8 @@ function applyFormValueToAVProduct(base: AVProduct, v: EquipmentFormValue): AVPr
     part_number: v.partNumber,
     msrp: v.msrp,
     cost: v.cost,
+    margin: v.margin,
+    markup: v.markup,
     ports: v.ports,
     amp_draw: v.ampDraw,
     voltage: v.voltage,
@@ -626,10 +753,18 @@ function applyFormValueToAVProduct(base: AVProduct, v: EquipmentFormValue): AVPr
     btu_hr: v.btuHr,
     rack_mounted: v.rackMounted,
     rack_units: v.rackUnits,
+    rack_ear_included: v.rackEarsIncluded,
     width_in: v.widthIn,
     height_in: v.heightIn,
     depth_in: v.depthIn,
     weight_lb: v.weightLb,
+    hfov_deg: v.hfovDeg,
+    vfov_deg: v.vfovDeg,
+    coverage_pattern: v.coveragePattern,
+    coverage_diameter_ft: v.coverageDiameterFt,
+    coverage_angle_deg: v.coverageAngleDeg,
+    coverage_width_ft: v.coverageWidthFt,
+    coverage_depth_ft: v.coverageDepthFt,
   };
 }
 
@@ -672,6 +807,13 @@ const emptyAVProduct = (): AVProduct => ({
   rd_width_ft: null,
   rd_height_ft: null,
   rd_icon: null,
+  hfov_deg: null,
+  vfov_deg: null,
+  coverage_pattern: null,
+  coverage_diameter_ft: null,
+  coverage_angle_deg: null,
+  coverage_width_ft: null,
+  coverage_depth_ft: null,
 });
 
 function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
@@ -731,6 +873,8 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             part_number: product.part_number,
             msrp: product.msrp,
             cost: product.cost,
+            margin: product.margin,
+            markup: product.markup,
             color: product.color,
             ports: product.ports ?? [],
             amp_draw: product.amp_draw,
@@ -739,6 +883,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             btu_hr: product.btu_hr,
             rack_mounted: product.rack_mounted ?? false,
             rack_units: product.rack_units,
+            rack_ear_included: product.rack_ear_included,
             width_in: product.width_in,
             height_in: product.height_in,
             depth_in: product.depth_in,
@@ -817,6 +962,8 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         part_number: product.part_number,
         msrp: product.msrp,
         cost: product.cost,
+        margin: product.margin,
+        markup: product.markup,
         color: product.color,
         ports: product.ports ?? [],
         amp_draw: product.amp_draw,
@@ -825,6 +972,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         btu_hr: product.btu_hr,
         rack_mounted: product.rack_mounted ?? false,
         rack_units: product.rack_units,
+        rack_ear_included: product.rack_ear_included,
         width_in: product.width_in,
         height_in: product.height_in,
         depth_in: product.depth_in,
@@ -850,6 +998,8 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         part_number: product.part_number,
         msrp: product.msrp,
         cost: product.cost,
+        margin: product.margin,
+        markup: product.markup,
         color: product.color,
         ports: product.ports ?? [],
         amp_draw: product.amp_draw,
@@ -858,6 +1008,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         btu_hr: product.btu_hr,
         rack_mounted: product.rack_mounted ?? false,
         rack_units: product.rack_units,
+        rack_ear_included: product.rack_ear_included,
         width_in: product.width_in,
         height_in: product.height_in,
         depth_in: product.depth_in,
@@ -1337,6 +1488,8 @@ const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> =
   part_number: null,
   msrp: null,
   cost: null,
+  margin: null,
+  markup: null,
   color: null,
   ports: [],
   amp_draw: null,
@@ -1345,10 +1498,18 @@ const emptyOrgItem = (orgId: string): Omit<OrgEquipmentItem, "id" | "user_id"> =
   btu_hr: null,
   rack_mounted: false,
   rack_units: null,
+  rack_ear_included: null,
   width_in: null,
   height_in: null,
   depth_in: null,
   weight_lb: null,
+  hfov_deg: null,
+  vfov_deg: null,
+  coverage_pattern: null,
+  coverage_diameter_ft: null,
+  coverage_angle_deg: null,
+  coverage_width_ft: null,
+  coverage_depth_ft: null,
 });
 
 function orgItemToFormValue(item: OrgEquipmentItem | Omit<OrgEquipmentItem, "id" | "user_id">): EquipmentFormValue {
@@ -1361,6 +1522,8 @@ function orgItemToFormValue(item: OrgEquipmentItem | Omit<OrgEquipmentItem, "id"
     partNumber: item.part_number,
     msrp: item.msrp,
     cost: item.cost,
+    margin: item.margin,
+    markup: item.markup,
     ports: item.ports,
     ampDraw: item.amp_draw,
     voltage: item.voltage,
@@ -1368,10 +1531,18 @@ function orgItemToFormValue(item: OrgEquipmentItem | Omit<OrgEquipmentItem, "id"
     btuHr: item.btu_hr,
     rackMounted: item.rack_mounted,
     rackUnits: item.rack_units,
+    rackEarsIncluded: item.rack_ear_included ?? false,
     widthIn: item.width_in,
     heightIn: item.height_in,
     depthIn: item.depth_in,
     weightLb: item.weight_lb,
+    hfovDeg: item.hfov_deg,
+    vfovDeg: item.vfov_deg,
+    coveragePattern: item.coverage_pattern,
+    coverageDiameterFt: item.coverage_diameter_ft,
+    coverageAngleDeg: item.coverage_angle_deg,
+    coverageWidthFt: item.coverage_width_ft,
+    coverageDepthFt: item.coverage_depth_ft,
   };
 }
 
@@ -1386,6 +1557,8 @@ function applyFormValueToOrgItem<T extends OrgEquipmentItem | Omit<OrgEquipmentI
     part_number: v.partNumber,
     msrp: v.msrp,
     cost: v.cost,
+    margin: v.margin,
+    markup: v.markup,
     ports: v.ports,
     amp_draw: v.ampDraw,
     voltage: v.voltage,
@@ -1393,10 +1566,18 @@ function applyFormValueToOrgItem<T extends OrgEquipmentItem | Omit<OrgEquipmentI
     btu_hr: v.btuHr,
     rack_mounted: v.rackMounted,
     rack_units: v.rackUnits,
+    rack_ear_included: v.rackEarsIncluded,
     width_in: v.widthIn,
     height_in: v.heightIn,
     depth_in: v.depthIn,
     weight_lb: v.weightLb,
+    hfov_deg: v.hfovDeg,
+    vfov_deg: v.vfovDeg,
+    coverage_pattern: v.coveragePattern,
+    coverage_diameter_ft: v.coverageDiameterFt,
+    coverage_angle_deg: v.coverageAngleDeg,
+    coverage_width_ft: v.coverageWidthFt,
+    coverage_depth_ft: v.coverageDepthFt,
   };
 }
 
@@ -1525,6 +1706,8 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           part_number: editing.part_number,
           msrp: editing.msrp,
           cost: editing.cost,
+          margin: editing.margin,
+          markup: editing.markup,
           color: editing.color,
           ports: editing.ports,
           amp_draw: editing.amp_draw,
@@ -1533,6 +1716,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           btu_hr: editing.btu_hr,
           rack_mounted: editing.rack_mounted,
           rack_units: editing.rack_units,
+          rack_ear_included: editing.rack_ear_included,
           width_in: editing.width_in,
           height_in: editing.height_in,
           depth_in: editing.depth_in,

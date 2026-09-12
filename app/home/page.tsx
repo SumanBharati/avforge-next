@@ -10,6 +10,7 @@ import PMStoreProvider from "@/components/PMStoreProvider";
 import { Scheduler } from "@/components/Scheduler";
 import { getRecentTools } from "@/lib/recentTools";
 import HomePageSkeleton from "@/components/HomePageSkeleton";
+import AnimatedIcon from "@/components/AnimatedIcon";
 
 /* ── Pinned tools (calculators only) ───────────────────────── */
 const VideoWallIconSmall = () => (
@@ -57,7 +58,7 @@ export default function DashboardPage() {
   const [showNewProject, setShowNewProject] = useState(false);
   const [search, setSearch] = useState("");
   const [projectCount, setProjectCount] = useState(0);
-  const [recentProjects, setRecentProjects] = useState<{ id: string; name: string; phase: string; created_at: string }[]>([]);
+  const [recentProjects, setRecentProjects] = useState<{ id: string; name: string; phase: string; created_at: string; job_number: string | null }[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [stageCounts, setStageCounts] = useState<{ label: string; count: number; color: string }[]>([]);
   const [activities, setActivities] = useState<{ action: string; project: string; user: string; time: string }[]>([]);
@@ -73,7 +74,7 @@ export default function DashboardPage() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       // Load project count and most recent project
-      supabase.from("projects").select("id, name, phase, created_at")
+      supabase.from("projects").select("id, name, phase, created_at, job_number")
         .eq("org_id", activeOrg.id)
         .order("created_at", { ascending: false })
         .then(({ data }) => {
@@ -199,6 +200,9 @@ export default function DashboardPage() {
                     {recentProjects.map((p, i) => (
                       <Link key={i} href={`/projects/${p.id}`} className="flex w-fit items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-blue-50">
                         <span className="text-[14px] font-semibold" style={{ color: "#26315C" }}>{p.name}</span>
+                        {p.job_number && (
+                          <span className="text-[12px] font-medium" style={{ color: "#959DB2" }}>#{p.job_number}</span>
+                        )}
                         <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e8f0" }}>
                           {p.phase?.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) || "Opportunity"}
                         </span>
@@ -220,13 +224,13 @@ export default function DashboardPage() {
               <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
-            {/* 3D Folder illustration */}
-            <img
-              src="/3DFolder.svg"
-              alt=""
+            {/* Folder illustration — animated via IconScout Lottie export once
+                public/animated-icons/folder.json exists; static SVG until then */}
+            <AnimatedIcon
+              src="/animated-icons/folder.json"
+              fallbackSrc="/3DFolder.svg"
               className="pointer-events-none absolute right-0 w-[112px]"
               style={{ bottom: "12px" }}
-              draggable={false}
             />
           </div>
 
@@ -291,13 +295,13 @@ export default function DashboardPage() {
               <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
-            {/* 3D Calculator illustration */}
-            <img
-              src="/3DCalculator.svg"
-              alt=""
+            {/* Calculator illustration — animated once
+                public/animated-icons/calculator.json exists */}
+            <AnimatedIcon
+              src="/animated-icons/calculator.json"
+              fallbackSrc="/3DCalculator.svg"
               className="pointer-events-none absolute right-4 w-[86px]"
               style={{ bottom: "12px" }}
-              draggable={false}
             />
           </div>
 
@@ -348,13 +352,13 @@ export default function DashboardPage() {
               <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
-            {/* 3D News illustration */}
-            <img
-              src="/3DNews.svg"
-              alt=""
+            {/* AV News/Podcast illustration — animated once
+                public/animated-icons/news-podcast.json exists */}
+            <AnimatedIcon
+              src="/animated-icons/news-podcast.json"
+              fallbackSrc="/3DNews.svg"
               className="pointer-events-none absolute right-0 w-[150px]"
               style={{ bottom: "12px" }}
-              draggable={false}
             />
           </div>
         </div>

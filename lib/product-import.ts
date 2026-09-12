@@ -77,6 +77,7 @@ export function parseProductRows(rows:unknown[][]):{products:ImportProduct[];err
       diameter_in:numeric(get(indexes.diameter)),weight_lb:numeric(get(indexes.weight)),rack_mountable_detail:rackDetail||null,rack_ear_included:rackEarDetail?yes(rackEarDetail):null,rack_ear_detail:rackEarDetail||null,
       shelf_required:shelfDetail?yes(shelfDetail):null,shelf_requirement:shelfDetail||null,voltage_detail:voltageDetail||null,current_detail:currentDetail||null,power_supply_type:get(indexes.powerSupply)||null,notes:get(indexes.notes)||null,
       rd_type:null,rd_wall:null,rd_width_ft:null,rd_height_ft:null,rd_icon:null,
+      hfov_deg:null,vfov_deg:null,coverage_pattern:null,coverage_diameter_ft:null,coverage_angle_deg:null,coverage_width_ft:null,coverage_depth_ft:null,
     });
   }
   return {products,errors};

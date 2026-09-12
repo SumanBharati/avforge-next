@@ -13,6 +13,8 @@ export interface OrgEquipmentItem {
   part_number: string | null;
   msrp: number | null;
   cost: number | null;
+  margin: number | null;
+  markup: number | null;
   color: string | null;
   ports: Array<{ side: string; signal: string; dir: string; label: string; connector?: string }>;
   amp_draw: number | null;
@@ -21,10 +23,24 @@ export interface OrgEquipmentItem {
   btu_hr: number | null;
   rack_mounted: boolean;
   rack_units: number | null;
+  rack_ear_included: boolean | null;
   width_in: number | null;
   height_in: number | null;
   depth_in: number | null;
   weight_lb: number | null;
+  // Cameras: lens field of view, in degrees.
+  hfov_deg: number | null;
+  vfov_deg: number | null;
+  // Mics/speakers/sensors: the coverage footprint Room Designer can draw on
+  // the floor plan — circular (diameter + optional cone angle) or
+  // rectangular (W x D). Diameter (not radius) matches how manufacturers
+  // publish ceiling mic/speaker coverage specs, and Room Designer's own
+  // existing covDiameter convention.
+  coverage_pattern: "circular" | "rectangular" | null;
+  coverage_diameter_ft: number | null;
+  coverage_angle_deg: number | null;
+  coverage_width_ft: number | null;
+  coverage_depth_ft: number | null;
 }
 
 const SEARCHABLE_LIBRARY_COLUMNS = ["manufacturer", "model", "category", "part_number", "description"];

@@ -3,9 +3,15 @@
 import Link from "next/link";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { useOrg } from "@/components/OrgProvider";
+import { ROLE_OPTIONS, PERSON_COLORS, loadPMStore, savePMStore, type Person } from "@/lib/pm-store";
+import { type RemovedChangeOrderItem } from "@/lib/proposal-pricing";
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Project { id: string; name: string; job_number: string; }
+
+interface OrgMember { id: string; user_id: string; role: string; full_name: string; email: string; }
+interface ProjectMember { id: string; member_id: string | null; person_id: string | null; role: string; full_name: string; email: string; }
 
 interface Task {
   id: string; title: string; description: string; assignee: string;
@@ -17,10 +23,6 @@ interface Task {
 interface Milestone {
   id: string; name: string; dueDate: string; status: "pending" | "completed";
   description: string;
-}
-
-interface TeamMember {
-  id: string; name: string; role: string; email: string; phone: string;
 }
 
 interface FieldReport {
@@ -39,6 +41,11 @@ interface ChangeOrder {
   id: string; title: string; description: string; requestedBy: string;
   status: "draft" | "submitted" | "approved" | "rejected";
   costImpact: number; scheduleImpact: string; date: string; notes: string;
+  // Equipment added/removed against the live Proposal while editing under
+  // this Change Order there — see app/projects/[id]/proposal/page.tsx.
+  // Added items are tagged live on the proposal's line items (changeOrderId);
+  // removed items only exist here, snapshotted at the moment of removal.
+  removedItems: RemovedChangeOrderItem[];
 }
 
 interface Submittal {
@@ -61,7 +68,6 @@ interface BudgetLine {
 interface PMData {
   tasks: Task[];
   milestones: Milestone[];
-  team: TeamMember[];
   fieldReports: FieldReport[];
   punchList: PunchItem[];
   changeOrders: ChangeOrder[];
@@ -74,7 +80,7 @@ interface PMData {
 }
 
 const emptyPM: PMData = {
-  tasks: [], milestones: [], team: [], fieldReports: [], punchList: [],
+  tasks: [], milestones: [], fieldReports: [], punchList: [],
   changeOrders: [], submittals: [], rfis: [], budget: [],
   projectNotes: "", scheduleStart: "", scheduleEnd: "",
 };
@@ -89,11 +95,9 @@ const TASK_CATEGORIES = ["Pre-Construction", "Engineering", "Procurement", "Exec
 const TASK_STATUSES: Task["status"][] = ["not_started", "in_progress", "completed", "blocked"];
 const PRIORITIES: Task["priority"][] = ["low", "medium", "high", "critical"];
 const PUNCH_STATUSES: PunchItem["status"][] = ["open", "in_progress", "resolved", "verified"];
-const CO_STATUSES: ChangeOrder["status"][] = ["draft", "submitted", "approved", "rejected"];
 const SUB_STATUSES: Submittal["status"][] = ["pending", "approved", "approved_as_noted", "rejected", "resubmit"];
 const RFI_STATUSES: RFI["status"][] = ["open", "answered", "closed"];
 const BUDGET_CATEGORIES = ["Equipment", "Labor — Installation", "Labor — Programming", "Labor — Engineering", "Cabling & Infrastructure", "Subcontractors", "Permits & Fees", "Travel & Expenses", "Contingency", "Other"];
-const TEAM_ROLES = ["Project Manager", "Lead Engineer", "Design Engineer", "Programmer", "Lead Technician", "Installer", "Cable Tech", "Commissioning Engineer", "Project Coordinator", "Sales Engineer", "Other"];
 
 const statusLabel = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const statusColor = (s: string) => {
@@ -109,7 +113,7 @@ const statusColor = (s: string) => {
 };
 
 /* ── Sidebar nav definition ────────────────────────────────── */
-type TabId = "overview" | "tasks" | "milestones" | "team" | "budget" | "field-reports" | "punch-list" | "change-orders" | "submittals" | "rfis";
+type TabId = "overview" | "tasks" | "milestones" | "team" | "budget" | "field-reports" | "punch-list" | "submittals" | "rfis";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> },
@@ -119,26 +123,239 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "budget", label: "Budget", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> },
   { id: "field-reports", label: "Field Reports", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
   { id: "punch-list", label: "Punch List", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> },
-  { id: "change-orders", label: "Change Orders", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
   { id: "submittals", label: "Submittals", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> },
   { id: "rfis", label: "RFIs", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> },
 ];
 
+/* ── Shared UI pieces (module scope so identity is stable across renders —
+   defining these inside the component body recreates them on every render,
+   which unmounts/remounts every input and drops focus after one keystroke) ── */
+const Badge = ({ label, color }: { label: string; color: string }) => (
+  <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: color + "1a", color, border: `1px solid ${color}3d` }}>
+    {statusLabel(label)}
+  </span>
+);
+
+const EmptyState = ({ noun, onAdd }: { noun: string; onAdd: () => void }) => (
+  <div className="flex flex-col items-center justify-center py-20">
+    <p className="mb-3 text-sm text-faint">No {noun} yet</p>
+    <button onClick={onAdd} className="forge-btn-primary text-[13px]">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+      Add {noun.replace(/s$/, "").replace(/ies$/, "y")}
+    </button>
+  </div>
+);
+
+const SectionHeader = ({ title, count, onAdd, addLabel }: { title: string; count: number; onAdd: () => void; addLabel: string }) => (
+  <div className="mb-5 flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <h2 className="text-lg font-bold text-heading">{title}</h2>
+      <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">{count}</span>
+    </div>
+    <button onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-orange-500/10 px-3 py-1.5 text-[12px] font-semibold text-orange-400 transition-colors hover:bg-orange-500/20">
+      <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+      {addLabel}
+    </button>
+  </div>
+);
+
+const InputField = ({ label, value, onChange, type = "text", placeholder = "" }: { label: string; value: string | number; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
+  <div>
+    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
+    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="forge-input w-full text-[13px]" />
+  </div>
+);
+
+const TextareaField = ({ label, value, onChange, placeholder = "", rows = 3 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; rows?: number }) => (
+  <div>
+    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
+    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} className="forge-input w-full resize-none text-[13px]" />
+  </div>
+);
+
+const SelectField = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) => (
+  <div>
+    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="forge-input w-full text-[13px]">
+      {options.map((o) => <option key={o} value={o}>{statusLabel(o)}</option>)}
+    </select>
+  </div>
+);
+
+const DeleteBtn = ({ onClick }: { onClick: () => void }) => (
+  <button onClick={onClick} className="shrink-0 rounded p-1.5 text-faint transition-colors hover:bg-red-500/10 hover:text-red-400" title="Delete">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+  </button>
+);
+
+/* ── Metric card for overview ──────────────────── */
+const MetricCard = ({ label, value, sub, color = "#f97316" }: { label: string; value: string | number; sub?: string; color?: string }) => (
+  <div className="rounded-xl border border-border bg-forge-surface/40 p-5">
+    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</p>
+    <p className="text-2xl font-bold" style={{ color }}>{value}</p>
+    {sub && <p className="mt-1 text-[12px] text-subtle">{sub}</p>}
+  </div>
+);
+
 /* ═══════════════════════════════════════════════════════════ */
 export default function ProjectManagementPage({ params }: { params: { id: string } }) {
+  const { activeOrg } = useOrg();
+  const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
   const [project, setProject] = useState<Project | null>(null);
   const [pm, setPm] = useState<PMData>(emptyPM);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [saved, setSaved] = useState(false);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
 
+  /* ── Team (org-level assignments, synced with the org-wide Schedule tool) ── */
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [assigningRole, setAssigningRole] = useState<string | null>(null);
+  const [showAddResource, setShowAddResource] = useState(false);
+  const [newResourceName, setNewResourceName] = useState("");
+  const [newResourceRole, setNewResourceRole] = useState("");
+  const [newResourceEmail, setNewResourceEmail] = useState("");
+  const [customRoleName, setCustomRoleName] = useState("");
+  const [savingResource, setSavingResource] = useState(false);
+  const [resourceAddedName, setResourceAddedName] = useState<string | null>(null);
+
+  const CUSTOM_ROLE_VALUE = "__custom__";
+  const effectiveNewResourceRole = newResourceRole === CUSTOM_ROLE_VALUE ? customRoleName.trim() : newResourceRole;
+  // Project-level custom roles (assigned here but not part of the org's
+  // standard role list) still get their own slot in the Team grid below.
+  const teamRoles = [...roleOptions, ...new Set(projectMembers.map((m) => m.role).filter((r) => !roleOptions.includes(r)))];
+
   /* ── Load ──────────────────────────────────────── */
   useEffect(() => {
     supabase.from("projects").select("id, name, job_number").eq("id", params.id).single()
       .then(({ data }) => { if (data) setProject(data); });
     supabase.from("project_management").select("data").eq("project_id", params.id).single()
-      .then(({ data: row }) => { if (row?.data) setPm({ ...emptyPM, ...(row.data as PMData) }); });
+      .then(({ data: row }) => {
+        if (!row?.data) return;
+        const loaded = row.data as PMData;
+        setPm({ ...emptyPM, ...loaded, changeOrders: (loaded.changeOrders || []).map((c) => ({ ...c, removedItems: c.removedItems || [] })) });
+      });
+    supabase.from("project_members").select("id, member_id, person_id, role, full_name, email").eq("project_id", params.id)
+      .then(({ data }) => { if (data) setProjectMembers(data as ProjectMember[]); });
   }, [params.id]);
+
+  useEffect(() => {
+    if (!activeOrg) return;
+    supabase.from("organization_members").select("id, user_id, role").eq("org_id", activeOrg.id)
+      .then(async ({ data: members }) => {
+        if (!members) return;
+        const enriched: OrgMember[] = await Promise.all(
+          members.map(async (m) => {
+            const { data: u } = await supabase.auth.admin.getUserById(m.user_id).catch(() => ({ data: null })) as any;
+            return {
+              id: m.id,
+              user_id: m.user_id,
+              role: m.role,
+              full_name: u?.user?.user_metadata?.full_name || u?.user?.email?.split("@")[0] || m.user_id.slice(0, 8),
+              email: u?.user?.email || "",
+            };
+          })
+        );
+        setOrgMembers(enriched);
+      });
+  }, [activeOrg?.id]);
+
+  useEffect(() => {
+    if (!assigningRole && !showAddResource) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Element;
+      if (!target.closest("[data-member-picker]") && !target.closest("[data-add-resource]")) {
+        setAssigningRole(null);
+        setShowAddResource(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [assigningRole, showAddResource]);
+
+  async function assignOrgMember(member: OrgMember, role: string) {
+    if (!activeOrg) return;
+    const existingSlot = projectMembers.find((m) => m.role === role);
+    if (existingSlot) await supabase.from("project_members").delete().eq("id", existingSlot.id);
+    const { data, error } = await supabase
+      .from("project_members")
+      .insert({ org_id: activeOrg.id, project_id: params.id, member_id: member.id, person_id: null, role, full_name: member.full_name, email: member.email })
+      .select()
+      .single();
+    if (error) {
+      alert(`Couldn't assign ${member.full_name} to ${role}: ${error.message}`);
+    } else if (data) {
+      setProjectMembers((prev) => [...prev.filter((m) => m.role !== role), data as ProjectMember]);
+    }
+    setAssigningRole(null);
+  }
+
+  async function removeProjectMember(id: string) {
+    await supabase.from("project_members").delete().eq("id", id);
+    setProjectMembers((prev) => prev.filter((m) => m.id !== id));
+  }
+
+  function openAddResource() {
+    setNewResourceName("");
+    setNewResourceRole(roleOptions[0] || "");
+    setNewResourceEmail("");
+    setCustomRoleName("");
+    setAssigningRole(null);
+    setShowAddResource(true);
+  }
+
+  async function submitAddResource() {
+    const role = effectiveNewResourceRole;
+    const name = newResourceName.trim();
+    if (!activeOrg || !name || !role) return;
+    setSavingResource(true);
+    // Adds to the org-wide Resources pool (Schedule tool) so this external
+    // resource can also be scheduled/reused on other projects, then assigns
+    // them to this project's team slot for the chosen role.
+    const store = await loadPMStore(activeOrg.id);
+    const existingPerson = store.people.find((p) => !p.archived && p.name.trim().toLowerCase() === name.toLowerCase());
+
+    let person: Person;
+    if (existingPerson) {
+      // Reuse the existing resource instead of creating a duplicate — fill
+      // in an email only if they didn't already have one on file.
+      const email = existingPerson.email || newResourceEmail.trim();
+      person = { ...existingPerson, email };
+      if (email !== existingPerson.email) {
+        await savePMStore(activeOrg.id, { ...store, people: store.people.map((p) => (p.id === person.id ? person : p)) });
+      }
+    } else {
+      person = {
+        id: uid(),
+        name,
+        role,
+        email: newResourceEmail.trim(),
+        color: PERSON_COLORS[store.people.length % PERSON_COLORS.length],
+        weeklyHours: 40,
+        hourlyRate: 0,
+        tags: [],
+        archived: false,
+      };
+      await savePMStore(activeOrg.id, { ...store, people: [...store.people, person] });
+    }
+
+    const existingSlot = projectMembers.find((m) => m.role === role);
+    if (existingSlot) await supabase.from("project_members").delete().eq("id", existingSlot.id);
+    const { data, error } = await supabase
+      .from("project_members")
+      .insert({ org_id: activeOrg.id, project_id: params.id, member_id: null, person_id: person.id, role, full_name: person.name, email: person.email })
+      .select()
+      .single();
+    if (error) {
+      alert(`Added "${person.name}" to your org's Resources list, but couldn't assign them to this project's team: ${error.message}`);
+    } else if (data) {
+      setProjectMembers((prev) => [...prev.filter((m) => m.role !== role), data as ProjectMember]);
+      setResourceAddedName(person.name);
+      setTimeout(() => setResourceAddedName((cur) => (cur === person.name ? null : cur)), 4000);
+    }
+    setSavingResource(false);
+    setShowAddResource(false);
+  }
 
   /* ── Auto-save ─────────────────────────────────── */
   const autoSave = useCallback(async (d: PMData) => {
@@ -182,14 +399,6 @@ export default function ProjectManagementPage({ params }: { params: { id: string
   }
   function removeMilestone(id: string) { persist({ ...pm, milestones: pm.milestones.filter((m) => m.id !== id) }); }
 
-  function addTeamMember() {
-    persist({ ...pm, team: [...pm.team, { id: uid(), name: "", role: TEAM_ROLES[0], email: "", phone: "" }] });
-  }
-  function updateTeamMember(id: string, patch: Partial<TeamMember>) {
-    persist({ ...pm, team: pm.team.map((m) => m.id === id ? { ...m, ...patch } : m) });
-  }
-  function removeTeamMember(id: string) { persist({ ...pm, team: pm.team.filter((m) => m.id !== id) }); }
-
   function addFieldReport() {
     persist({ ...pm, fieldReports: [{ id: uid(), date: today(), author: "", crewSize: 0, hoursWorked: 0, workPerformed: "", materialsUsed: "", issues: "", tomorrowPlan: "", weather: "", notes: "" }, ...pm.fieldReports] });
   }
@@ -205,14 +414,6 @@ export default function ProjectManagementPage({ params }: { params: { id: string
     persist({ ...pm, punchList: pm.punchList.map((p) => p.id === id ? { ...p, ...patch } : p) });
   }
   function removePunchItem(id: string) { persist({ ...pm, punchList: pm.punchList.filter((p) => p.id !== id) }); }
-
-  function addChangeOrder() {
-    persist({ ...pm, changeOrders: [...pm.changeOrders, { id: uid(), title: "", description: "", requestedBy: "", status: "draft", costImpact: 0, scheduleImpact: "", date: today(), notes: "" }] });
-  }
-  function updateChangeOrder(id: string, patch: Partial<ChangeOrder>) {
-    persist({ ...pm, changeOrders: pm.changeOrders.map((c) => c.id === id ? { ...c, ...patch } : c) });
-  }
-  function removeChangeOrder(id: string) { persist({ ...pm, changeOrders: pm.changeOrders.filter((c) => c.id !== id) }); }
 
   function addSubmittal() {
     const num = `SUB-${String(pm.submittals.length + 1).padStart(3, "0")}`;
@@ -264,73 +465,10 @@ export default function ProjectManagementPage({ params }: { params: { id: string
     );
   }
 
-  /* ── Shared UI pieces ──────────────────────────── */
-  const Badge = ({ label, color }: { label: string; color: string }) => (
-    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: color + "1a", color, border: `1px solid ${color}3d` }}>
-      {statusLabel(label)}
-    </span>
-  );
-
-  const EmptyState = ({ noun, onAdd }: { noun: string; onAdd: () => void }) => (
-    <div className="flex flex-col items-center justify-center py-20">
-      <p className="mb-3 text-sm text-faint">No {noun} yet</p>
-      <button onClick={onAdd} className="forge-btn-primary text-[13px]">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-        Add {noun.replace(/s$/, "").replace(/ies$/, "y")}
-      </button>
-    </div>
-  );
-
-  const SectionHeader = ({ title, count, onAdd, addLabel }: { title: string; count: number; onAdd: () => void; addLabel: string }) => (
-    <div className="mb-5 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-bold text-heading">{title}</h2>
-        <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">{count}</span>
-      </div>
-      <button onClick={onAdd} className="flex items-center gap-1.5 rounded-lg bg-orange-500/10 px-3 py-1.5 text-[12px] font-semibold text-orange-400 transition-colors hover:bg-orange-500/20">
-        <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-        {addLabel}
-      </button>
-    </div>
-  );
-
-  const InputField = ({ label, value, onChange, type = "text", placeholder = "" }: { label: string; value: string | number; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
-    <div>
-      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="forge-input w-full text-[13px]" />
-    </div>
-  );
-
-  const TextareaField = ({ label, value, onChange, placeholder = "", rows = 3 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; rows?: number }) => (
-    <div>
-      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} className="forge-input w-full resize-none text-[13px]" />
-    </div>
-  );
-
-  const SelectField = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) => (
-    <div>
-      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="forge-input w-full text-[13px]">
-        {options.map((o) => <option key={o} value={o}>{statusLabel(o)}</option>)}
-      </select>
-    </div>
-  );
-
-  const DeleteBtn = ({ onClick }: { onClick: () => void }) => (
-    <button onClick={onClick} className="shrink-0 rounded p-1.5 text-faint transition-colors hover:bg-red-500/10 hover:text-red-400" title="Delete">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-    </button>
-  );
-
-  /* ── Metric card for overview ──────────────────── */
-  const MetricCard = ({ label, value, sub, color = "#f97316" }: { label: string; value: string | number; sub?: string; color?: string }) => (
-    <div className="rounded-xl border border-border bg-forge-surface/40 p-5">
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">{label}</p>
-      <p className="text-2xl font-bold" style={{ color }}>{value}</p>
-      {sub && <p className="mt-1 text-[12px] text-subtle">{sub}</p>}
-    </div>
-  );
+  /* ── Shared UI pieces are module-scope (see above the component) so
+     their identity stays stable across renders — defining them inside the
+     component body recreated them on every keystroke, unmounting/remounting
+     every input and dropping focus after a single character. ── */
 
   /* ═══════════════════════════════════════════════════════════ */
   /* ── Tab content renderers ─────────────────────────────── */
@@ -362,12 +500,12 @@ export default function ProjectManagementPage({ params }: { params: { id: string
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
           <div className="rounded-xl border border-border bg-forge-surface/40 p-5">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Team</p>
-            <p className="text-xl font-bold text-heading">{pm.team.length} members</p>
+            <p className="text-xl font-bold text-heading">{projectMembers.length} members</p>
             <div className="mt-2 flex flex-wrap gap-1">
-              {pm.team.slice(0, 5).map((m) => (
-                <span key={m.id} className="rounded bg-orange-500/10 px-2 py-0.5 text-[11px] text-orange-400">{m.name || m.role}</span>
+              {projectMembers.slice(0, 5).map((m) => (
+                <span key={m.id} className="rounded bg-orange-500/10 px-2 py-0.5 text-[11px] text-orange-400">{m.full_name || m.role}</span>
               ))}
-              {pm.team.length > 5 && <span className="text-[11px] text-faint">+{pm.team.length - 5} more</span>}
+              {projectMembers.length > 5 && <span className="text-[11px] text-faint">+{projectMembers.length - 5} more</span>}
             </div>
           </div>
           <div className="rounded-xl border border-border bg-forge-surface/40 p-5">
@@ -484,29 +622,132 @@ export default function ProjectManagementPage({ params }: { params: { id: string
 
   /* ── Team ───────────────────────────────────────── */
   function renderTeam() {
-    if (pm.team.length === 0) return <EmptyState noun="team members" onAdd={addTeamMember} />;
     return (
       <div>
-        <SectionHeader title="Project Team" count={pm.team.length} onAdd={addTeamMember} addLabel="Add Member" />
-        <div className="grid gap-3 lg:grid-cols-2">
-          {pm.team.map((m) => (
-            <div key={m.id} className="flex gap-4 rounded-xl border border-border bg-forge-surface/40 p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-sm font-bold text-orange-400">
-                {m.name ? m.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() : "?"}
-              </div>
-              <div className="flex-1 space-y-2">
-                <div className="flex items-start gap-2">
-                  <input value={m.name} onChange={(e) => updateTeamMember(m.id, { name: e.target.value })} placeholder="Name" className="flex-1 border-none bg-transparent text-[14px] font-semibold text-heading outline-none placeholder:text-faint" />
-                  <DeleteBtn onClick={() => removeTeamMember(m.id)} />
+        <div className="mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold text-heading">Project Team</h2>
+            <span className="rounded-md bg-forge-surface/60 px-2 py-0.5 text-[11px] text-subtle">{projectMembers.length}</span>
+            {resourceAddedName && (
+              <span className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-400">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Added &ldquo;{resourceAddedName}&rdquo; to the team
+              </span>
+            )}
+          </div>
+          <div className="relative" data-add-resource>
+            <button
+              onClick={() => (showAddResource ? setShowAddResource(false) : openAddResource())}
+              className="flex items-center gap-1.5 rounded-lg bg-orange-500/10 px-3 py-1.5 text-[12px] font-semibold text-orange-400 transition-colors hover:bg-orange-500/20"
+            >
+              <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+              Add an External Resource
+            </button>
+            {showAddResource && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-xl border border-border bg-forge-bg p-3 shadow-xl">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">New External Resource</div>
+                <div className="space-y-2">
+                  <InputField label="Name" value={newResourceName} onChange={setNewResourceName} placeholder="Full name" />
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-faint">Role</label>
+                    <select value={newResourceRole} onChange={(e) => setNewResourceRole(e.target.value)} className="forge-input w-full text-[13px]">
+                      {roleOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                      <option value={CUSTOM_ROLE_VALUE}>+ Create custom role…</option>
+                    </select>
+                  </div>
+                  {newResourceRole === CUSTOM_ROLE_VALUE && (
+                    <InputField label="Custom Role Name" value={customRoleName} onChange={setCustomRoleName} placeholder="e.g. Rack Fabricator" />
+                  )}
+                  <InputField label="Email" value={newResourceEmail} onChange={setNewResourceEmail} placeholder="email@company.com" />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <SelectField label="Role" value={m.role} onChange={(v) => updateTeamMember(m.id, { role: v })} options={TEAM_ROLES} />
-                  <InputField label="Email" value={m.email} onChange={(v) => updateTeamMember(m.id, { email: v })} placeholder="email@company.com" />
-                  <InputField label="Phone" value={m.phone} onChange={(v) => updateTeamMember(m.id, { phone: v })} placeholder="(555) 000-0000" />
+                {newResourceRole === CUSTOM_ROLE_VALUE && (
+                  <p className="mt-2 text-[11px] text-faint">Custom roles apply to this project only — they won&apos;t appear in other projects&apos; Team tabs.</p>
+                )}
+                <p className="mt-2 text-[11px] text-faint">Also added to your org&apos;s Schedule &gt; Resources list.</p>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button onClick={() => setShowAddResource(false)} className="rounded-lg px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-body">Cancel</button>
+                  <button
+                    onClick={submitAddResource}
+                    disabled={savingResource || !newResourceName.trim() || !effectiveNewResourceRole}
+                    className="rounded-lg bg-orange-500 px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    {savingResource ? "Adding…" : "Add"}
+                  </button>
                 </div>
               </div>
-            </div>
-          ))}
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {teamRoles.map((role) => {
+            const assigned = projectMembers.find((m) => m.role === role);
+            const isAssigning = assigningRole === role;
+            return (
+              <div key={role} className="relative" data-member-picker>
+                <div className={`rounded-xl border p-4 ${assigned ? "border-border bg-forge-surface/40" : "border-dashed border-border/50"}`}>
+                  <div className="mb-2 text-[10px] font-semibold uppercase leading-tight tracking-wider text-faint">{role}</div>
+                  {assigned ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-[11px] font-bold text-orange-400">
+                        {(assigned.full_name?.[0] || "?").toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] font-semibold text-heading">{assigned.full_name}</div>
+                        {!assigned.member_id && <div className="text-[10px] text-faint">External resource</div>}
+                      </div>
+                      <button onClick={() => removeProjectMember(assigned.id)} className="shrink-0 rounded p-1 text-faint transition-colors hover:text-red-400">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setShowAddResource(false); setAssigningRole(role); }}
+                      className="flex items-center gap-1 text-[11px] text-muted transition-colors hover:text-blue-400"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                      Assign
+                    </button>
+                  )}
+                </div>
+
+                {isAssigning && (
+                  <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-xl border border-border bg-forge-bg shadow-xl">
+                    <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted">Select Member</div>
+                    <div className="max-h-52 overflow-y-auto">
+                      {orgMembers.length === 0 ? (
+                        <p className="px-3 py-3 text-[12px] text-subtle">No org members found</p>
+                      ) : (
+                        orgMembers.map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => assignOrgMember(m, role)}
+                            className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-forge-surface/60"
+                          >
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-[11px] font-bold text-blue-300">
+                              {(m.full_name?.[0] || "?").toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-[12px] font-medium text-heading">{m.full_name}</div>
+                              <div className="text-[11px] text-muted">{m.role}</div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <div className="border-t border-border p-2">
+                      <button onClick={() => { setAssigningRole(null); openAddResource(); setNewResourceRole(role); }} className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-medium text-orange-400 transition-colors hover:bg-orange-500/10">
+                        + Add an External Resource
+                      </button>
+                      <button onClick={() => setAssigningRole(null)} className="w-full rounded-lg px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-body">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -648,39 +889,6 @@ export default function ProjectManagementPage({ params }: { params: { id: string
     );
   }
 
-  /* ── Change Orders ─────────────────────────────── */
-  function renderChangeOrders() {
-    if (pm.changeOrders.length === 0) return <EmptyState noun="change orders" onAdd={addChangeOrder} />;
-    return (
-      <div>
-        <SectionHeader title="Change Orders" count={pm.changeOrders.length} onAdd={addChangeOrder} addLabel="New CO" />
-        <div className="space-y-3">
-          {pm.changeOrders.map((co, i) => (
-            <div key={co.id} className="rounded-xl border border-border bg-forge-surface/40 p-4">
-              <div className="mb-3 flex items-start gap-2">
-                <span className="shrink-0 rounded bg-orange-500/15 px-2 py-0.5 text-[11px] font-bold text-orange-400">CO-{String(i + 1).padStart(3, "0")}</span>
-                <input value={co.title} onChange={(e) => updateChangeOrder(co.id, { title: e.target.value })} placeholder="Change order title..." className="flex-1 border-none bg-transparent text-[14px] font-semibold text-heading outline-none placeholder:text-faint" />
-                <Badge label={co.status} color={statusColor(co.status)} />
-                <DeleteBtn onClick={() => removeChangeOrder(co.id)} />
-              </div>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <SelectField label="Status" value={co.status} onChange={(v) => updateChangeOrder(co.id, { status: v as ChangeOrder["status"] })} options={CO_STATUSES} />
-                <InputField label="Requested By" value={co.requestedBy} onChange={(v) => updateChangeOrder(co.id, { requestedBy: v })} placeholder="Name / Company" />
-                <InputField label="Cost Impact ($)" value={co.costImpact || ""} onChange={(v) => updateChangeOrder(co.id, { costImpact: +v })} type="number" placeholder="0" />
-                <InputField label="Schedule Impact" value={co.scheduleImpact} onChange={(v) => updateChangeOrder(co.id, { scheduleImpact: v })} placeholder="e.g. +3 days" />
-                <InputField label="Date" value={co.date} onChange={(v) => updateChangeOrder(co.id, { date: v })} type="date" />
-              </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <TextareaField label="Description" value={co.description} onChange={(v) => updateChangeOrder(co.id, { description: v })} placeholder="Scope of change, reason..." rows={3} />
-                <TextareaField label="Notes" value={co.notes} onChange={(v) => updateChangeOrder(co.id, { notes: v })} placeholder="Approval notes, attachments..." rows={3} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   /* ── Submittals ────────────────────────────────── */
   function renderSubmittals() {
     if (pm.submittals.length === 0) return <EmptyState noun="submittals" onAdd={addSubmittal} />;
@@ -767,7 +975,6 @@ export default function ProjectManagementPage({ params }: { params: { id: string
     budget: renderBudget,
     "field-reports": renderFieldReports,
     "punch-list": renderPunchList,
-    "change-orders": renderChangeOrders,
     submittals: renderSubmittals,
     rfis: renderRFIs,
   };
@@ -784,7 +991,7 @@ export default function ProjectManagementPage({ params }: { params: { id: string
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               {project.name}
-              {project.job_number && <span className="text-subtle/60"> · #{project.job_number}</span>}
+              {project.job_number && <span className="text-subtle"> · #{project.job_number}</span>}
             </Link>
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-orange-400">
@@ -834,11 +1041,10 @@ export default function ProjectManagementPage({ params }: { params: { id: string
               const isActive = activeTab === tab.id;
               const count = tab.id === "tasks" ? pm.tasks.length
                 : tab.id === "milestones" ? pm.milestones.length
-                : tab.id === "team" ? pm.team.length
+                : tab.id === "team" ? projectMembers.length
                 : tab.id === "budget" ? pm.budget.length
                 : tab.id === "field-reports" ? pm.fieldReports.length
                 : tab.id === "punch-list" ? pm.punchList.length
-                : tab.id === "change-orders" ? pm.changeOrders.length
                 : tab.id === "submittals" ? pm.submittals.length
                 : tab.id === "rfis" ? pm.rfis.length
                 : 0;

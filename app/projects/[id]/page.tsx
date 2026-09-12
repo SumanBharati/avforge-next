@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { duplicateProject } from "@/lib/duplicate-project";
+import { itemPrice as sharedItemPrice } from "@/lib/proposal-pricing";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
 import { useOrg } from "@/components/OrgProvider";
 import ProjectDetailSkeleton from "@/components/skeletons/ProjectDetailSkeleton";
 
 interface Project {
   id: string;
+  org_id: string;
   name: string;
   job_number: string;
   client_name: string;
@@ -29,6 +31,8 @@ interface Project {
 interface LineItem {
   qty: number;
   unitCost: number;
+  margin?: number | null;
+  markup?: number | null;
   laborHours: number;
   laborRate: number;
   category: string;
@@ -167,7 +171,7 @@ const bottomRow = [
       </svg>
     ),
     color: "violet",
-    href: "",
+    href: "programming",
     absolute: false,
     stage: 7,
     recommendedStage: "installation",
@@ -376,16 +380,19 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   }
 
   async function addMember(member: OrgMember, role: string) {
+    if (!project) return;
     const existingSlot = projectMembers.find((m) => m.role === role);
     if (existingSlot) {
       await supabase.from("project_members").delete().eq("id", existingSlot.id);
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("project_members")
-      .insert({ project_id: params.id, member_id: member.id, role, full_name: member.full_name, email: member.email })
+      .insert({ org_id: project.org_id, project_id: params.id, member_id: member.id, role, full_name: member.full_name, email: member.email })
       .select()
       .single();
-    if (data) {
+    if (error) {
+      alert(`Couldn't assign ${member.full_name} to ${role}: ${error.message}`);
+    } else if (data) {
       setProjectMembers((prev) => [...prev.filter((m) => m.role !== role), data as ProjectMember]);
     }
     setAssigningRole(null);
@@ -636,9 +643,22 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         const totalLaborHours = laborBySection.reduce((s, l) => s + l.hours, 0);
         const totalLaborPrice = laborBySection.reduce((s, l) => s + l.price, 0);
 
-        const equipmentTotal = allItems.reduce((sum, i) => sum + (i.qty || 0) * (i.unitCost || 0), 0);
-        const laborTotal = totalLaborPrice;
-        const shippingTotal = equipmentTotal * ((proposalData?.taxRate || 0) / 100);
+        // Per-item Margin %/Markup % override an item's own margin if set;
+        // otherwise fall back to the proposal's default Margin % — same rule
+        // the Proposal page itself uses, so this dashboard reflects a
+        // per-item override instead of only ever showing the flat default.
+        // Delegates to lib/proposal-pricing.ts, the same module the Proposal
+        // page and Procurement's release snapshot use.
+        const defaultMarginPct = proposalData?.marginPercent || 0;
+        const itemPrice = (i: LineItem) => sharedItemPrice(i, defaultMarginPct);
+
+        const equipmentCost = allItems.reduce((sum, i) => sum + (i.qty || 0) * (i.unitCost || 0), 0);
+        const equipmentPrice = allItems.reduce((sum, i) => sum + (i.qty || 0) * itemPrice(i), 0);
+        const equipmentTotal = equipmentCost; // Cost Breakdown card stays cost-basis
+        const laborTotal = totalLaborPrice; // billed at laborRate directly — no margin applied
+        // Tax applies to what the client is actually charged (sell price), matching
+        // the Proposal page's own Tax line — not the raw equipment cost.
+        const shippingTotal = equipmentPrice * ((proposalData?.taxRate || 0) / 100);
 
         const costSegments: { label: string; value: number; color: string }[] = [];
         if (equipmentTotal > 0) costSegments.push({ label: "Equipment", value: equipmentTotal, color: "#8b5cf6" });
@@ -646,7 +666,20 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         if (shippingTotal > 0) costSegments.push({ label: "Shipping", value: shippingTotal, color: "#10b981" });
 
         const costTotal = costSegments.reduce((s, c) => s + c.value, 0);
-        const marginPct = proposalData?.marginPercent || 0;
+
+        // Margin only genuinely applies to Equipment (Labor is billed flat,
+        // Shipping/Tax is a passthrough) — each segment gets its own true
+        // margin % (price-based, matching the Equipment Library/Proposal
+        // definition) instead of one flat rate stamped across every bucket.
+        const equipmentMarginDollar = equipmentPrice - equipmentCost;
+        const marginSegments = costSegments.map((seg) => {
+          if (seg.label !== "Equipment") return { ...seg, price: seg.value, marginDollar: 0, marginPct: 0 };
+          const pct = equipmentPrice > 0 ? (equipmentMarginDollar / equipmentPrice) * 100 : 0;
+          return { ...seg, price: equipmentPrice, marginDollar: equipmentMarginDollar, marginPct: pct };
+        });
+        const totalPrice = marginSegments.reduce((s, seg) => s + seg.price, 0);
+        const totalMarginDollar = marginSegments.reduce((s, seg) => s + seg.marginDollar, 0);
+        const totalMarginPct = totalPrice > 0 ? (totalMarginDollar / totalPrice) * 100 : 0;
 
         function pieSlices(segments: typeof costSegments) {
           const total = segments.reduce((s, c) => s + c.value, 0);
@@ -755,29 +788,27 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
             {/* Margins */}
             <div className="bg-forge-panel p-5">
               <h3 className="mb-4 text-[13px] font-bold uppercase tracking-wider text-heading">Margins</h3>
-              {costSegments.length > 0 ? (() => {
-                const costPct = 100 - marginPct;
-                const totalMargin = costTotal * (marginPct / 100);
+              {marginSegments.length > 0 ? (() => {
                 return (
                   <div className="space-y-2.5">
-                    {costSegments.map((seg, i) => (
+                    {marginSegments.map((seg, i) => (
                       <div key={i} className="space-y-1">
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-secondary">{seg.label} <span className="text-muted">{marginPct.toFixed(1)}%</span></span>
-                          <span className="font-mono font-semibold text-heading">{fmt(seg.value * (marginPct / 100))}</span>
+                          <span className="text-secondary">{seg.label} <span className="text-muted">{seg.marginPct.toFixed(1)}%</span></span>
+                          <span className="font-mono font-semibold text-heading">{fmt(seg.marginDollar)}</span>
                         </div>
                         <div className="h-2.5 w-full overflow-hidden rounded-full bg-forge-card">
-                          <div className="h-full rounded-full transition-all" style={{ width: `${costPct}%`, backgroundColor: seg.color }} />
+                          <div className="h-full rounded-full transition-all" style={{ width: `${seg.marginPct}%`, backgroundColor: seg.color }} />
                         </div>
                       </div>
                     ))}
                     <div className="!mt-4 space-y-1">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="font-semibold text-muted">Total <span>{marginPct.toFixed(1)}%</span></span>
-                        <span className="font-mono font-bold text-heading">{fmt(totalMargin)}</span>
+                        <span className="font-semibold text-muted">Total <span>{totalMarginPct.toFixed(1)}%</span></span>
+                        <span className="font-mono font-bold text-heading">{fmt(totalMarginDollar)}</span>
                       </div>
                       <div className="h-2.5 w-full overflow-hidden rounded-full bg-forge-card">
-                        <div className="h-full rounded-full bg-gray-400 transition-all" style={{ width: `${costPct}%` }} />
+                        <div className="h-full rounded-full bg-gray-400 transition-all" style={{ width: `${totalMarginPct}%` }} />
                       </div>
                     </div>
                   </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Video, Monitor, Presentation } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
@@ -8,6 +9,7 @@ import { searchProducts } from "@/lib/av-products";
 import { useBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
+import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
 
 /* Theme-aware canvas colors */
 const canvasColors = {
@@ -73,6 +75,15 @@ interface RoomType {
 interface DeviceCatalogItem {
   id: string; name: string; icon: string; w: number; h: number;
   wall: string; type: string; color: string;
+  // Real equipment from the database (search modal) carries its own FOV/
+  // coverage spec through here; built-in catalog items leave these unset and
+  // addDeviceToRoom falls back to its hardcoded per-type/id defaults.
+  hfovDeg?: number | null;
+  coveragePattern?: "circular" | "rectangular" | null;
+  coverageDiameterFt?: number | null;
+  coverageAngleDeg?: number | null;
+  coverageWidthFt?: number | null;
+  coverageDepthFt?: number | null;
 }
 interface PlacedDevice extends DeviceCatalogItem {
   uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; wallType?: "drywall"|"glass"|"solid"; rotation?: number; wallUid?: number;
@@ -132,6 +143,37 @@ const roomElementItems: DeviceCatalogItem[] = [
 ];
 
 export default function RoomDesignerPage() {
+  // The sidebar's room links are plain Next.js <Link>s to this same route with
+  // only ?room= changed — Next does not remount this page for that, so without
+  // reacting to these explicitly, switching rooms left this component's state
+  // (and currentProjectId/currentRoomId below) pointed at whichever room
+  // loaded first, and autosave would silently overwrite the newly-selected
+  // room's saved design with the old one's.
+  const searchParams = useSearchParams();
+  const roomParam = searchParams.get("room") || "default";
+  const projectParam = searchParams.get("project") || "";
+  // Chrome-free view for embedding this room's drawing elsewhere (the
+  // per-room "Drawings" page). Reuses exportAsPDF's proven technique for
+  // isolating #rd-canvas-export — walk up to <body>, hiding every sibling
+  // along the way — just applied permanently instead of only for print.
+  const embedMode = searchParams.get("embed") === "1";
+  useEffect(() => {
+    if (!embedMode) return;
+    let node: HTMLElement | null = document.getElementById('rd-canvas-export');
+    while (node && node !== document.body) {
+      const parent: HTMLElement | null = node.parentElement;
+      if (parent) {
+        Array.from(parent.children).forEach(sib => {
+          if (sib !== node && sib instanceof HTMLElement) sib.style.display = 'none';
+        });
+      }
+      node.style.overflow = 'visible';
+      node.style.height = 'auto';
+      node.style.maxHeight = 'none';
+      node.style.position = 'static';
+      node = parent;
+    }
+  }, [embedMode]);
   const { theme } = useTheme();
   const cc = canvasColors[theme];
 
@@ -480,10 +522,13 @@ export default function RoomDesignerPage() {
     }, 1500);
   }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
 
-  // Auto-save on changes (after step 2 is active)
+  // Auto-save on changes (after step 2 is active, and only once this room's
+  // own saved design has actually finished loading — otherwise the reset
+  // below, or the load itself still being in flight, would get saved as if
+  // it were a real edit).
   React.useEffect(() => {
-    if (step === 2) triggerAutoSave();
-  }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, step, triggerAutoSave]);
+    if (step === 2 && rdLoaded) triggerAutoSave();
+  }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, step, rdLoaded, triggerAutoSave]);
 
   // Sync placed AV devices to shared BOM
   const { updateSlice } = useBOM();
@@ -522,6 +567,10 @@ export default function RoomDesignerPage() {
           rd_type: p.rd_type, rd_wall: p.rd_wall,
           rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
           rd_icon: p.rd_icon,
+          // Camera FOV / mic-speaker coverage spec, also null when not yet enriched
+          hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
+          coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
+          coverage_width_ft: p.coverage_width_ft, coverage_depth_ft: p.coverage_depth_ft,
         })));
       } finally { setModalLoading(false); }
     }, 300);
@@ -609,6 +658,84 @@ export default function RoomDesignerPage() {
     });
   };
 
+  // DXF export — a real CAD floor plan (room outline, device footprints,
+  // coverage circles/rectangles, camera FOV cones), in feet, so it opens at
+  // true scale in AutoCAD. Ceiling-mounted devices are placed at their plan
+  // (x,y) but their coverage circle/FOV cone geometry is plan-view-only, same
+  // as the on-screen floor plan — this does not attempt to export the
+  // separate ceiling/wall-speaker/wall-mic elevation views.
+  const exportDXF = () => {
+    const dxf = new DxfWriter();
+    // This floor plan's y increases going south (screen/SVG-down
+    // convention — confirmed by pY()'s plain, uninverted y*planScale), but
+    // DXF/AutoCAD's y increases upward, so writing raw y values renders the
+    // plan upside down (north wall would end up at the bottom, labels above
+    // devices instead of below — the exact bug reported for Signal Flow's
+    // DXF). This thin wrapper flips y at the point of writing, so all the
+    // geometry math above stays in its natural, easier-to-verify space.
+    const flip = {
+      rect: (x: number, y: number, w: number, h: number, layer?: string) => dxf.rect(x, -(y + h), w, h, layer),
+      circle: (cx: number, cy: number, r: number, layer?: string) => dxf.circle(cx, -cy, r, layer),
+      line: (x1: number, y1: number, x2: number, y2: number, layer?: string) => dxf.line(x1, -y1, x2, -y2, layer),
+      text: (x: number, y: number, h: number, value: string, layer?: string) => dxf.text(x, -y, h, value, layer),
+    };
+
+    const drawnWallItems = placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined);
+    if (isCustomBlank && drawnWallItems.length > 0) {
+      drawnWallItems.forEach(w => {
+        const halfX = Math.cos(w.wallAngle!) * w.w / 2;
+        const halfY = Math.sin(w.wallAngle!) * w.w / 2;
+        flip.line(w.x - halfX, w.y - halfY, w.x + halfX, w.y + halfY, "ROOM");
+      });
+    } else {
+      flip.rect(0, 0, roomW, roomL, "ROOM");
+    }
+
+    // Clip a ray from (ox,oy) toward (ex,ey) to the room rectangle — same
+    // logic as the on-screen FOV cone rendering, just in feet instead of
+    // screen pixels (no pX/pY conversion, no arbitrary reach cap needed).
+    const clipToRoom = (ox: number, oy: number, ex: number, ey: number) => {
+      let t = 1;
+      const dx = ex - ox, dy = ey - oy;
+      if (dx !== 0) t = Math.min(t, dx > 0 ? (roomW - ox) / dx : (0 - ox) / dx);
+      if (dy !== 0) t = Math.min(t, dy > 0 ? (roomL - oy) / dy : (0 - oy) / dy);
+      t = Math.max(0, t);
+      return { x: ox + dx * t, y: oy + dy * t };
+    };
+
+    placedDevices.filter(d => !(d.id === "wall-partition" && d.wallAngle !== undefined)).forEach(dev => {
+      const layer = (dev.type || "device").toUpperCase();
+      flip.rect(dev.x - dev.w / 2, dev.y - dev.h / 2, dev.w, dev.h, layer);
+      flip.text(dev.x - dev.w / 2, dev.y - dev.h / 2 - 0.3, 0.4, dev.name, layer);
+
+      if (dev.covShape === "round" && dev.covDiameter) {
+        flip.circle(dev.x, dev.y, dev.covDiameter / 2, "COVERAGE");
+      } else if (dev.covShape === "square" && dev.covW && dev.covL) {
+        flip.rect(dev.x - dev.covW / 2, dev.y - dev.covL / 2, dev.covW, dev.covL, "COVERAGE");
+      }
+
+      if (dev.type === "camera" && dev.wall !== "ceiling" && dev.mountWall !== "ceiling") {
+        const mw = dev.mountWall || "north";
+        const hfovDeg = dev.hfov || 70;
+        const halfAngle = (hfovDeg / 2) * Math.PI / 180;
+        let cx = dev.x, cy = dev.y, reach = 0, spread = 0;
+        if (mw === "north") { cx = dev.x; cy = 0; reach = roomL; spread = reach * Math.tan(halfAngle); }
+        else if (mw === "south") { cx = dev.x; cy = roomL; reach = roomL; spread = reach * Math.tan(halfAngle); }
+        else if (mw === "west") { cx = 0; cy = dev.y; reach = roomW; spread = reach * Math.tan(halfAngle); }
+        else { cx = roomW; cy = dev.y; reach = roomW; spread = reach * Math.tan(halfAngle); }
+        let p1: { x: number; y: number }, p2: { x: number; y: number };
+        if (mw === "north") { p1 = clipToRoom(cx, cy, cx - spread, cy + reach); p2 = clipToRoom(cx, cy, cx + spread, cy + reach); }
+        else if (mw === "south") { p1 = clipToRoom(cx, cy, cx - spread, cy - reach); p2 = clipToRoom(cx, cy, cx + spread, cy - reach); }
+        else if (mw === "west") { p1 = clipToRoom(cx, cy, cx + reach, cy - spread); p2 = clipToRoom(cx, cy, cx + reach, cy + spread); }
+        else { p1 = clipToRoom(cx, cy, cx - reach, cy - spread); p2 = clipToRoom(cx, cy, cx - reach, cy + spread); }
+        flip.line(cx, cy, p1.x, p1.y, "FOV");
+        flip.line(cx, cy, p2.x, p2.y, "FOV");
+      }
+    });
+
+    downloadDxf(dxf, `Room Designer${roomParam && roomParam !== "default" ? " - " + roomParam : ""}`);
+  };
+
   const addFromModal = () => {
     const sel = modalSelected;
     const name = sel ? sel.type : modalDeviceName.trim();
@@ -639,7 +766,15 @@ export default function RoomDesignerPage() {
         devType = "speaker"; wall = "ceiling"; icon = "🔊"; color = "#ef4444"; w = 0.3; h = 0.3;
       }
     }
-    addDeviceToRoom({ id: `modal-${Date.now()}`, name, icon, w, h, wall, type: devType, color });
+    addDeviceToRoom({
+      id: `modal-${Date.now()}`, name, icon, w, h, wall, type: devType, color,
+      hfovDeg: sel?.hfov_deg ?? null,
+      coveragePattern: sel?.coverage_pattern ?? null,
+      coverageDiameterFt: sel?.coverage_diameter_ft ?? null,
+      coverageAngleDeg: sel?.coverage_angle_deg ?? null,
+      coverageWidthFt: sel?.coverage_width_ft ?? null,
+      coverageDepthFt: sel?.coverage_depth_ft ?? null,
+    });
     closeModal();
   };
 
@@ -655,17 +790,36 @@ export default function RoomDesignerPage() {
     return () => window.removeEventListener("avforge-save", handler);
   }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
 
-  // Load room dimensions from site survey + saved design
+  // Load room dimensions from site survey + saved design — re-runs whenever
+  // the room or project actually changes (not just on mount), since switching
+  // rooms via the sidebar reuses this same component.
   React.useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get("room");
-    const projectId = urlParams.get("project");
+    let cancelled = false;
+    const roomId = roomParam;
+    const projectId = projectParam;
     if (!projectId) return;
+
+    // Gate autosave closed and clear the canvas *before* re-pointing the save
+    // refs, so nothing here is ever mistaken for an edit and written over the
+    // room we're navigating away from, or over the new room before its real
+    // data has loaded.
+    setRdLoaded(false);
+    setPlacedDevices([]);
+    setRoomType("medium"); setRoomW(16.4); setRoomL(19.7); setRoomH(8.86);
+    setTableShape("rectangular"); setTableSeats(2); setTableWidth(2.0); setTableWallDist(3.28);
+    setShowTable(false); setSelectedWall("north"); setPlacedDoors([]);
+    annotate.setAnnotations([]);
+    setSelected(new Set()); setSelectedUids(new Set()); setSelectedUid(null); setSelectedEdge(null);
+    setUndoStack([]);
+    setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
+    setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
+
     currentProjectId.current = projectId;
     currentRoomId.current = roomId || "default";
 
     supabase.from("site_surveys").select("data").eq("project_id", projectId).single()
           .then(({ data: surveyRow }) => {
+            if (cancelled) return;
             try {
               const survey = surveyRow?.data as { buildings?: { name?: string; rooms?: { id: string; name?: string; data?: Record<string, string> }[] }[] } | null;
               const building = survey?.buildings?.[0];
@@ -701,6 +855,7 @@ export default function RoomDesignerPage() {
     supabase.from("room_designs").select("data")
       .eq("project_id", projectId).eq("room_id", roomId || "default").single()
       .then(({ data: designRow }) => {
+        if (cancelled) return;
         setRdLoaded(true);
         if (!designRow?.data) return;
         const saved = designRow.data as { devices?: PlacedDevice[]; config?: Record<string, unknown> };
@@ -721,7 +876,8 @@ export default function RoomDesignerPage() {
           setStep(2);
         }
       });
-  }, []);
+    return () => { cancelled = true; };
+  }, [roomParam, projectParam]);
 
   const toFtIn = (feet: number) => {
     const totalQ = Math.round(feet * 12 * 4); // quarters of an inch
@@ -1190,12 +1346,13 @@ export default function RoomDesignerPage() {
     } else if(dev.wall==="ceiling") { x=roomW/2; y=roomL/2; z=roomH-0.05; mountWall="ceiling"; }
     else if(dev.wall==="table")     { x=roomW/2; y=roomL/2; z=0.76;       mountWall="floor"; }
     else if(dev.wall==="floor")     { x=roomW/2; y=roomL/2; z=0;          mountWall="floor"; }
-    const hfov = dev.type==="camera" ? (dev.id==="soundbar-cam"?120:dev.id==="ceiling-cam"?90:70) : undefined;
-    const covShape = (dev.type==="mic"&&dev.wall==="ceiling") ? "round" as const : undefined;
-    const covDiameter = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : dev.id==="table-mic" ? 2 : undefined;
-    const covW = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
-    const covL = (dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined;
-    const dispersion = (dev.type==="speaker"&&dev.wall==="ceiling") ? 90 : undefined;
+    const hfov = dev.hfovDeg ?? (dev.type==="camera" ? (dev.id==="soundbar-cam"?120:dev.id==="ceiling-cam"?90:70) : undefined);
+    const covShape = dev.coveragePattern==="circular" ? "round" as const : dev.coveragePattern==="rectangular" ? "square" as const
+      : (dev.type==="mic"&&dev.wall==="ceiling") ? "round" as const : undefined;
+    const covDiameter = dev.coverageDiameterFt ?? ((dev.type==="mic"&&dev.wall==="ceiling") ? 6 : dev.id==="table-mic" ? 2 : undefined);
+    const covW = dev.coverageWidthFt ?? ((dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined);
+    const covL = dev.coverageDepthFt ?? ((dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined);
+    const dispersion = dev.coverageAngleDeg ?? ((dev.type==="speaker"&&dev.wall==="ceiling") ? 90 : undefined);
     setPlacedDevices(prev=>[...prev,{...dev,uid:id,x,y,z,mountWall,rotation,wallUid,hfov,covShape,covDiameter,covW,covL,dispersion}]);
   };
 
@@ -2826,6 +2983,15 @@ export default function RoomDesignerPage() {
                   <line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/>
                 </svg>
                 Export PDF
+              </button>
+              <button onClick={exportDXF} title="Export floor plan as DXF (for AutoCAD)"
+                style={{display:"flex",alignItems:"center",gap:6,marginLeft:6,padding:"7px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,cursor:"pointer",color:"rgb(var(--text-body))",fontSize:12,fontWeight:500,transition:"all 0.15s",whiteSpace:"nowrap"}}
+                onMouseEnter={e=>{e.currentTarget.style.background="rgba(139,92,246,0.1)";e.currentTarget.style.borderColor="#8b5cf6";e.currentTarget.style.color="#8b5cf6";}}
+                onMouseLeave={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))";e.currentTarget.style.color="rgb(var(--text-body))"}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Export DXF
               </button>
             </div>
           </div>

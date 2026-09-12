@@ -41,8 +41,20 @@ function BoardIcon() {
   );
 }
 
+function OrderManagementIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="4" width="14" height="18" rx="2" />
+      <path d="M9 2h6a1 1 0 011 1v2H8V3a1 1 0 011-1z" fill="currentColor" stroke="none" />
+      <path d="M8.5 12.5l2 2 4.5-4.5" />
+      <line x1="8" y1="17.5" x2="14" y2="17.5" />
+    </svg>
+  );
+}
+
 const navItems = [
   { href: "/projects", label: "Projects", icon: ToolsIcon },
+  { href: "/procurement", label: "Order Management", icon: OrderManagementIcon },
   { href: "/project-management", label: "Schedule", icon: ScheduleIcon },
   { href: "/time-tracking", label: "Time Tracking", icon: TimeTrackingIcon },
   { href: "/board", label: "Board", icon: BoardIcon },

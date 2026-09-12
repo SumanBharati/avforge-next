@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
+import { BOMProvider } from "@/lib/bom-context";
 
 interface Room {
   id: string;
@@ -14,6 +16,19 @@ interface Room {
 const toolsPerRoom = [
   { id: "cable-pull", name: "Cable Pull Sheet", icon: "📡", base: "/designEngineering/cable-pull" },
   { id: "edid-hdcp",  name: "EDID & HDCP Strategy", icon: "🔒", base: "/designEngineering/edid-hdcp" },
+  {
+    id: "drawings", name: "Drawings", icon: "📐", base: null,
+    // Nested under this project-engineering route (not the standalone
+    // /designEngineering/* tree) so the Project Engineering sidebar stays
+    // visible instead of being swapped for the Design Engineering tool's
+    // own "Rooms" sidebar — see app/projects/[id]/project-engineering/
+    // {room-designer,signal-flow,rack-planner}/page.tsx.
+    children: [
+      { id: "room-designer", name: "Room Designer", base: "room-designer" },
+      { id: "signal-flow",   name: "Signal Flow Builder", base: "signal-flow" },
+      { id: "rack-planner",  name: "Rack Builder", base: "rack-planner" },
+    ],
+  },
 ];
 
 export default function ProjectEngineeringLayout({
@@ -29,6 +44,14 @@ export default function ProjectEngineeringLayout({
   const [projectName, setProjectName] = useState<string>("");
   const [jobNumber, setJobNumber] = useState<string>("");
   const [saved, setSaved] = useState(false);
+  // Flyout submenu (e.g. "Drawings" -> Room Designer / Signal Flow / Rack
+  // Builder) is portaled to <body> with fixed positioning rather than
+  // absolutely positioned inside the sidebar — the sidebar scrolls
+  // (overflow-y-auto), which per the CSS overflow spec also clips the x-axis
+  // even though it's left at "visible", so anything positioned outside the
+  // sidebar's own box was getting clipped instead of floating over the
+  // canvas. Same escape-the-clipping technique as rack-planner's FloatingPanel.
+  const [openFlyout, setOpenFlyout] = useState<{ key: string; top: number; left: number } | null>(null);
 
   useEffect(() => {
     supabase.from("projects").select("name, job_number").eq("id", params.id).single()
@@ -67,14 +90,14 @@ export default function ProjectEngineeringLayout({
             <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               {projectName}
-              {jobNumber && <span className="text-subtle/60"> · #{jobNumber}</span>}
+              {jobNumber && <span className="text-subtle"> · #{jobNumber}</span>}
             </Link>
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400">
                 <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
                 <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
               </svg>
-              Project Engineering & Programming
+              Project Engineering
             </h1>
           </div>
           <div className="flex items-center gap-4">
@@ -128,7 +151,56 @@ export default function ProjectEngineeringLayout({
                   {isExpanded && (
                     <div className="ml-5 mt-0.5 flex flex-col gap-0.5 border-l border-border/50 pl-3">
                       {toolsPerRoom.map((tool) => {
-                        const toolHref = `${tool.base}?room=${room.id}`;
+                        if (tool.children) {
+                          const flyoutKey = `${room.id}:${tool.id}`;
+                          const isOpen = openFlyout?.key === flyoutKey;
+                          return (
+                            <div
+                              key={tool.id}
+                              onMouseEnter={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setOpenFlyout({ key: flyoutKey, top: rect.top, left: rect.right + 4 });
+                              }}
+                              onMouseLeave={() => setOpenFlyout((prev) => (prev?.key === flyoutKey ? null : prev))}
+                            >
+                              <div className={`flex cursor-default items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-all ${isOpen ? "bg-forge-surface/30 text-secondary" : "text-subtle"}`}>
+                                <span className="text-sm">{tool.icon}</span>
+                                <span className="flex-1">{tool.name}</span>
+                                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="shrink-0 text-faint">
+                                  <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                </svg>
+                              </div>
+                              {isOpen && typeof document !== "undefined" && createPortal(
+                                <div
+                                  style={{ position: "fixed", top: openFlyout!.top, left: openFlyout!.left, zIndex: 200 }}
+                                  className="min-w-[190px] rounded-lg border border-border bg-forge-bg py-1 shadow-2xl shadow-black/50"
+                                  onMouseEnter={() => setOpenFlyout({ key: flyoutKey, top: openFlyout!.top, left: openFlyout!.left })}
+                                  onMouseLeave={() => setOpenFlyout((prev) => (prev?.key === flyoutKey ? null : prev))}
+                                >
+                                  {tool.children.map((child) => {
+                                    const childBase = `/projects/${params.id}/project-engineering/${child.base}`;
+                                    const childHref = `${childBase}?room=${room.id}&project=${params.id}`;
+                                    const childActive = pathname === childBase && typeof window !== "undefined" && window.location.search.includes(room.id);
+                                    return (
+                                      <Link
+                                        key={child.id}
+                                        href={childHref}
+                                        onClick={() => setOpenFlyout(null)}
+                                        className={`block px-3 py-2 text-[13px] transition-colors ${
+                                          childActive ? "font-semibold text-heading" : "text-secondary hover:bg-forge-surface/60"
+                                        }`}
+                                      >
+                                        {child.name}
+                                      </Link>
+                                    );
+                                  })}
+                                </div>,
+                                document.body
+                              )}
+                            </div>
+                          );
+                        }
+                        const toolHref = `${tool.base}?room=${room.id}&project=${params.id}`;
                         const isActive = pathname === tool.base && typeof window !== "undefined" && window.location.search.includes(room.id);
                         return (
                           <Link
@@ -154,9 +226,12 @@ export default function ProjectEngineeringLayout({
         )}
       </aside>
 
-      {/* Main content */}
+      {/* Main content — BOMProvider wraps it because the nested Room
+          Designer / Signal Flow / Rack Builder routes (see toolsPerRoom's
+          "Drawings" flyout) use the shared BOM context, same as the
+          standalone Design Engineering tool does for those same pages. */}
       <div className="flex-1 overflow-y-auto">
-        {children}
+        <BOMProvider>{children}</BOMProvider>
       </div>
       </div>
     </div>
