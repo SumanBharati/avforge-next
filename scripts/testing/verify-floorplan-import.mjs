@@ -69,29 +69,57 @@ async function main() {
     console.log("DXF import produced a background image:", dxfImageHref && dxfImageHref.startsWith("data:image/png") ? "YES (fixed)" : `NO (FAIL — ${dxfImageHref?.slice(0,50)})`);
     await page.screenshot({ path: `${OUT_DIR}floorplan-dxf-import.png` });
 
-    // --- Calibrate in inches ---
-    await page.locator('button:has-text("Set Scale")').click();
-    await page.locator("text=Click two points on the plan").waitFor({ timeout: 5000 });
+    // --- Bluebeam-style calibration: same two points, each of the four
+    // supported units (ft-in / ft / in / mm) entered as an equivalent
+    // 10ft-6in reference distance — all four should converge on the same
+    // resulting px/ft scale, proving the unit conversion is correct rather
+    // than just "some number got parsed and applied".
     const canvasBox = await page.locator('[data-rd-canvas="plan"] svg').first().boundingBox();
     const p1 = { x: canvasBox.x + canvasBox.width * 0.3, y: canvasBox.y + canvasBox.height * 0.4 };
     const p2 = { x: canvasBox.x + canvasBox.width * 0.6, y: canvasBox.y + canvasBox.height * 0.4 };
-    await page.mouse.click(p1.x, p1.y);
-    await page.waitForTimeout(150);
-    await page.mouse.click(p2.x, p2.y);
-    await page.waitForTimeout(150);
 
-    const inchesLabelVisible = await page.locator("text=Enter the real distance between the two points, in inches").count();
-    console.log("Calibration prompt asks for inches (not feet):", inchesLabelVisible > 0 ? "YES (fixed)" : "NO (FAIL)");
-    const unitSuffix = await page.locator("text=in").count();
-    console.log("Unit suffix shows 'in':", unitSuffix > 0 ? "YES (correct)" : "NO (FAIL)");
+    const calibrate = async (setup) => {
+      await page.locator('button:has-text("Set Scale")').click();
+      await page.locator("text=Click two points on the plan").waitFor({ timeout: 5000 });
+      await page.mouse.click(p1.x, p1.y);
+      await page.waitForTimeout(150);
+      await page.mouse.click(p2.x, p2.y);
+      await page.waitForTimeout(150);
+      await setup();
+      await page.locator('button:has-text("Apply Scale")').click();
+      await page.waitForTimeout(300);
+      return (await page.locator("text=/Scale: [\\d.]+ px\\/ft/").textContent());
+    };
 
-    const scaleBefore = await page.locator("text=/Scale: \\d+ px\\/ft/").textContent();
-    await page.locator('input[placeholder="e.g. 120"]').fill("120"); // 120 inches = 10 ft reference
-    await page.locator('button:has-text("Apply Scale")').click();
-    await page.waitForTimeout(300);
-    const scaleAfter = await page.locator("text=/Scale: \\d+ px\\/ft/").textContent();
-    console.log("Applying an inches-based calibration changed the stored scale:", scaleBefore !== scaleAfter ? `YES (fixed — ${scaleBefore} -> ${scaleAfter})` : `NO (FAIL — stayed ${scaleAfter})`);
+    const scaleFtIn = await calibrate(async () => {
+      const unitPickerVisible = await page.locator('button:has-text("ft/in")').count();
+      console.log("Bluebeam-style unit picker (ft/in, ft, in, mm) shown:", unitPickerVisible > 0 ? "YES (fixed)" : "NO (FAIL)");
+      // ft/in is the default unit — no picker click needed.
+      await page.locator('input[placeholder="10"]').fill("10");
+      await page.locator('input[placeholder="6"]').fill("6");
+    });
+    console.log("ft-in calibration (10 ft 6 in) applied a scale:", scaleFtIn);
+
+    const scaleFt = await calibrate(async () => {
+      await page.locator('button:has-text("ft")', { hasText: /^ft$/ }).click();
+      await page.locator('input[placeholder="e.g. 10"]').fill("10.5");
+    });
+    console.log("ft calibration (10.5 ft, same distance) applied a scale:", scaleFt, scaleFt === scaleFtIn ? "(matches ft-in — YES fixed)" : "(FAIL — should match ft-in)");
+
+    const scaleIn = await calibrate(async () => {
+      await page.locator('button', { hasText: /^in$/ }).click();
+      await page.locator('input[placeholder="e.g. 120"]').fill("126");
+    });
+    console.log("in calibration (126 in, same distance) applied a scale:", scaleIn, scaleIn === scaleFtIn ? "(matches ft-in — YES fixed)" : "(FAIL — should match ft-in)");
+
+    const scaleMm = await calibrate(async () => {
+      await page.locator('button', { hasText: /^mm$/ }).click();
+      await page.locator('input[placeholder="e.g. 3000"]').fill("3200.4"); // 126in * 25.4
+    });
+    console.log("mm calibration (3200.4 mm, same distance) applied a scale:", scaleMm, scaleMm === scaleFtIn ? "(matches ft-in — YES fixed)" : "(FAIL — should match ft-in)");
+
     await page.screenshot({ path: `${OUT_DIR}floorplan-calibrated.png` });
+    const scaleAfter = scaleMm;
 
     // --- Persistence across reload ---
     await page.waitForTimeout(2200); // let autosave fire

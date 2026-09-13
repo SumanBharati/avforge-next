@@ -601,7 +601,16 @@ export default function RoomDesignerPage() {
   const [floorPlanOffset,    setFloorPlanOffset]    = useState({x: 0, y: 0});
   const [isScalingFloorPlan, setIsScalingFloorPlan] = useState(false);
   const [scaleRefPoints,     setScaleRefPoints]     = useState<{x:number;y:number}[]>([]);
+  // Bluebeam-style calibration: pick two points of a known real-world
+  // dimension, then enter that dimension in whichever unit is easiest to
+  // read off the drawing (feet, architectural feet+inches, or millimeters)
+  // — scaleRefLength holds the feet value in "ft-in" mode, the sole value
+  // otherwise. Always converted to inches internally (see
+  // scaleRefToInches/applyScaleReference) to match the equipment library's
+  // own dimension unit, regardless of which unit was actually typed.
+  const [scaleRefUnit,       setScaleRefUnit]       = useState<"ft"|"ft-in"|"in"|"mm">("ft-in");
   const [scaleRefLength,     setScaleRefLength]     = useState("");
+  const [scaleRefInches,     setScaleRefInches]     = useState("");
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
 
   // Track current project/room IDs for save
@@ -972,7 +981,7 @@ export default function RoomDesignerPage() {
     setUndoStack([]);
     setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
     setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
-    setFloorPlanImg(null); setFloorPlanScale(50); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]);
+    setFloorPlanImg(null); setFloorPlanScale(50); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
 
     currentProjectId.current = projectId;
     currentRoomId.current = roomId || "default";
@@ -2603,7 +2612,7 @@ export default function RoomDesignerPage() {
       setFloorPlanScale(50); // default: 50 pixels per foot, until calibrated
       setFloorPlanOffset({x: 0, y: 0});
       setIsScalingFloorPlan(false);
-      setScaleRefPoints([]);
+      setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
     };
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext === "dxf") {
@@ -2627,23 +2636,43 @@ export default function RoomDesignerPage() {
     e.target.value = ""; // allow re-selecting the same file after an error
   };
 
-  // Reference-distance entered in inches — matching the equipment library's
-  // own dimension unit — rather than feet, so a doorway, a ceiling tile, or
-  // an outlet spacing (the kind of small, precisely-known dimensions an
-  // actual floor plan/photo shows) can be used as the calibration reference
-  // without converting to a fraction of a foot by hand.
+  // Converts whatever unit the user picked (feet, architectural feet+inches,
+  // plain inches, or millimeters) to inches — the one unit everything below
+  // actually computes in, since that's what the equipment library's own
+  // dimensions use. Returns null for an incomplete/invalid entry rather than
+  // silently treating it as zero.
+  const scaleRefToInches = (): number | null => {
+    if (scaleRefUnit === "ft-in") {
+      const ft = parseFloat(scaleRefLength), inch = parseFloat(scaleRefInches) || 0;
+      if (!Number.isFinite(ft) && !(inch > 0)) return null;
+      return (Number.isFinite(ft) ? ft : 0) * 12 + inch;
+    }
+    const v = parseFloat(scaleRefLength);
+    if (!Number.isFinite(v)) return null;
+    if (scaleRefUnit === "ft") return v * 12;
+    if (scaleRefUnit === "mm") return v / 25.4;
+    return v; // "in"
+  };
+
+  // Bluebeam-style calibration: the two clicked points already mark a known
+  // real-world distance on the drawing — this just converts whatever unit it
+  // was entered in to inches, then rescales the whole background so that
+  // pixel distance now represents exactly that many inches.
   const applyScaleReference = () => {
-    if (scaleRefPoints.length !== 2 || !scaleRefLength) return;
+    if (scaleRefPoints.length !== 2) return;
+    const realDistIn = scaleRefToInches();
+    if (realDistIn === null || realDistIn <= 0) return;
     const dx = scaleRefPoints[1].x - scaleRefPoints[0].x;
     const dy = scaleRefPoints[1].y - scaleRefPoints[0].y;
     const pixelDist = Math.sqrt(dx*dx + dy*dy) * planScale; // distance in SVG pixels
-    const realDistFt = parseFloat(scaleRefLength) / 12;
-    if (realDistFt > 0 && pixelDist > 0) {
+    const realDistFt = realDistIn / 12;
+    if (pixelDist > 0) {
       setFloorPlanScale(prev => prev * (pixelDist / (realDistFt * prev)));
     }
     setIsScalingFloorPlan(false);
     setScaleRefPoints([]);
     setScaleRefLength("");
+    setScaleRefInches("");
   };
 
   // Isometric chair renderer (needs sX/sY closure)
@@ -3242,7 +3271,7 @@ export default function RoomDesignerPage() {
                   <div style={{fontSize:12,color:"rgb(var(--text-muted))"}}>Floor plan loaded</div>
                   {!isScalingFloorPlan ? (
                     <div style={{display:"flex",gap:4}}>
-                      <button onClick={()=>{setIsScalingFloorPlan(true);setScaleRefPoints([]);setIsDrawingWall(true);}} style={{flex:1,padding:"6px 8px",borderRadius:5,fontSize:11,fontWeight:600,background:"rgba(139,92,246,0.1)",border:"1px solid rgba(139,92,246,0.3)",color:"#a78bfa",cursor:"pointer"}}>Set Scale</button>
+                      <button onClick={()=>{setIsScalingFloorPlan(true);setScaleRefPoints([]);setScaleRefLength("");setScaleRefInches("");setIsDrawingWall(true);}} style={{flex:1,padding:"6px 8px",borderRadius:5,fontSize:11,fontWeight:600,background:"rgba(139,92,246,0.1)",border:"1px solid rgba(139,92,246,0.3)",color:"#a78bfa",cursor:"pointer"}}>Set Scale</button>
                       <button onClick={()=>{setFloorPlanImg(null);setIsScalingFloorPlan(false);setScaleRefPoints([]);}} style={{padding:"6px 8px",borderRadius:5,fontSize:11,background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",cursor:"pointer"}}>Remove</button>
                     </div>
                   ) : (
@@ -3251,14 +3280,41 @@ export default function RoomDesignerPage() {
                       {scaleRefPoints.length === 1 && "Click the second point"}
                       {scaleRefPoints.length === 2 && (
                         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                          <div>Enter the real distance between the two points, in inches:</div>
-                          <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                            <input type="number" step="0.5" value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder="e.g. 120" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
-                            <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>in</span>
+                          <div>Enter the real distance between the two points:</div>
+                          {/* Unit picker first (Bluebeam-calibrate style) — which
+                              input(s) show below depends on this, since ft-in
+                              needs two fields (feet, inches) and the rest need
+                              just one. Always converted to inches internally
+                              (scaleRefToInches) to match the equipment
+                              library's own dimension unit, whichever of these
+                              was actually easiest to read off the drawing. */}
+                          <div style={{display:"flex",gap:3}}>
+                            {(["ft-in","ft","in","mm"] as const).map(u => (
+                              <button key={u} onClick={()=>setScaleRefUnit(u)}
+                                style={{flex:1,padding:"3px 0",borderRadius:4,fontSize:10,fontWeight:600,cursor:"pointer",
+                                  background: scaleRefUnit===u ? "rgba(139,92,246,0.25)" : "rgb(var(--forge-surface) / 0.6)",
+                                  border:"1px solid "+(scaleRefUnit===u ? "#8b5cf6" : "rgba(139,92,246,0.3)"),
+                                  color: scaleRefUnit===u ? "#c4b5fd" : "rgb(var(--text-subtle))"}}>
+                                {u==="ft-in" ? "ft/in" : u}
+                              </button>
+                            ))}
                           </div>
+                          {scaleRefUnit === "ft-in" ? (
+                            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                              <input type="number" step="1" value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder="10" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+                              <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>ft</span>
+                              <input type="number" step="0.5" value={scaleRefInches} onChange={e=>setScaleRefInches(e.target.value)} placeholder="6" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+                              <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>in</span>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                              <input type="number" step={scaleRefUnit==="mm"?"1":"0.5"} value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder={scaleRefUnit==="ft"?"e.g. 10":scaleRefUnit==="mm"?"e.g. 3000":"e.g. 120"} className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+                              <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>{scaleRefUnit}</span>
+                            </div>
+                          )}
                           <div style={{display:"flex",gap:4}}>
                             <button onClick={applyScaleReference} style={{flex:1,padding:"5px",borderRadius:4,fontSize:11,fontWeight:600,background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Apply Scale</button>
-                            <button onClick={()=>{setIsScalingFloorPlan(false);setScaleRefPoints([]);setIsDrawingWall(false);}} style={{padding:"5px 8px",borderRadius:4,fontSize:11,background:"none",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",cursor:"pointer"}}>Cancel</button>
+                            <button onClick={()=>{setIsScalingFloorPlan(false);setScaleRefPoints([]);setScaleRefLength("");setScaleRefInches("");setIsDrawingWall(false);}} style={{padding:"5px 8px",borderRadius:4,fontSize:11,background:"none",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",cursor:"pointer"}}>Cancel</button>
                           </div>
                         </div>
                       )}
