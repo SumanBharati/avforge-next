@@ -1510,17 +1510,22 @@ export default function RoomDesignerPage() {
     setSelectedUid(newUid);
   };
 
-  // Manual rotate: sets the camera's facing-direction nudge (on top of
-  // whatever the auto wall-snap computed — see facingOverrideDeg on
-  // PlacedDevice, which is what the camera's own FOV-cone rendering reads)
-  // to an exact value typed into the rotate popup, since a camera's true
-  // facing can't just be set to an absolute compass angle without redoing
-  // the same inside/outside wall-normal resolution its renderer already does.
-  const setCameraRotation = (uid: number, deg: number) => {
+  // Manual rotate, from the rotate popup: cameras get an exact value set as
+  // facingOverrideDeg — an additive nudge on top of whatever the auto
+  // wall-snap computed (see PlacedDevice; the FOV-cone renderer adds this to
+  // its own resolved facing), since a camera's true facing can't be set to
+  // an absolute angle without redoing the same inside/outside wall-normal
+  // resolution its renderer already does. Displays render their icon
+  // directly from `rotation`, so theirs is set as that absolute angle.
+  const setDeviceRotation = (uid: number, deg: number) => {
     const dev = placedDevices.find(d=>d.uid===uid);
     if (!dev) return;
     pushUndo();
-    setPlacedDevices(prev=>prev.map(d=>d.uid===uid?{...d, facingOverrideDeg:deg}:d));
+    if (dev.type === "camera") {
+      setPlacedDevices(prev=>prev.map(d=>d.uid===uid?{...d, facingOverrideDeg:deg}:d));
+    } else {
+      setPlacedDevices(prev=>prev.map(d=>d.uid===uid?{...d, rotation:deg}:d));
+    }
   };
 
   // Snap world coords to nearest wall, return wall name and position (0-1) along that wall
@@ -1564,11 +1569,17 @@ export default function RoomDesignerPage() {
     const cands: { x:number; y:number; angleDeg:number; mountWall:string; wallUid?:number; dist:number }[] = [];
     if (!isCustomBlank) {
       const bx = Math.max(0, Math.min(roomW, wx)), by = Math.max(0, Math.min(roomL, wy));
+      // Sit on whichever face of the wall the cursor is actually on — inside
+      // (the default, toward the room interior) or outside (the exterior
+      // face) — rather than always forcing the inside face. Since dragging a
+      // device beyond the room's boundary is now possible (see CANVAS_PAD),
+      // this is what lets it actually snap to the outside of a wall instead
+      // of always snapping back in.
       cands.push(
-        { x: bx, y: 0.02,        angleDeg: 0,  mountWall: "north", dist: Math.abs(wy) },
-        { x: bx, y: roomL-0.02,  angleDeg: 0,  mountWall: "south", dist: Math.abs(wy-roomL) },
-        { x: 0.02,       y: by,  angleDeg: 90, mountWall: "west",  dist: Math.abs(wx) },
-        { x: roomW-0.02, y: by,  angleDeg: 90, mountWall: "east",  dist: Math.abs(wx-roomW) },
+        { x: bx, y: wy < 0 ? -0.02 : 0.02,             angleDeg: 0,  mountWall: "north", dist: Math.abs(wy) },
+        { x: bx, y: wy > roomL ? roomL+0.02 : roomL-0.02, angleDeg: 0,  mountWall: "south", dist: Math.abs(wy-roomL) },
+        { x: wx < 0 ? -0.02 : 0.02, y: by,             angleDeg: 90, mountWall: "west",  dist: Math.abs(wx) },
+        { x: wx > roomW ? roomW+0.02 : roomW-0.02, y: by, angleDeg: 90, mountWall: "east",  dist: Math.abs(wx-roomW) },
       );
     }
     placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).forEach(w => {
@@ -1579,12 +1590,14 @@ export default function RoomDesignerPage() {
       if (lenSq < 0.001) return;
       const t = Math.max(0, Math.min(1, ((wx-x1)*dx + (wy-y1)*dy)/lenSq));
       const cx = x1 + t*dx, cy = y1 + t*dy;
-      // Sit on the inside face of the wall (toward the room interior),
-      // not on its centerline: offset by half wall thickness + display depth
+      // Sit on whichever face of the wall the cursor is actually on, not
+      // its centerline: offset by half wall thickness + display depth.
+      // Comparing against the cursor's own position (rather than always
+      // biasing toward the room's interior/center) is what lets a device
+      // snap to the *outside* of a hand-drawn wall too.
       const inset = (w.h ?? 0.333)/2 + 0.15;
       let nx0 = -Math.sin(angle), ny0 = Math.cos(angle);
-      const refX = drawnBounds ? drawnBounds.centerX : wx, refY = drawnBounds ? drawnBounds.centerY : wy;
-      if (nx0*(refX-cx) + ny0*(refY-cy) < 0) { nx0 = -nx0; ny0 = -ny0; }
+      if (nx0*(wx-cx) + ny0*(wy-cy) < 0) { nx0 = -nx0; ny0 = -ny0; }
       cands.push({ x: cx + nx0*inset, y: cy + ny0*inset, angleDeg: angle*180/Math.PI, mountWall: "drawn", wallUid: w.uid, dist: Math.hypot(wx-cx, wy-cy) });
     });
     if (!cands.length) return null;
@@ -3869,10 +3882,19 @@ export default function RoomDesignerPage() {
                     <rect x={rx2+1} y={ry2+0.5} width={rw2-2} height={rh2-1} rx={0.3} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
                     <text x={rx2+rw2/2} y={ry2+rh2+12} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600} className="dev-label">{dev.name}</text>
                     {isSelected && (
-                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
-                        <circle cx={rx2+rw2+8} cy={ry2-4} r={7} fill="#ef4444"/>
-                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${rx2+rw2+8},${ry2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
-                      </g>
+                      <>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={rx2+rw2+8} cy={ry2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${rx2+rw2+8},${ry2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setRotatePopup({x:e.clientX,y:e.clientY,uid:dev.uid,value:String(dev.rotation??angle)});}}>
+                          <circle cx={rx2+rw2-10} cy={ry2-4} r={7} fill="#8b5cf6"/>
+                          <g transform={`translate(${rx2+rw2-14},${ry2-8}) scale(0.333)`}>
+                            <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                            <polyline points="21 3 21 6.7 17.3 6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                          </g>
+                        </g>
+                      </>
                     )}
                   </g>);
                 }
@@ -3932,8 +3954,13 @@ export default function RoomDesignerPage() {
                     if(wallDev){
                       const angle=wallDev.wallAngle!;
                       let nx0=-Math.sin(angle), ny0=Math.cos(angle);
-                      const refX = drawnBounds ? drawnBounds.centerX : dev.x, refY = drawnBounds ? drawnBounds.centerY : dev.y;
-                      if(nx0*(refX-dev.x)+ny0*(refY-dev.y) < 0){ nx0=-nx0; ny0=-ny0; }
+                      // Face away from the wall on whichever side the camera
+                      // actually sits on (compared against the wall's own
+                      // center point) — not always toward the room's
+                      // interior. A camera mounted on the *outside* face of
+                      // a wall should face outward, not get force-flipped to
+                      // point back through the wall into the room.
+                      if(nx0*(dev.x-wallDev.x)+ny0*(dev.y-wallDev.y) < 0){ nx0=-nx0; ny0=-ny0; }
                       facingA = Math.atan2(ny0,nx0);
                     }
                     reach=Math.min(Math.max(effectiveRoomW,effectiveRoomL)*planScale,200);
@@ -5554,8 +5581,8 @@ export default function RoomDesignerPage() {
     )}
 
     {/* Rotate popup — opened from the small purple button next to a selected
-        camera's delete "×"; typing a value and pressing Enter/Apply sets the
-        camera's manual facing offset directly. */}
+        camera or display's delete "×"; typing a value and pressing
+        Enter/Apply sets its rotation directly. */}
     {rotatePopup && (
       <>
         <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setRotatePopup(null)} />
@@ -5567,7 +5594,7 @@ export default function RoomDesignerPage() {
             onKeyDown={e=>{
               if(e.key==="Enter"){
                 const deg=Number(rotatePopup.value);
-                if(!Number.isNaN(deg)) setCameraRotation(rotatePopup.uid, deg);
+                if(!Number.isNaN(deg)) setDeviceRotation(rotatePopup.uid, deg);
                 setRotatePopup(null);
               } else if(e.key==="Escape"){
                 setRotatePopup(null);
@@ -5576,7 +5603,7 @@ export default function RoomDesignerPage() {
             style={{width:70,padding:"5px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
           <button onClick={()=>{
             const deg=Number(rotatePopup.value);
-            if(!Number.isNaN(deg)) setCameraRotation(rotatePopup.uid, deg);
+            if(!Number.isNaN(deg)) setDeviceRotation(rotatePopup.uid, deg);
             setRotatePopup(null);
           }} style={{padding:"5px 10px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
             Apply
