@@ -52,7 +52,7 @@ export default function PoEDatabasePage() {
   return (
     <div className="animate-fade-in p-6 max-w-[860px]">
       <Link href="/calculators" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Calculators</Link>
-      <h2 className="mb-1 text-lg font-semibold text-heading">📦 PoE Device Database</h2>
+      <h2 className="mb-1 text-xl font-semibold text-heading">📦 PoE Device Database</h2>
       <p className="mb-5 text-[13px] text-subtle">Per-device PoE class and power draw reference for AV equipment</p>
 
       {/* Filters */}

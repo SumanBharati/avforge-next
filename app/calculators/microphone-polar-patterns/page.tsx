@@ -5,7 +5,7 @@ export default function MicrophonePolarPatternsPage() {
   return (
     <div className="animate-fade-in max-w-[900px] p-6">
       <Link href="/references" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← References</Link>
-      <h2 className="mb-1 text-lg font-semibold text-heading">Microphone Polar Patterns</h2>
+      <h2 className="mb-1 text-xl font-semibold text-heading">Microphone Polar Patterns</h2>
       <p className="mb-5 text-[13px] text-subtle">Pickup direction, rejection characteristics, and typical applications for common microphone patterns.</p>
       <MicrophonePolarPatterns />
       <div className="mt-4 rounded-lg border border-blue-500/25 bg-blue-500/5 px-3.5 py-2.5 text-[12px] leading-relaxed text-muted">

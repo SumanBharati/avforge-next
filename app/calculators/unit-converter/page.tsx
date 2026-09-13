@@ -115,7 +115,7 @@ export default function UnitConverterPage() {
           <div className="flex-1">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.04em] text-subtle">From</label>
             <input value={fromVal} onChange={e => setFromVal(e.target.value)} type="number"
-              className="mb-1.5 w-full rounded-md border-2 border-blue-500 bg-forge-surface px-3 py-2.5 font-mono text-lg font-bold text-body outline-none"
+              className="mb-1.5 w-full rounded-md border-2 border-blue-500 bg-forge-surface px-3 py-2.5 font-mono text-2xl font-bold text-body outline-none"
               style={{ boxSizing: 'border-box' }} />
             <select value={fromUnit} onChange={e => setFromUnit(e.target.value)}
               className="w-full rounded-md border border-border bg-forge-surface px-2.5 py-1.5 text-xs text-body outline-none">
@@ -131,7 +131,7 @@ export default function UnitConverterPage() {
           {/* To */}
           <div className="flex-1">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.04em] text-subtle">To</label>
-            <div className="mb-1.5 w-full rounded-md border-2 border-green-500/30 bg-green-500/[0.06] px-3 py-2.5 font-mono text-lg font-bold text-green-400"
+            <div className="mb-1.5 w-full rounded-md border-2 border-green-500/30 bg-green-500/[0.06] px-3 py-2.5 font-mono text-2xl font-bold text-green-400"
               style={{ minHeight: 46, boxSizing: 'border-box' }}>{resultStr}</div>
             <select value={toUnit} onChange={e => setToUnit(e.target.value)}
               className="w-full rounded-md border border-border bg-forge-surface px-2.5 py-1.5 text-xs text-body outline-none">

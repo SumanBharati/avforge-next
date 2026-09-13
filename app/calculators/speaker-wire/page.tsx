@@ -163,7 +163,7 @@ export default function SpeakerWirePage() {
                 <div className="mb-1 text-[11px] uppercase tracking-[0.06em] text-blue-400/70">
                   Minimum Passing Gauge
                 </div>
-                <div className="font-mono text-[32px] font-bold text-blue-400">
+                <div className="font-mono text-2xl font-bold text-blue-400">
                   {results.recommended.gauge}
                 </div>
                 <div className="mt-1 text-[12px] text-subtle">
@@ -172,7 +172,7 @@ export default function SpeakerWirePage() {
               </div>
             ) : (
               <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-4">
-                <div className="font-mono text-[18px] font-bold text-red-400">No standard gauge passes</div>
+                <div className="font-mono text-[15px] font-semibold text-red-400">No standard gauge passes</div>
                 <div className="mt-1 text-[12px] text-subtle">
                   Run is too long or power too high for standard gauges. Consider 70V distribution or splitting the run.
                 </div>

@@ -207,7 +207,7 @@ export default function DisplaySizingPage() {
                 </button>
                 <div className="flex items-center justify-between border-t border-border pt-2">
                   <span className="text-[12px] font-medium text-muted">Farthest Viewer</span>
-                  <span className="font-mono text-[14px] font-bold text-body">{colResults[0] ? fmt(colResults[0].farthestViewer) : '—'}</span>
+                  <span className="font-mono text-2xl font-bold text-blue-400">{colResults[0] ? fmt(colResults[0].farthestViewer) : '—'}</span>
                 </div>
                 {colResults[0] ? (
                   <div className="divide-y divide-border border-t border-border">
@@ -252,7 +252,7 @@ export default function DisplaySizingPage() {
                 </button>
                 <div className="flex items-center justify-between border-t border-border pt-2">
                   <span className="text-[12px] font-medium text-muted">Min Image Height</span>
-                  <span className="font-mono text-[14px] font-bold text-body">{colResults[1] ? fmt(colResults[1].imageH) : '—'}</span>
+                  <span className="font-mono text-2xl font-bold text-blue-400">{colResults[1] ? fmt(colResults[1].imageH) : '—'}</span>
                 </div>
                 {colResults[1] ? (
                   <div className="divide-y divide-border border-t border-border">
@@ -297,7 +297,7 @@ export default function DisplaySizingPage() {
                 </button>
                 <div className="flex items-center justify-between border-t border-border pt-2">
                   <span className="text-[12px] font-medium text-muted">Min Element Height %</span>
-                  <span className="font-mono text-[14px] font-bold text-body">{colResults[2] ? fmt(colResults[2].minElemH) + '%' : '—'}</span>
+                  <span className="font-mono text-2xl font-bold text-blue-400">{colResults[2] ? fmt(colResults[2].minElemH) + '%' : '—'}</span>
                 </div>
                 {colResults[2] ? (
                   <div className="divide-y divide-border border-t border-border">

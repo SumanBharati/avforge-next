@@ -204,7 +204,7 @@ export default function ProjectorThrowPage() {
                   </div>
                   {isVariable ? (
                     <div className="font-mono">
-                      <span className="text-xl font-bold text-blue-400">{minDist.toFixed(1)} – {maxDist.toFixed(1)}</span>
+                      <span className="text-2xl font-bold text-blue-400">{minDist.toFixed(1)} – {maxDist.toFixed(1)}</span>
                       <span className="ml-1.5 text-sm text-subtle">ft</span>
                     </div>
                   ) : (
