@@ -23,10 +23,22 @@ type RackItem = {
   btuHr?: number | null;
   unrackedX?: number;
   unrackedY?: number;
+  // Physical faceplate width in inches (half-rack/quarter-rack/other custom
+  // widths) — null/unset means a standard full-width faceplate. See
+  // RACK_USABLE_WIDTH_IN for how this becomes an on-screen/DXF fraction.
+  widthIn?: number | null;
   name: string;
   ru: number;
   color: string;
 };
+
+// EIA-310's rail-to-rail spacing puts the actual usable front-panel width in
+// a 19" rack at 17.75" nominal — narrower faceplates (half-rack ~8.5-9.5",
+// quarter-rack ~4.25-4.75", or any other custom size) are expressed as a
+// fraction of this, not of the outer 19" frame width.
+const RACK_USABLE_WIDTH_IN = 17.75;
+const rackWidthFraction = (widthIn?: number | null) =>
+  Number.isFinite(widthIn) && (widthIn as number) > 0 ? Math.min(1, (widthIn as number) / RACK_USABLE_WIDTH_IN) : 1;
 
 // Renders its children into document.body, positioned next to `getAnchor()`'s element.
 // The rack area sits inside nested `overflow-y:auto` containers (design-engineering layout +
@@ -112,7 +124,7 @@ export default function RackPlannerPage() {
   const [hoveredRackNumber, setHoveredRackNumber] = useState<number|null>(null);
   const [rackContextMenu, setRackContextMenu] = useState<{x:number;y:number;index:number}|null>(null);
   const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
-  const [rackEditDraft, setRackEditDraft] = useState({name:"",ru:"1",voltage:"",ampDraw:"",powerWatts:"",btuHr:""});
+  const [rackEditDraft, setRackEditDraft] = useState({name:"",ru:"1",voltage:"",ampDraw:"",powerWatts:"",btuHr:"",widthIn:""});
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const { updateSlice } = useBOM();
 
@@ -188,6 +200,7 @@ export default function RackPlannerPage() {
             voltage: saved?.voltage ?? device.voltage ?? null,
             powerWatts: saved?.powerWatts ?? device.power_watts ?? null,
             btuHr: saved?.btuHr ?? device.btu_hr ?? null,
+            widthIn: saved?.widthIn ?? device.width_in ?? null,
             name: saved?.name || sourceName,
             ru: saved?.ru || (Number.isFinite(catalogRU) && catalogRU > 0 ? Math.max(1, Math.round(catalogRU)) : 1),
             color: saved?.color || device.color || rackColors[index % rackColors.length],
@@ -269,7 +282,7 @@ export default function RackPlannerPage() {
     if (selectedProduct) {
       const ru = selectedProduct.rack_units && selectedProduct.rack_units > 0 ? Math.max(1, Math.round(selectedProduct.rack_units)) : 1;
       const name = [selectedProduct.manufacturer, selectedProduct.model_name].filter(Boolean).join(" ") || selectedProduct.type;
-      setPendingRackItem({manual:true,productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr});
+      setPendingRackItem({manual:true,productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr,widthIn:selectedProduct.width_in});
       closeAddEquipment();
       return;
     }
@@ -488,7 +501,7 @@ export default function RackPlannerPage() {
   const openRackEquipmentEditor=(index:number)=>{
     const item=items[index];
     if(!item)return;
-    setRackEditDraft({name:item.name,ru:String(item.ru),voltage:item.voltage==null?"":String(item.voltage),ampDraw:item.ampDraw==null?"":String(item.ampDraw),powerWatts:item.powerWatts==null?"":String(item.powerWatts),btuHr:item.btuHr==null?"":String(item.btuHr)});
+    setRackEditDraft({name:item.name,ru:String(item.ru),voltage:item.voltage==null?"":String(item.voltage),ampDraw:item.ampDraw==null?"":String(item.ampDraw),powerWatts:item.powerWatts==null?"":String(item.powerWatts),btuHr:item.btuHr==null?"":String(item.btuHr),widthIn:item.widthIn==null?"":String(item.widthIn)});
     setRackEditingIndex(index);
     setRackContextMenu(null);
   };
@@ -510,8 +523,13 @@ export default function RackPlannerPage() {
         const startRU = rackNumber === 1 ? rackStartFor(item, index) : (item.rackStartRU ?? 1);
         const yBottom = (startRU - 1) * RU_IN;
         const h = item.ru * RU_IN;
-        dxf.rect(xOffset, yBottom, RACK_W_IN, h, "EQUIPMENT");
-        dxf.text(xOffset + 2, yBottom + h / 2, 8, item.name, "EQUIPMENT");
+        // Half/quarter/custom-width faceplates get a narrower, centered
+        // rect instead of always spanning the full 19" frame — same
+        // RACK_USABLE_WIDTH_IN basis as the on-screen elevation.
+        const itemW = rackWidthFraction(item.widthIn) * RACK_USABLE_WIDTH_IN;
+        const itemX = xOffset + (RACK_W_IN - itemW) / 2;
+        dxf.rect(itemX, yBottom, itemW, h, "EQUIPMENT");
+        dxf.text(itemX + 2, yBottom + h / 2, 8, item.name, "EQUIPMENT");
       });
     };
 
@@ -647,22 +665,35 @@ export default function RackPlannerPage() {
                           ))}
                         </div>
 
-                        {/* Device faceplate */}
-                        <div onClick={()=>{if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}setEditingIdx(editingIdx===i?null:i);}} style={{flex:1,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:"none",borderRight:"none",display:"flex",alignItems:"center",padding:"0 12px",gap:8,cursor:"inherit",position:"relative",overflow:"hidden",transition:"all 0.15s",outline:editingIdx===i?"1px solid "+item.color+"88":"none"}}>
-                          {/* Device label */}
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
-                            {item.ru>=2 && <div style={{fontSize:8,color:item.color,opacity:0.7,marginTop:1}}>{item.ru}U</div>}
-                          </div>
+                        {/* Device faceplate — the slot below is the full
+                            rail-to-rail click/drag target; the visible
+                            colored panel inside is only as wide as the
+                            equipment's actual physical width, so a half- or
+                            quarter-rack item doesn't visually claim the
+                            whole bay the way every item used to regardless
+                            of its real size. */}
+                        {(() => {
+                          const frac = rackWidthFraction(item.widthIn);
+                          const isFull = frac >= 0.999;
+                          return (
+                            <div onClick={()=>{if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}setEditingIdx(editingIdx===i?null:i);}} style={{flex:1,display:"flex",alignItems:"stretch",justifyContent:"center",cursor:"inherit",position:"relative",overflow:"hidden"}}>
+                              <div style={{width:isFull?"100%":`${frac*100}%`,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:isFull?"none":"1px solid "+item.color+"44",borderRight:isFull?"none":"1px solid "+item.color+"44",display:"flex",alignItems:"center",padding:"0 12px",gap:8,position:"relative",overflow:"hidden",transition:"all 0.15s",outline:editingIdx===i?"1px solid "+item.color+"88":"none"}}>
+                                {/* Device label */}
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
+                                  {item.ru>=2 && <div style={{fontSize:8,color:item.color,opacity:0.7,marginTop:1}}>{item.ru}U</div>}
+                                </div>
 
-                          {false && hoveredRackIndex===i && (
-                            <button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment"
-                              onMouseDown={e=>{e.preventDefault();e.stopPropagation();}}
-                              onClick={e=>{e.preventDefault();e.stopPropagation();setItems(prev=>prev.filter((_,index)=>index!==i));setHoveredRackIndex(null);setEditingIdx(null);setSelectedIdxs(new Set());}}
-                              style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:3,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.18)"}}>×</button>
-                          )}
-
-                        </div>
+                                {false && hoveredRackIndex===i && (
+                                  <button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment"
+                                    onMouseDown={e=>{e.preventDefault();e.stopPropagation();}}
+                                    onClick={e=>{e.preventDefault();e.stopPropagation();setItems(prev=>prev.filter((_,index)=>index!==i));setHoveredRackIndex(null);setEditingIdx(null);setSelectedIdxs(new Set());}}
+                                    style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:3,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.18)"}}>×</button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Right rail with RU numbers */}
                         <div style={{width:26,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",background:"rgb(var(--forge-panel))",borderRight:"2px solid rgb(var(--border))",borderLeft:"1px solid rgb(var(--border))"}}>
@@ -742,15 +773,23 @@ export default function RackPlannerPage() {
                   </div>)}
                   <div style={{position:"absolute",left:26,right:26,top:0,bottom:0,border:"1px dashed rgb(var(--border))",background:`repeating-linear-gradient(to bottom,transparent 0,transparent ${ruH-1}px,rgb(var(--border) / 0.45) ${ruH-1}px,rgb(var(--border) / 0.45) ${ruH}px)`,opacity:0.4}} />
                   {rackEntries.length===0&&<span style={{position:"absolute",left:26,right:26,top:"45%",textAlign:"center",fontSize:10,color:"rgb(var(--text-faint))"}}>{rackDisplayRU} RU available</span>}
-                  {rackEntries.map(({item,index})=><div key={`rack-${rackNumber}-item-${index}`} draggable
+                  {rackEntries.map(({item,index})=>{
+                    const frac=rackWidthFraction(item.widthIn);
+                    const isFull=frac>=0.999;
+                    return <div key={`rack-${rackNumber}-item-${index}`} draggable
                     onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index});}}
                     onMouseEnter={()=>setHoveredRackIndex(index)} onMouseLeave={()=>setHoveredRackIndex(previous=>previous===index?null:previous)}
                     onDragStart={e=>{const rect=e.currentTarget.getBoundingClientRect();rackDragOffsetY.current=e.clientY-rect.top;e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",String(index));setDraggedRackIndex(index);}}
                     onDragEnd={()=>setDraggedRackIndex(null)}
-                    style={{position:"absolute",zIndex:4,left:26,right:26,bottom:((item.rackStartRU??1)-1)*ruH,height:item.ru*ruH,display:"flex",alignItems:"center",padding:"0 12px",background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",cursor:"grab",opacity:draggedRackIndex===index?0.45:1,overflow:"hidden"}}>
-                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>{item.ru>=2&&<div style={{fontSize:8,color:item.color,opacity:0.7}}>{item.ru}U</div>}</div>
-                    {false&&hoveredRackIndex===index&&<button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment" onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={e=>{e.preventDefault();e.stopPropagation();setItems(current=>current.filter((_,itemIndex)=>itemIndex!==index));setHoveredRackIndex(null);}} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:5,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer"}}>×</button>}
-                  </div>)}
+                    style={{position:"absolute",zIndex:4,left:26,right:26,bottom:((item.rackStartRU??1)-1)*ruH,height:item.ru*ruH,display:"flex",alignItems:"stretch",justifyContent:"center",cursor:"grab",opacity:draggedRackIndex===index?0.45:1,overflow:"hidden"}}>
+                    {/* Visible faceplate — only as wide as the equipment's
+                        actual physical width, same as the primary rack. */}
+                    <div style={{width:isFull?"100%":`${frac*100}%`,display:"flex",alignItems:"center",padding:"0 12px",background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",overflow:"hidden"}}>
+                      <div style={{flex:1,minWidth:0}}><div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>{item.ru>=2&&<div style={{fontSize:8,color:item.color,opacity:0.7}}>{item.ru}U</div>}</div>
+                      {false&&hoveredRackIndex===index&&<button draggable={false} aria-label={`Delete ${item.name}`} title="Delete equipment" onMouseDown={e=>{e.preventDefault();e.stopPropagation();}} onClick={e=>{e.preventDefault();e.stopPropagation();setItems(current=>current.filter((_,itemIndex)=>itemIndex!==index));setHoveredRackIndex(null);}} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:5,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer"}}>×</button>}
+                    </div>
+                  </div>;
+                  })}
                 </div>
                 <div style={{height:8,margin:"4px 8px 0",background:"linear-gradient(0deg,rgb(var(--border)),rgb(var(--forge-surface)))",borderRadius:"0 0 3px 3px",border:"1px solid rgb(var(--border))"}} />
               </div>
@@ -794,9 +833,9 @@ export default function RackPlannerPage() {
         <div style={{padding:20}}>
           <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))",marginBottom:14}}>Description<input autoFocus value={rackEditDraft.name} onChange={e=>setRackEditDraft(draft=>({...draft,name:e.target.value}))} style={{padding:"9px 10px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/></label>
           <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:9}}>Equipment Specifications</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>{([{key:"ru",label:"Rack Units",unit:"RU"},{key:"voltage",label:"Voltage",unit:"V"},{key:"ampDraw",label:"Current Draw",unit:"A"},{key:"powerWatts",label:"Power",unit:"W"},{key:"btuHr",label:"Heat Output",unit:"BTU/hr"}] as const).map(field=><label key={field.key} style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={field.key==="ru"?1:0} step={field.key==="ru"?1:"any"} value={rackEditDraft[field.key]} onChange={e=>setRackEditDraft(draft=>({...draft,[field.key]:e.target.value}))} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/><span style={{minWidth:36,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>{([{key:"ru",label:"Rack Units",unit:"RU"},{key:"widthIn",label:"Width",unit:"in"},{key:"voltage",label:"Voltage",unit:"V"},{key:"ampDraw",label:"Current Draw",unit:"A"},{key:"powerWatts",label:"Power",unit:"W"},{key:"btuHr",label:"Heat Output",unit:"BTU/hr"}] as const).map(field=><label key={field.key} style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={field.key==="ru"?1:0} step={field.key==="ru"?1:"any"} value={rackEditDraft[field.key]} onChange={e=>setRackEditDraft(draft=>({...draft,[field.key]:e.target.value}))} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/><span style={{minWidth:36,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}</div>
         </div>
-        <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:9}}><button onClick={()=>setRackEditingIndex(null)} style={{padding:"8px 17px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",cursor:"pointer"}}>Cancel</button><button disabled={!rackEditDraft.name.trim()} onClick={()=>{const value=(text:string)=>text.trim()===""?null:Number(text);setItems(current=>current.map((item,index)=>index===rackEditingIndex?{...item,name:rackEditDraft.name.trim(),ru:Math.max(1,Math.floor(Number(rackEditDraft.ru)||1)),voltage:value(rackEditDraft.voltage),ampDraw:value(rackEditDraft.ampDraw),powerWatts:value(rackEditDraft.powerWatts),btuHr:value(rackEditDraft.btuHr)}:item));setRackEditingIndex(null);}} style={{padding:"8px 17px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:6,color:"white",fontWeight:600,cursor:"pointer"}}>Save</button></div>
+        <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:9}}><button onClick={()=>setRackEditingIndex(null)} style={{padding:"8px 17px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",cursor:"pointer"}}>Cancel</button><button disabled={!rackEditDraft.name.trim()} onClick={()=>{const value=(text:string)=>text.trim()===""?null:Number(text);setItems(current=>current.map((item,index)=>index===rackEditingIndex?{...item,name:rackEditDraft.name.trim(),ru:Math.max(1,Math.floor(Number(rackEditDraft.ru)||1)),voltage:value(rackEditDraft.voltage),ampDraw:value(rackEditDraft.ampDraw),powerWatts:value(rackEditDraft.powerWatts),btuHr:value(rackEditDraft.btuHr),widthIn:value(rackEditDraft.widthIn)}:item));setRackEditingIndex(null);}} style={{padding:"8px 17px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:6,color:"white",fontWeight:600,cursor:"pointer"}}>Save</button></div>
       </div></div>}
 
       {showAddEquipment && (
