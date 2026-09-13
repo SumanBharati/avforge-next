@@ -121,6 +121,15 @@ interface PlacedDevice extends DeviceCatalogItem {
   width_in?: number | null; height_in?: number | null; depth_in?: number | null; weight_lb?: number | null;
 }
 
+// Revit-style "Elevation Marker" — a placeable, rotatable tag dropped
+// anywhere in the plan. It doesn't carry equipment of its own; it just
+// records a position + facing direction, and the Elevations pane derives
+// a wall-facing view from whatever equipment sits along that direction at
+// render time (see computeElevation below) — so moving/adding devices in
+// the plan always keeps every marker's elevation current with no manual
+// re-sync step.
+interface ElevationMarker { id: number; x: number; y: number; angle: number; label: string; }
+
 // Room Designer's own placed-device model has no separate manufacturer/model
 // breakdown or ports/rack/power spec — "name" (e.g. '43" Display') is the one
 // user-facing label, and "type" (display/camera/mic/...) drives which SVG
@@ -499,6 +508,16 @@ export default function RoomDesignerPage() {
   const [wallMicDragUid,   setWallMicDragUid]   = useState<number|null>(null);
   const wallMicSvgRef = useRef<SVGSVGElement>(null);
 
+  // Elevation markers — see the ElevationMarker type above. `placingElevationMarker`
+  // arms a single click-to-drop on the plan canvas (mirrors how door/chair/table
+  // placement already works); `elevMarkerDrag` tracks an in-progress
+  // reposition ("move") or direction change ("rotate", dragging the arrowhead).
+  const [elevationMarkers,       setElevationMarkers]       = useState<ElevationMarker[]>([]);
+  const [placingElevationMarker, setPlacingElevationMarker] = useState(false);
+  const [selectedElevationId,    setSelectedElevationId]    = useState<number | null>(null);
+  const [activeElevationId,      setActiveElevationId]      = useState<number | null>(null);
+  const [elevMarkerDrag,         setElevMarkerDrag]         = useState<{id: number; mode: "move" | "rotate"} | null>(null);
+
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Annotations (Text / Shape / Pencil / Highlight / Eraser) on the floor plan
@@ -646,9 +665,10 @@ export default function RoomDesignerPage() {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
         floorPlanImg, floorPlanScale, floorPlanOffset,
+        elevationMarkers,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Auto-save on changes (after step 2 is active, and only once this room's
   // own saved design has actually finished loading — otherwise the reset
@@ -900,6 +920,26 @@ export default function RoomDesignerPage() {
       }
     });
 
+    // Elevation Marker views — each drawn as its own sheet offset to the
+    // right of the plan (real-world feet scale, same as everything else in
+    // this export) so it doesn't collide with the plan geometry above.
+    // DXF is already y-up/floor-at-0 like this projection, so these use
+    // dxf.rect/text directly instead of the plan's y-flipping `flip` wrapper.
+    let elevSheetX = roomW + 15;
+    elevationMarkers.forEach(marker => {
+      const data = computeElevation(marker);
+      const ox = elevSheetX;
+      dxf.rect(ox, 0, data.wallWidthFt, data.roomHFt, "ELEVATION");
+      dxf.text(ox + data.wallWidthFt / 2, data.roomHFt + 1, 0.6, `Elevation ${marker.label} - Facing ${Math.round(marker.angle)} deg`, "ELEVATION", "center");
+      data.items.forEach(it => {
+        const layer = (it.dev.type || "device").toUpperCase();
+        const x0 = ox + it.u - it.wFt / 2;
+        dxf.rect(x0, it.boxBot, it.wFt, Math.max(0.05, it.boxTop - it.boxBot), layer);
+        dxf.text(x0 + it.wFt / 2, it.boxTop + 0.15, 0.3, calloutLabel(it.dev), layer, "center");
+      });
+      elevSheetX += data.wallWidthFt + 10;
+    });
+
     downloadDxf(dxf, `Room Designer${roomParam && roomParam !== "default" ? " - " + roomParam : ""}`);
   };
 
@@ -952,11 +992,12 @@ export default function RoomDesignerPage() {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
         floorPlanImg, floorPlanScale, floorPlanOffset,
+        elevationMarkers,
       });
     };
     window.addEventListener("avforge-save", handler);
     return () => window.removeEventListener("avforge-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
   // the room or project actually changes (not just on mount), since switching
@@ -982,6 +1023,7 @@ export default function RoomDesignerPage() {
     setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
     setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
     setFloorPlanImg(null); setFloorPlanScale(50); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
+    setElevationMarkers([]); setSelectedElevationId(null); setActiveElevationId(null);
 
     currentProjectId.current = projectId;
     currentRoomId.current = roomId || "default";
@@ -1045,6 +1087,7 @@ export default function RoomDesignerPage() {
           if (saved.config.floorPlanImg) setFloorPlanImg(saved.config.floorPlanImg as string);
           if (saved.config.floorPlanScale) setFloorPlanScale(saved.config.floorPlanScale as number);
           if (saved.config.floorPlanOffset) setFloorPlanOffset(saved.config.floorPlanOffset as {x:number;y:number});
+          if (saved.config.elevationMarkers) setElevationMarkers(saved.config.elevationMarkers as ElevationMarker[]);
           setStep(2);
         }
       });
@@ -1215,6 +1258,83 @@ export default function RoomDesignerPage() {
     const model = dev.model && dev.model !== "—" ? dev.model : null;
     return [mfr, model].filter(Boolean).join(" ") || dev.name || "Device";
   };
+
+  // Elevation Marker projection math — shared by the on-screen Elevations
+  // pane and the DXF export so both draw exactly the same view. Angle 0°
+  // faces the north wall (plan y=0), 90° east, 180° south, 270° west,
+  // matching this file's plan-view wall labels; `perp` is the marker's
+  // "right hand" while facing that direction, used as the elevation's
+  // horizontal (u) axis. Vertical position reuses each device's own `z`
+  // (feet AFF) — already computed at placement time for the 3D view — so
+  // there's no separate mount-height field to keep in sync.
+  const elevationDir = (angleDeg: number) => {
+    const a = angleDeg * Math.PI / 180;
+    return { x: Math.sin(a), y: -Math.cos(a) };
+  };
+  const elevationPerp = (angleDeg: number) => {
+    const a = angleDeg * Math.PI / 180;
+    return { x: Math.cos(a), y: Math.sin(a) };
+  };
+  const ELEV_EQUIPMENT_TYPES = new Set(["display", "camera", "mic", "speaker", "control"]);
+  const computeElevation = (marker: ElevationMarker) => {
+    const dir = elevationDir(marker.angle);
+    const perp = elevationPerp(marker.angle);
+    const minX = isCustomBlank && drawnBounds ? drawnBounds.minX : 0;
+    const maxX = isCustomBlank && drawnBounds ? drawnBounds.maxX : roomW;
+    const minY = isCustomBlank && drawnBounds ? drawnBounds.minY : 0;
+    const maxY = isCustomBlank && drawnBounds ? drawnBounds.maxY : roomL;
+    const corners = [{x:minX,y:minY},{x:maxX,y:minY},{x:maxX,y:maxY},{x:minX,y:maxY}];
+    let uMin = Infinity, uMax = -Infinity;
+    corners.forEach(c => {
+      const u = (c.x - marker.x) * perp.x + (c.y - marker.y) * perp.y;
+      uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
+    });
+    const wallWidthFt = Math.max(1, uMax - uMin);
+    const items = placedDevices
+      .filter(d => ELEV_EQUIPMENT_TYPES.has(d.type))
+      .map(d => {
+        const rx = d.x - marker.x, ry = d.y - marker.y;
+        const depthAlong = rx * dir.x + ry * dir.y;
+        const u = rx * perp.x + ry * perp.y - uMin;
+        const isCeiling = d.wall === "ceiling" || d.mountWall === "ceiling";
+        const wFt = d.w || 0.5, hFt = d.h || 0.5;
+        const centerZ = d.z ?? roomH * 0.55;
+        const boxTop = isCeiling ? roomH : centerZ + hFt / 2;
+        const boxBot = isCeiling ? roomH - Math.min(hFt, 0.35) : centerZ - hFt / 2;
+        return { dev: d, depthAlong, u, wFt, boxTop, boxBot };
+      })
+      .filter(it => it.depthAlong > -0.75 && it.u > -it.wFt && it.u < wallWidthFt + it.wFt)
+      .sort((a, b) => b.depthAlong - a.depthAlong);
+    return { wallWidthFt, roomHFt: roomH, items };
+  };
+  const nextElevationLabel = () => {
+    let n = elevationMarkers.length;
+    let s = "";
+    do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+    return s;
+  };
+  const placeElevationMarker = (pos: {x:number;y:number}) => {
+    const id = Date.now();
+    setElevationMarkers(prev => [...prev, { id, x: pos.x, y: pos.y, angle: 0, label: nextElevationLabel() }]);
+    setSelectedElevationId(id);
+    setActiveElevationId(id);
+    setPlacingElevationMarker(false);
+  };
+  const handleElevMarkerMouseMove = (e: React.MouseEvent) => {
+    if (!elevMarkerDrag) return;
+    const pos = screenToWorld(e);
+    if (!pos) return;
+    setElevationMarkers(prev => prev.map(m => {
+      if (m.id !== elevMarkerDrag.id) return m;
+      if (elevMarkerDrag.mode === "move") return { ...m, x: pos.x, y: pos.y };
+      const dx = pos.x - m.x, dy = pos.y - m.y;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return m;
+      let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+      if (deg < 0) deg += 360;
+      return { ...m, angle: deg };
+    }));
+  };
+  const handleElevMarkerMouseUp = () => setElevMarkerDrag(null);
 
   // Zoom extents: fit the room (or the drawn walls' extents in custom-blank
   // mode) into the 600×420 view of the given canvas. All five canvases fit
@@ -3508,6 +3628,25 @@ export default function RoomDesignerPage() {
               <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Annotate</span>
             </div>
 
+            {/* Divider */}
+            <div style={{width:1,background:"rgb(var(--border))",margin:"6px 4px"}} />
+
+            {/* Elevation group */}
+            <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
+              <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
+                <button onClick={()=>{setPlacingElevationMarker(v=>!v);setPanMode(false);setMoveMode(false);}} title="Drop an elevation marker — point it at a wall to generate that wall's elevation below"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:placingElevationMarker?"rgba(14,165,233,0.12)":"transparent",border:`1px solid ${placingElevationMarker?"#0ea5e9":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                  onMouseEnter={e=>{if(!placingElevationMarker){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
+                  onMouseLeave={e=>{if(!placingElevationMarker){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="8"/><path d="M12 4 L15 9 L9 9 Z" fill={placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))"} stroke="none"/>
+                  </svg>
+                  <span style={{fontSize:9,color:placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Elevation</span>
+                </button>
+              </div>
+              <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Views</span>
+            </div>
+
             {/* Spacer pushes export button to far right */}
             <div style={{flex:1}}/>
             <div style={{display:"flex",alignItems:"center",paddingRight:4}}>
@@ -3545,13 +3684,13 @@ export default function RoomDesignerPage() {
         {/* Floor Plan */}
         <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
-          style={{background:cc.card,userSelect:"none",cursor:(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
-          onMouseMove={e=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleCalloutMouseMove(e);handleMarqueeMove(e);}}
-          onMouseUp={()=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
-          onMouseLeave={()=>{if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
+          style={{background:cc.card,userSelect:"none",cursor:placingElevationMarker?"crosshair":(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
+          onMouseMove={e=>{if(elevMarkerDrag){handleElevMarkerMouseMove(e);return;}if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleCalloutMouseMove(e);handleMarqueeMove(e);}}
+          onMouseUp={()=>{if(elevMarkerDrag){handleElevMarkerMouseUp();return;}if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
+          onMouseLeave={()=>{if(elevMarkerDrag){handleElevMarkerMouseUp();return;}if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
           onDoubleClick={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleDoubleClick(e);}}}
-          onMouseDown={e=>{if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0||annotate.hasSelection)){e.preventDefault();pushUndo();if(annotate.hasSelection)annotate.beginChange();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
-          onClick={e=>{if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();annotate.clearSelection();}}}>
+          onMouseDown={e=>{if(placingElevationMarker)return;if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0||annotate.hasSelection)){e.preventDefault();pushUndo();if(annotate.hasSelection)annotate.beginChange();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
+          onClick={e=>{if(placingElevationMarker){const pos=screenToWorld(e);if(pos)placeElevationMarker(pos);return;}if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();annotate.clearSelection();setSelectedElevationId(null);}}}>
 
           {viewMode==="plan" ? (
             <g>
@@ -4685,6 +4824,38 @@ export default function RoomDesignerPage() {
                   />
                 );
               })()}
+
+              {/* Elevation markers — Revit-style circle+arrow tags. Drag the
+                  circle to reposition, the arrowhead to point it at a wall;
+                  the Elevations pane below renders whichever one is active. */}
+              {elevationMarkers.map(m => {
+                const mx = pX(m.x), my = pY(m.y);
+                const isSelected = selectedElevationId === m.id;
+                const r = 10;
+                const dir = elevationDir(m.angle);
+                const edgeX = mx + dir.x * r, edgeY = my + dir.y * r;
+                const tipX = mx + dir.x * (r + 10), tipY = my + dir.y * (r + 10);
+                return (
+                  <g key={"elevm" + m.id}>
+                    <line x1={edgeX} y1={edgeY} x2={tipX} y2={tipY} stroke="#0ea5e9" strokeWidth={1.5}/>
+                    <circle cx={mx} cy={my} r={r} fill="rgba(14,165,233,0.15)" stroke="#0ea5e9" strokeWidth={isSelected?2.5:1.5}
+                      style={{cursor:"grab"}}
+                      onMouseDown={e=>{e.stopPropagation();setElevMarkerDrag({id:m.id,mode:"move"});setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
+                      onClick={e=>{e.stopPropagation();setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
+                    />
+                    <text x={mx} y={my+3.5} textAnchor="middle" fontSize={9} fontWeight={700} fill="#0ea5e9" pointerEvents="none">{m.label}</text>
+                    <circle cx={tipX} cy={tipY} r={5} fill="#0ea5e9" style={{cursor:"crosshair"}}
+                      onMouseDown={e=>{e.stopPropagation();setElevMarkerDrag({id:m.id,mode:"rotate"});setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
+                    />
+                    {isSelected && (
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setElevationMarkers(prev=>prev.filter(x=>x.id!==m.id));setActiveElevationId(prev=>prev===m.id?null:prev);setSelectedElevationId(null);}}>
+                        <circle cx={mx+r+6} cy={my-r-6} r={7} fill="#ef4444"/>
+                        <text x={mx+r+6} y={my-r-3} textAnchor="middle" fontSize={10} fill="#fff" fontWeight={700} pointerEvents="none">×</text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
             </g>
           ) : (
             <g>
@@ -5819,6 +5990,61 @@ export default function RoomDesignerPage() {
         </svg>
         {/* Wall mic zoom controls */}
         {zoomCluster("wallMic")}
+      </div>
+
+      {/* Row 5: Elevations — Revit-style, generated from whichever Elevation
+          Marker is active (dropped + pointed at a wall in the Plan View). */}
+      <div id="rd-print-title-elev" style={{borderTop:"1px solid rgb(var(--border))"}}>
+        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Elevations{collapseToggle("elev")}</div>
+      </div>
+      <div id="rd-print-page-elev" style={{display:collapsedCanvases.has("elev")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        {elevationMarkers.length === 0 ? (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:6,color:"rgb(var(--text-subtle))",fontSize:13,textAlign:"center",padding:24}}>
+            <div>No elevation markers placed yet.</div>
+            <div style={{fontSize:11}}>Use the <strong>Elevation</strong> tool in the toolbar above, then click inside the Plan View to drop one — drag its arrow to point it at a wall.</div>
+          </div>
+        ) : (() => {
+          const activeMarker = elevationMarkers.find(m => m.id === activeElevationId) || elevationMarkers[0];
+          const elevData = computeElevation(activeMarker);
+          const eScale = Math.min(500 / elevData.wallWidthFt, 260 / Math.max(1, elevData.roomHFt));
+          const eOffX = (600 - elevData.wallWidthFt * eScale) / 2;
+          const eFloorY = 370;
+          const ePX = (xFt: number) => eOffX + xFt * eScale;
+          const ePY = (zFt: number) => eFloorY - zFt * eScale;
+          return (
+            <>
+              <div style={{position:"absolute",top:8,left:8,zIndex:5,display:"flex",gap:4,flexWrap:"wrap",maxWidth:"70%"}}>
+                {elevationMarkers.map(m => (
+                  <button key={m.id} onClick={()=>setActiveElevationId(m.id)}
+                    style={{padding:"4px 10px",fontSize:11,fontWeight:activeMarker.id===m.id?700:400,background:activeMarker.id===m.id?"rgba(14,165,233,0.18)":"rgb(var(--forge-surface))",border:`1px solid ${activeMarker.id===m.id?"#0ea5e9":"rgb(var(--border))"}`,borderRadius:5,cursor:"pointer",color:activeMarker.id===m.id?"#0ea5e9":"rgb(var(--text-muted))"}}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <svg width="100%" height="100%" viewBox="0 0 600 420" style={{background:cc.card}}>
+                <text x={300} y={22} textAnchor="middle" fontSize={11} fontWeight={700} fill="rgb(var(--text-body))">Elevation {activeMarker.label} — facing {Math.round(activeMarker.angle)}°</text>
+                <line x1={ePX(0)} y1={eFloorY} x2={ePX(elevData.wallWidthFt)} y2={eFloorY} stroke="#475569" strokeWidth={2}/>
+                <rect x={ePX(0)} y={ePY(elevData.roomHFt)} width={elevData.wallWidthFt*eScale} height={elevData.roomHFt*eScale} fill="none" stroke="#b0b5be" strokeWidth={1.5}/>
+                <text x={ePX(elevData.wallWidthFt/2)} y={eFloorY+16} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(elevData.wallWidthFt)}</text>
+                <text x={ePX(-0.15)} y={ePY(elevData.roomHFt/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${ePX(-0.15)},${ePY(elevData.roomHFt/2)})`}>{toDisplay(elevData.roomHFt)}</text>
+                {elevData.items.length === 0 && (
+                  <text x={300} y={210} textAnchor="middle" fontSize={10} fill="rgb(var(--text-subtle))">No equipment along this line of sight</text>
+                )}
+                {elevData.items.map(it => {
+                  const x0 = ePX(it.u - it.wFt/2), x1 = ePX(it.u + it.wFt/2);
+                  const y0 = ePY(it.boxTop), y1 = ePY(it.boxBot);
+                  const boxColor = it.dev.color || "#8b5cf6";
+                  return (
+                    <g key={it.dev.uid}>
+                      <rect x={Math.min(x0,x1)} y={y0} width={Math.abs(x1-x0)} height={Math.max(2,y1-y0)} fill={boxColor} fillOpacity={0.18} stroke={boxColor} strokeWidth={1.2}/>
+                      <text x={(x0+x1)/2} y={y0-5} textAnchor="middle" fontSize={8} fill={boxColor} fontWeight={600}>{calloutLabel(it.dev)}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </>
+          );
+        })()}
       </div>
       </>
       </div>{/* end scrollable canvas */}
