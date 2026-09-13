@@ -50,7 +50,15 @@ export class DxfWriter {
     }
   }
 
-  text(x: number, y: number, height: number, value: string, layer = "0") {
+  // `align` matches the on-screen SVG textAnchor convention (start/middle/end
+  // rendered as left/center/right here) — the annotation Text tool supports
+  // centered and right-aligned text, and without a matching DXF horizontal
+  // justification code (group 72) every exported line would silently
+  // left-align at x instead, reading as a different layout than the app.
+  // Per the DXF TEXT spec, a non-default justification needs a *second*
+  // alignment point (group 11/21/31) equal to the same coordinate — the
+  // primary 10/20/30 point stays required either way.
+  text(x: number, y: number, height: number, value: string, layer = "0", align: "left" | "center" | "right" = "left") {
     if (!value) return;
     this.push(0, "TEXT");
     this.push(8, layer);
@@ -59,6 +67,12 @@ export class DxfWriter {
     this.push(30, 0);
     this.push(40, height.toFixed(4));
     this.push(1, value.replace(/[\r\n]+/g, " "));
+    if (align !== "left") {
+      this.push(72, align === "center" ? 1 : 2);
+      this.push(11, x.toFixed(4));
+      this.push(21, y.toFixed(4));
+      this.push(31, 0);
+    }
   }
 
   build(): string {
