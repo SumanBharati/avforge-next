@@ -138,12 +138,19 @@ async function main() {
     const geometry = await page2.evaluate(() => {
       const tag = (name, attr) => {
         const label = [...document.querySelectorAll("div")].find(d => d.textContent === name && d.children.length === 0);
-        let row = label;
-        while (row && !row.hasAttribute("draggable")) row = row.parentElement;
-        row?.setAttribute(attr, "1");
-        row?.parentElement?.setAttribute("data-testid", "rack-drop-zone");
+        let faceplate = label;
+        while (faceplate && !faceplate.hasAttribute("draggable")) faceplate = faceplate.parentElement;
+        faceplate?.setAttribute(attr, "1");
+        // The faceplate now sits a couple of levels inside a shared per-row
+        // device area (rows with multiple side-by-side items share one row
+        // div) — walk up past those (each only ~1 RU tall) to the actual
+        // rack container that owns onDragOver/onDrop, taller than any
+        // single row.
+        let container = faceplate;
+        while (container && container.getBoundingClientRect().height < 40) container = container.parentElement;
+        container?.setAttribute("data-testid", "rack-drop-zone");
         const labelRect = label.getBoundingClientRect();
-        const containerRect = row.parentElement.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
         return { labelRect: { x: labelRect.x, y: labelRect.y, width: labelRect.width, height: labelRect.height }, containerRect: { x: containerRect.x, y: containerRect.y, width: containerRect.width, height: containerRect.height } };
       };
       const existing = tag("Existing Tiny", "data-testid-existing");

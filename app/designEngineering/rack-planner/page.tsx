@@ -708,57 +708,67 @@ export default function RackPlannerPage() {
                     );
                     cursorRU-=count;
                   };
-                  [...mountedEntries].sort((a,b)=>(rackStartFor(b.item,b.index)+b.item.ru)-(rackStartFor(a.item,a.index)+a.item.ru)).forEach(({item,index:i}) => {
-                    const startRU=rackStartFor(item,i);
-                    pushEmpty(cursorRU-(startRU+item.ru-1),"gap-"+i);
-                    const h = item.ru * ruH;
+                  // Items that share the exact same RU range (same startRU
+                  // and ru — how two side-by-side devices actually land, see
+                  // getRackDropStart's horizontal-aware occupancy check) are
+                  // grouped into a single row: one set of rail numbers at
+                  // that row's real height, with each item's own faceplate
+                  // positioned inside it by its own xOffsetIn. Previously
+                  // every item drew its own full row (rails included)
+                  // regardless, so two devices sharing a row rendered as two
+                  // stacked 1U rows instead of one.
+                  const rows = new Map<string, { item: RackItem; index: number }[]>();
+                  mountedEntries.forEach(entry => {
+                    const key = `${rackStartFor(entry.item, entry.index)}:${entry.item.ru}`;
+                    (rows.get(key) ?? rows.set(key, []).get(key)!).push(entry);
+                  });
+                  Array.from(rows.values())
+                    .sort((a, b) => (rackStartFor(b[0].item, b[0].index) + b[0].item.ru) - (rackStartFor(a[0].item, a[0].index) + a[0].item.ru))
+                    .forEach((row, rowIdx) => {
+                    const startRU = rackStartFor(row[0].item, row[0].index);
+                    const ru = row[0].item.ru;
+                    pushEmpty(cursorRU-(startRU+ru-1),"gap-"+rowIdx);
+                    const h = ru * ruH;
+                    const railNumbers = (side: "l"|"r") => (
+                      <div style={{width:26,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",background:"rgb(var(--forge-panel))",borderLeft:side==="l"?"2px solid rgb(var(--border))":"1px solid rgb(var(--border))",borderRight:side==="r"?"2px solid rgb(var(--border))":"1px solid rgb(var(--border))"}}>
+                        {Array.from({length:ru},(_,r)=>(
+                          <div key={r} style={{fontSize:7,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace",lineHeight:ruH+"px",textAlign:"center"}}>{startRU+ru-1-r}</div>
+                        ))}
+                      </div>
+                    );
                     elements.push(
-                      <div key={"item-"+i}
-                        draggable
-                        onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index:i});}}
-                        onMouseDown={e=>e.stopPropagation()}
-                        onMouseEnter={()=>setHoveredRackIndex(i)}
-                        onMouseLeave={()=>setHoveredRackIndex(prev=>prev===i?null:prev)}
-                        onDragStart={e=>{
-                          const rowRect=e.currentTarget.getBoundingClientRect();
-                          rackDragOffsetY.current=e.clientY-rowRect.top;
-                          const rack=rackRef.current;
-                          if(rack){
-                            const rackRect=rack.getBoundingClientRect();
-                            const bayPx=rackRect.width-52;
-                            const faceplateLeftAbs=rackRect.left+26+(rackItemXIn(item)/RACK_USABLE_WIDTH_IN)*bayPx;
-                            rackDragOffsetXPx.current=e.clientX-faceplateLeftAbs;
-                          }
-                          e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",String(i));setDraggedRackIndex(i);setEditingIdx(null);
-                        }}
-                        onDragEnd={()=>{setDraggedRackIndex(null);setRackDropStartRU(null);setRackDropXIn(null);}}
-                        style={{display:"flex",alignItems:"stretch",height:h,outline:selectedIdxs.has(i)?"2px solid #8b5cf6":undefined,outlineOffset:-1,position:"relative",zIndex:selectedIdxs.has(i)?2:undefined,opacity:draggedRackIndex===i?0.45:1,cursor:draggedRackIndex===i?"grabbing":"grab",boxShadow:rackDropStartRU!==null&&draggedRackIndex===i?"0 0 0 2px #8b5cf6":undefined}}>
-                        {/* Left rail with RU numbers */}
-                        <div style={{width:26,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",background:"rgb(var(--forge-panel))",borderLeft:"2px solid rgb(var(--border))",borderRight:"1px solid rgb(var(--border))"}}>
-                          {Array.from({length:item.ru},(_,r)=>(
-                            <div key={r} style={{fontSize:7,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace",lineHeight:ruH+"px",textAlign:"center"}}>{startRU+item.ru-1-r}</div>
-                          ))}
-                        </div>
-
-                        {/* Device faceplate — the slot below is the full
-                            rail-to-rail click/drag target; the visible
-                            colored panel inside is only as wide as the
-                            equipment's actual physical width, so a half- or
-                            quarter-rack item doesn't visually claim the
-                            whole bay the way every item used to regardless
-                            of its real size. */}
-                        {(() => {
-                          const frac = rackWidthFraction(item.widthIn);
-                          const isFull = frac >= 0.999;
-                          // Positioned by the item's actual xOffsetIn (centered
-                          // by default until dragged — see rackItemXIn) rather
-                          // than always centered, so two narrower items can
-                          // sit side by side instead of stacking on top of
-                          // each other.
-                          const xFrac = rackItemXIn(item) / RACK_USABLE_WIDTH_IN;
-                          return (
-                            <div onClick={()=>{if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}setEditingIdx(editingIdx===i?null:i);}} style={{flex:1,position:"relative",cursor:"inherit",overflow:"hidden"}}>
-                              <div style={{position:"absolute",top:0,bottom:0,left:isFull?0:`${xFrac*100}%`,width:isFull?"100%":`${frac*100}%`,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:isFull?"none":"1px solid "+item.color+"44",borderRight:isFull?"none":"1px solid "+item.color+"44",display:"flex",alignItems:"center",padding:"0 12px",gap:8,overflow:"hidden",transition:"all 0.15s",outline:editingIdx===i?"1px solid "+item.color+"88":"none"}}>
+                      <div key={"row-"+rowIdx} style={{display:"flex",alignItems:"stretch",height:h}}>
+                        {railNumbers("l")}
+                        {/* Shared device area — one per item sharing this row,
+                            each an independently draggable/selectable
+                            faceplate positioned by its own xOffsetIn. */}
+                        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+                          {row.map(({item,index:i}) => {
+                            const frac = rackWidthFraction(item.widthIn);
+                            const isFull = frac >= 0.999;
+                            const xFrac = rackItemXIn(item) / RACK_USABLE_WIDTH_IN;
+                            return (
+                              <div key={"item-"+i}
+                                draggable
+                                onContextMenu={e=>{e.preventDefault();e.stopPropagation();setRackContextMenu({x:e.clientX,y:e.clientY,index:i});}}
+                                onMouseDown={e=>e.stopPropagation()}
+                                onMouseEnter={()=>setHoveredRackIndex(i)}
+                                onMouseLeave={()=>setHoveredRackIndex(prev=>prev===i?null:prev)}
+                                onDragStart={e=>{
+                                  const rowRect=e.currentTarget.getBoundingClientRect();
+                                  rackDragOffsetY.current=e.clientY-rowRect.top;
+                                  const rack=rackRef.current;
+                                  if(rack){
+                                    const rackRect=rack.getBoundingClientRect();
+                                    const bayPx=rackRect.width-52;
+                                    const faceplateLeftAbs=rackRect.left+26+(rackItemXIn(item)/RACK_USABLE_WIDTH_IN)*bayPx;
+                                    rackDragOffsetXPx.current=e.clientX-faceplateLeftAbs;
+                                  }
+                                  e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",String(i));setDraggedRackIndex(i);setEditingIdx(null);
+                                }}
+                                onDragEnd={()=>{setDraggedRackIndex(null);setRackDropStartRU(null);setRackDropXIn(null);}}
+                                onClick={()=>{if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}setEditingIdx(editingIdx===i?null:i);}}
+                                style={{position:"absolute",top:0,bottom:0,left:isFull?0:`${xFrac*100}%`,width:isFull?"100%":`${frac*100}%`,background:`linear-gradient(180deg, ${item.color}18 0%, ${item.color}08 100%)`,border:"1px solid "+item.color+"44",borderLeft:isFull?"none":"1px solid "+item.color+"44",borderRight:isFull?"none":"1px solid "+item.color+"44",display:"flex",alignItems:"center",padding:"0 12px",gap:8,overflow:"hidden",transition:"all 0.15s",outline:selectedIdxs.has(i)?"2px solid #8b5cf6":editingIdx===i?"1px solid "+item.color+"88":"none",outlineOffset:selectedIdxs.has(i)?-1:0,zIndex:selectedIdxs.has(i)?2:undefined,opacity:draggedRackIndex===i?0.45:1,cursor:draggedRackIndex===i?"grabbing":"grab",boxShadow:rackDropStartRU!==null&&draggedRackIndex===i?"0 0 0 2px #8b5cf6":undefined}}>
                                 {/* Device label */}
                                 <div style={{flex:1,minWidth:0}}>
                                   <div style={{fontSize:item.ru>=2?11:10,color:"rgb(var(--text-body))",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
@@ -772,15 +782,10 @@ export default function RackPlannerPage() {
                                     style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",zIndex:3,width:18,height:18,padding:0,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(239,68,68,0.45)",borderRadius:4,background:"rgb(var(--forge-panel))",color:"#ef4444",fontSize:15,lineHeight:1,cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.18)"}}>×</button>
                                 )}
                               </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Right rail with RU numbers */}
-                        <div style={{width:26,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",background:"rgb(var(--forge-panel))",borderRight:"2px solid rgb(var(--border))",borderLeft:"1px solid rgb(var(--border))"}}>
-                          {Array.from({length:item.ru},(_,r)=><div key={r} style={{fontSize:7,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace",lineHeight:ruH+"px",textAlign:"center"}}>{startRU+item.ru-1-r}</div>)}
+                            );
+                          })}
                         </div>
-
+                        {railNumbers("r")}
                       </div>
                     );
                     cursorRU=startRU-1;
