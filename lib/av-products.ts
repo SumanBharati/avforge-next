@@ -56,14 +56,16 @@ export interface AVProduct {
   coverage_depth_ft: number | null;
 }
 
-const SEARCHABLE_PRODUCT_COLUMNS = ["manufacturer", "model_name", "category", "part_number", "type", "notes"];
+const SEARCHABLE_PRODUCT_COLUMNS = ["manufacturer", "model_name", "part_number"];
 
-// Fuzzy, multi-field search: matches on Manufacturer, Model, Category, Part
-// number, and Description (the "notes" column) — not just exact model numbers.
-// A broad ILIKE fetch first gathers candidates (any word matching any field),
-// with a fallback to a larger unfiltered pool when that finds too few, then
-// results are ranked by close-match relevance so near-misses (typos, partial
-// numbers, words in a different order) still surface.
+// Fuzzy search restricted to Manufacturer, Model, and Part Number only —
+// deliberately excludes Category/Type/Notes, which used to pull in every
+// product in a broad category (e.g. searching "camera" surfacing unrelated
+// makes/models just because their category field said "Camera"). A broad
+// ILIKE fetch first gathers candidates (any word matching any of those three
+// fields), with a fallback to a larger unfiltered pool when that finds too
+// few, then results are ranked by close-match relevance so near-misses
+// (typos, partial part numbers, words in a different order) still surface.
 export async function searchProducts(query: string, limit = 30): Promise<AVProduct[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -87,7 +89,7 @@ export async function searchProducts(query: string, limit = 30): Promise<AVProdu
   }
 
   return rankByFuzzyMatch(trimmed, candidates, (p: any) => [
-    p.manufacturer, p.model_name, p.category, p.part_number, p.type, p.notes,
+    p.manufacturer, p.model_name, p.part_number,
   ], limit);
 }
 

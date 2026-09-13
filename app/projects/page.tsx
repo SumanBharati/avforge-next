@@ -220,13 +220,13 @@ export default function ProjectsPage() {
             <option value="">All Clients</option>
             {uniqueClients.map((c) => (<option key={c} value={c}>{c}</option>))}
           </select>
-          <select value={filterSales} onChange={(e) => setFilterSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Sales Executives</option>
-            {uniqueSales.map((s) => (<option key={s} value={s}>{s}</option>))}
-          </select>
           <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)} className="forge-input w-auto min-w-[140px] py-1.5 text-[12px]">
             <option value="">All Stages</option>
             {Object.entries(PHASE_STYLES).map(([key, { label }]) => (<option key={key} value={key}>{label}</option>))}
+          </select>
+          <select value={filterSales} onChange={(e) => setFilterSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+            <option value="">All Sales Executives</option>
+            {uniqueSales.map((s) => (<option key={s} value={s}>{s}</option>))}
           </select>
           <select value={filterPreSales} onChange={(e) => setFilterPreSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
             <option value="">All Pre Sales Engineers</option>

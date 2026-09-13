@@ -34,11 +34,29 @@ function diceCoefficient(a: string, b: string): number {
 // otherwise the best bigram similarity against the field as a whole or any of its
 // space-separated tokens (so "swithcer" still matches well against "Switcher" inside
 // a longer model/description string).
+// Below this length, Dice similarity is unreliable: a 3-character string has
+// only 2 bigrams, so any single coincidentally-shared bigram already implies
+// 50%+ "similarity" — e.g. the model "DTP2 T 212" would otherwise fuzzy-match
+// a totally unrelated query like "i12" just because both reduce to the digits
+// "12". An exact substring match of any length is still caught immediately by
+// the literal check below, so this only narrows the approximate/typo-tolerant
+// path — which is what a short, mostly-numeric model/part fragment doesn't
+// meaningfully support anyway (unlike a real word typo, e.g. "swithcer").
+const MIN_FUZZY_LEN = 4;
+
 function scoreWordAgainstField(word: string, field: string): number {
   const f = field.toLowerCase();
   if (f.includes(word)) return 1;
+  // A query shorter than this relies on the exact-substring check above only
+  // — too short for Dice similarity against anything to mean much (a short
+  // field like a bare part number would hit the same unreliable-short-string
+  // problem even without token-splitting).
+  if (word.length < MIN_FUZZY_LEN) return 0;
   let best = diceCoefficient(word, f);
+  // Splitting on separators lets a word match a specific token inside a
+  // longer field (e.g. "switcher" against "AV Switcher Pro").
   for (const token of f.split(/[\s\-_/]+/)) {
+    if (token.length < MIN_FUZZY_LEN) continue;
     const sim = diceCoefficient(word, token);
     if (sim > best) best = sim;
   }

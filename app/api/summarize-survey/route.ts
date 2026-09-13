@@ -55,7 +55,6 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "stc_rating": "",
       "reflective_surfaces": "",
       "acoustic_treatment": "",
-      "rt60_estimate": "",
       "sound_masking": "",
       "acoustics_notes": "",
 
@@ -63,7 +62,6 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "network_drop_locations": "",
       "client_provides_network": "",
       "idf_mdf_location": "",
-      "switch_type": "",
       "poe_available": "",
       "vlan_available": "",
       "multicast": "",
@@ -87,7 +85,6 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "content_type": "",
       "display_mounting": "",
       "structural_support": "",
-      "existing_displays": "",
       "camera_locations": "",
       "camera_requirements": "",
       "display_notes": "",
@@ -97,7 +94,6 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "mic_type": "",
       "mic_pickup_zones": "",
       "aec_required": "",
-      "existing_audio": "",
       "assistive_listening": "",
       "audio_notes": "",
 
@@ -106,7 +102,6 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "scheduling_panel": "",
       "uc_platform": "",
       "byod_requirements": "",
-      "existing_control": "",
       "occupancy_sensor": "",
       "control_notes": "",
 
@@ -117,10 +112,8 @@ Return ONLY valid JSON (no markdown, no explanation) with this structure:
       "structural_notes": "",
 
       "ada_required": "",
-      "ada_reach": "",
       "fire_alarm": "",
       "emergency_paging": "",
-      "code_jurisdiction": "",
       "compliance_notes": ""
     }
   ]
@@ -135,13 +128,17 @@ Rules:
 
 - scope_of_work: A concise summary of the AV scope of work for this room — what systems are being installed or upgraded, key requirements, and any constraints or special considerations mentioned.
 
-Free-form textarea fields — use these as catch-alls for details that don't fit a select option:
-- control_notes: touch panel REQUIREMENTS beyond location — quantity, make/model (e.g. "Crestron TSW-770"), screen size, features (LED bar, mic, scheduling), mounting specifics. Also auto-on/off, integration with lighting/HVAC/shades, scheduling platform.
-- existing_control: existing control processors, touch panels, keypads — make/model, condition, reuse or replace.
-- audio_notes / existing_audio / mic_pickup_zones: audio detail that doesn't fit mic_type / speaker_type / aec_required.
-- display_notes / existing_displays: display detail beyond display_type / content_type / display_mounting.
-- network_notes: IT contacts, firewall, QoS, cloud service access.
-- pathway_notes / structural_notes / compliance_notes / room_notes / building_notes / lighting_notes / electrical_notes / acoustics_notes: section-level overflow.
+Free-form textarea "_notes" fields — every section has one, and it is the
+catch-all for anything relevant to that section that doesn't have its own
+dedicated field above. If a detail doesn't fit any specific field, fold it
+into that section's _notes field instead of leaving it out:
+- control_notes: touch panel REQUIREMENTS beyond location — quantity, make/model (e.g. "Crestron TSW-770"), screen size, features (LED bar, mic, scheduling), mounting specifics. Also auto-on/off, integration with lighting/HVAC/shades, scheduling platform, and any EXISTING control processors/touch panels/keypads (make/model, condition, reuse or replace).
+- audio_notes: audio detail that doesn't fit mic_type / speaker_type / aec_required / mic_pickup_zones — including any EXISTING audio equipment (make/model, condition, reuse or replace).
+- display_notes: display detail beyond display_type / content_type / display_mounting — including any EXISTING displays (make/model, size, condition, reuse or replace).
+- network_notes: IT contacts, firewall, QoS, cloud service access, and switch type/make/model if mentioned.
+- acoustics_notes: also capture an RT60 estimate here if one is discussed or measured — there's no dedicated field for it.
+- compliance_notes: also capture ADA reach/mounting-height measurements and the code jurisdiction / authority having jurisdiction (AHJ) here if mentioned — there's no dedicated field for either.
+- pathway_notes / structural_notes / room_notes / building_notes / lighting_notes / electrical_notes: section-level overflow for their respective sections.
 
 For "select" type fields, use the EXACT option text from these choices:
 - room_purpose: Boardroom, Conference Room, Huddle Room, Training Room, Classroom, Lecture Hall, Auditorium, Courtroom, Council Chamber, Command Center, Lobby, Digital Signage, Multipurpose, Divisible, Worship Space, Performance Venue, Other
@@ -150,7 +147,6 @@ For "select" type fields, use the EXACT option text from these choices:
 - hvac_noise: "Not noticeable", "Slightly noticeable", "Moderately noticeable — may affect speech", "Significant — will require mitigation", "Severe — diffusers directly over mic zones"
 - sound_isolation: "Not a concern", "Moderate — adjacent offices", "High — adjacent courtroom / boardroom", "Critical — SCIF / classified", "Unknown"
 - stc_rating: "STC 30-35 (standard single drywall)", "STC 40-45 (double drywall / insulated)", "STC 50-55 (rated partition)", "STC 55+ (high isolation / masonry)", "Unknown"
-- rt60_estimate: "< 0.4s (very dead / treated)", "0.4–0.6s (good for conferencing)", "0.6–0.8s (acceptable)", "0.8–1.2s (reverberant — needs treatment)", "1.2s+ (very reverberant)", "Unknown"
 - sound_masking: "None", "Existing system — functional", "Existing system — non-functional", "Planned / specified", "Recommended"
 - poe_available: "Yes — PoE+ (802.3at, 30W)", "Yes — PoE++ (802.3bt, 60W/90W)", "Standard PoE only (802.3af, 15.4W)", "No PoE — midspan injectors needed", "Unknown"
 - vlan_available: "Yes — existing AV VLAN", "Yes — IT will create", "No — shared network", "Unknown — needs coordination with IT"
@@ -181,11 +177,10 @@ For "select" type fields, use the EXACT option text from these choices:
 - ceiling_weight: "Standard (not load-rated)", "Load-rated (specify lbs)", "Open — steel structure above", "Concrete deck — anchor directly", "Unknown"
 - seismic_zone: "Not applicable", "Zone 1–2 (low)", "Zone 3 (moderate)", "Zone 4 (high — California, Pacific NW)", "Unknown — check local code"
 - ada_required: "Yes — public / assembly space", "Yes — government facility", "Partial — ALS only", "No — private space", "Unknown"
-- ada_reach: "Verified — 15\\" to 48\\" AFF", "Needs verification", "Not applicable"
 - fire_alarm: "Required — mute audio on alarm", "Required — visual strobe in room", "Not required", "Unknown"
 - emergency_paging: "Required — integration with AV speakers", "Separate system (not AV)", "Not required", "Unknown"
 
-IMPORTANT for touch panels: touch_panel_location is a LOCATION select only. Any discussion of quantity, make/model, screen size, features, or specific hardware requirements for touch panels goes in control_notes. Existing touch panels being reused/replaced goes in existing_control.
+IMPORTANT for touch panels: touch_panel_location is a LOCATION select only. Any discussion of quantity, make/model, screen size, features, or specific hardware requirements for touch panels — including existing touch panels being reused/replaced — goes in control_notes.
 ${existingRooms?.length ? `\nExisting rooms in the survey: ${existingRooms.join(", ")}. Update these if referenced, or add new ones.` : ""}`,
       messages: [{ role: "user", content: `Here is the conversation transcript from a site survey:\n\n${transcript}` }],
     });

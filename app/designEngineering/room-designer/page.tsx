@@ -6,10 +6,13 @@ import { Video, Monitor, Presentation } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import { searchProducts } from "@/lib/av-products";
+import { searchOrgLibrary } from "@/lib/equipment-library";
 import { useBOM } from "@/lib/bom-context";
+import { useOrg } from "@/components/OrgProvider";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
+import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
 
 /* Theme-aware canvas colors */
 const canvasColors = {
@@ -86,7 +89,109 @@ interface DeviceCatalogItem {
   coverageDepthFt?: number | null;
 }
 interface PlacedDevice extends DeviceCatalogItem {
-  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; wallType?: "drywall"|"glass"|"solid"; rotation?: number; wallUid?: number;
+  uid: number; x: number; y: number; z: number; mountWall: string; hfov?: number; vfov?: number; covShape?: "round"|"square"; covDiameter?: number; covW?: number; covL?: number; dispersion?: number; wallAngle?: number; wallType?: "drywall"|"glass"|"solid"; rotation?: number; wallUid?: number;
+  // Manual rotation nudge for a camera's facing direction, in degrees, added
+  // on top of whatever wall-facing angle auto-snapping computed — set via the
+  // inline rotate button next to the delete "×" on a selected camera. Kept
+  // separate from `rotation` (the wall's own run angle, used for icon
+  // orientation) since a camera's true facing has an inside/outside
+  // ambiguity `rotation` alone can't resolve, and this is purely a user
+  // override on top of it.
+  facingOverrideDeg?: number;
+  // Equipment spec fields, editable via the same "Edit Equipment" form used
+  // by Signal Flow Builder/Rack Planner — mostly informational for a floor
+  // plan (this tool has no cabling/rack concept of its own), kept here only
+  // so nothing the user fills in through that shared form gets silently
+  // dropped. Only mfr/model/price/part_number, and hfov/vfov/coverage above,
+  // are actually populated automatically from a library search.
+  mfr?: string; model?: string; price?: number; part_number?: string | null;
+  cat?: string; msrp?: number | null; cost?: number | null; margin?: number | null; markup?: number | null;
+  ports?: Array<{ side: string; signal: string; dir: string; label: string; connector?: string }>;
+  amp_draw?: number | null; voltage?: number | null; power_watts?: number | null; btu_hr?: number | null;
+  rackMounted?: boolean; rack_units?: number | null; rack_ear_included?: boolean;
+  width_in?: number | null; height_in?: number | null; depth_in?: number | null; weight_lb?: number | null;
+}
+
+// Room Designer's own placed-device model has no separate manufacturer/model
+// breakdown or ports/rack/power spec — "name" (e.g. '43" Display') is the one
+// user-facing label, and "type" (display/camera/mic/...) drives which SVG
+// branch renders it, so it must never be overwritten by a freeform edit.
+// These two functions bridge that model to/from the same EquipmentFormValue
+// shape Signal Flow Builder and Rack Planner already use, so the Edit
+// Equipment context-menu option behaves identically everywhere in the app.
+// "W (in)"/"H (in)" are deliberately wired to the device's actual on-canvas
+// footprint (feet, ×12) rather than left as inert spec fields — that's the
+// only sense "size" has for a floor-plan device, and it's exactly what
+// resizing a device here should mean.
+function deviceToFormValue(d: PlacedDevice): EquipmentFormValue {
+  return {
+    manufacturer: d.mfr || "",
+    model: d.model || "",
+    category: d.cat || "",
+    notes: d.name || "",
+    unitCost: d.price ?? 0,
+    partNumber: d.part_number ?? null,
+    msrp: d.msrp ?? null,
+    cost: d.cost ?? null,
+    margin: d.margin ?? null,
+    markup: d.markup ?? null,
+    ports: d.ports || [],
+    ampDraw: d.amp_draw ?? null,
+    voltage: d.voltage ?? null,
+    powerWatts: d.power_watts ?? null,
+    btuHr: d.btu_hr ?? null,
+    rackMounted: d.rackMounted ?? false,
+    rackUnits: d.rack_units ?? null,
+    rackEarsIncluded: d.rack_ear_included ?? false,
+    widthIn: Math.round((d.w || 0) * 12 * 100) / 100,
+    heightIn: Math.round((d.h || 0) * 12 * 100) / 100,
+    depthIn: d.depth_in ?? null,
+    weightLb: d.weight_lb ?? null,
+    hfovDeg: d.hfov ?? null,
+    vfovDeg: d.vfov ?? null,
+    coveragePattern: d.covShape === "round" ? "circular" : d.covShape === "square" ? "rectangular" : null,
+    coverageDiameterFt: d.covDiameter ?? null,
+    coverageAngleDeg: d.dispersion ?? null,
+    coverageWidthFt: d.covW ?? null,
+    coverageDepthFt: d.covL ?? null,
+  };
+}
+
+function applyFormValueToDevice(d: PlacedDevice, v: EquipmentFormValue): PlacedDevice {
+  return {
+    ...d,
+    mfr: v.manufacturer,
+    model: v.model,
+    cat: v.category,
+    name: v.notes || d.name,
+    price: v.unitCost,
+    part_number: v.partNumber,
+    msrp: v.msrp,
+    cost: v.cost,
+    margin: v.margin,
+    markup: v.markup,
+    ports: v.ports,
+    amp_draw: v.ampDraw,
+    voltage: v.voltage,
+    power_watts: v.powerWatts,
+    btu_hr: v.btuHr,
+    rackMounted: v.rackMounted,
+    rack_units: v.rackUnits,
+    rack_ear_included: v.rackEarsIncluded,
+    width_in: v.widthIn,
+    height_in: v.heightIn,
+    depth_in: v.depthIn,
+    weight_lb: v.weightLb,
+    w: v.widthIn != null && v.widthIn > 0 ? v.widthIn / 12 : d.w,
+    h: v.heightIn != null && v.heightIn > 0 ? v.heightIn / 12 : d.h,
+    hfov: v.hfovDeg ?? undefined,
+    vfov: v.vfovDeg ?? undefined,
+    covShape: v.coveragePattern === "circular" ? "round" : v.coveragePattern === "rectangular" ? "square" : undefined,
+    covDiameter: v.coverageDiameterFt ?? undefined,
+    dispersion: v.coverageAngleDeg ?? undefined,
+    covW: v.coverageWidthFt ?? undefined,
+    covL: v.coverageDepthFt ?? undefined,
+  };
 }
 
 const roomTypes: RoomType[] = [
@@ -217,9 +322,13 @@ export default function RoomDesignerPage() {
   const [modalResults,  setModalResults]  = useState<any[]>([]);
   const [modalLoading,  setModalLoading]  = useState(false);
   const [modalSelected, setModalSelected] = useState<any>(null);
+  const [modalGlobalSearch, setModalGlobalSearch] = useState(false);
   const [modalDeviceName, setModalDeviceName] = useState("");
   const [modalMake,     setModalMake]     = useState("");
   const [modalModel,    setModalModel]    = useState("");
+  const [deviceContextMenu, setDeviceContextMenu] = useState<{x:number;y:number;uid:number}|null>(null);
+  const [rotatePopup, setRotatePopup] = useState<{x:number;y:number;uid:number;value:string}|null>(null);
+  const [editingDevice, setEditingDevice] = useState<PlacedDevice|null>(null);
   const [showTable,     setShowTable]     = useState(false);
   const [showTableSizeEditor, setShowTableSizeEditor] = useState(false);
   const [tableEditW,    setTableEditW]    = useState("");
@@ -532,6 +641,7 @@ export default function RoomDesignerPage() {
 
   // Sync placed AV devices to shared BOM
   const { updateSlice } = useBOM();
+  const { activeOrg } = useOrg();
   React.useEffect(() => {
     updateSlice('room-designer', placedDevices
       .filter(d => d.type !== 'furniture')
@@ -553,21 +663,43 @@ export default function RoomDesignerPage() {
     }
   }, [avDeviceCount, rdLoaded]);
 
-  // Modal: search products DB
+  // Modal: search the org's own Equipment Library first (same convention as
+  // Signal Flow Builder), with the global AV Forge Library as an explicit
+  // fallback — org library items never carry Room Designer's rd_type/rd_wall/
+  // rd_icon placement metadata (only av_products has been enriched with
+  // those), so addFromModal's category/name-based inference below is what
+  // places them; it already exists for exactly this "not yet enriched" case.
   useEffect(() => {
     if (!modalSearch.trim()) { setModalResults([]); return; }
+    if (modalGlobalSearch) {
+      setModalLoading(true);
+      const timer = setTimeout(async () => {
+        try {
+          const dbData = await searchProducts(modalSearch).catch(() => []);
+          setModalResults(dbData.map((p: any) => ({
+            type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
+            color: p.color || "#64748b", cat: p.category,
+            // Room Designer placement fields (null when product not yet enriched)
+            rd_type: p.rd_type, rd_wall: p.rd_wall,
+            rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
+            rd_icon: p.rd_icon,
+            // Camera FOV / mic-speaker coverage spec, also null when not yet enriched
+            hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
+            coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
+            coverage_width_ft: p.coverage_width_ft, coverage_depth_ft: p.coverage_depth_ft,
+          })));
+        } finally { setModalLoading(false); }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+    if (!activeOrg) { setModalResults([]); return; }
     setModalLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const dbData = await searchProducts(modalSearch).catch(() => []);
-        setModalResults(dbData.map((p: any) => ({
-          type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
+        const orgData = await searchOrgLibrary(modalSearch, activeOrg.id).catch(() => []);
+        setModalResults(orgData.map((p: any) => ({
+          type: p.description || p.model, mfr: p.manufacturer, price: p.unit_cost,
           color: p.color || "#64748b", cat: p.category,
-          // Room Designer placement fields (null when product not yet enriched)
-          rd_type: p.rd_type, rd_wall: p.rd_wall,
-          rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
-          rd_icon: p.rd_icon,
-          // Camera FOV / mic-speaker coverage spec, also null when not yet enriched
           hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
           coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
           coverage_width_ft: p.coverage_width_ft, coverage_depth_ft: p.coverage_depth_ft,
@@ -575,11 +707,11 @@ export default function RoomDesignerPage() {
       } finally { setModalLoading(false); }
     }, 300);
     return () => clearTimeout(timer);
-  }, [modalSearch]);
+  }, [modalSearch, modalGlobalSearch, activeOrg?.id]);
 
   const closeModal = () => {
     setShowAddModal(false); setModalSearch(""); setModalSelected(null);
-    setModalDeviceName(""); setModalMake(""); setModalModel("");
+    setModalDeviceName(""); setModalMake(""); setModalModel(""); setModalGlobalSearch(false);
   };
 
   const exportAsPDF = () => {
@@ -1179,10 +1311,13 @@ export default function RoomDesignerPage() {
           setWallSnapPoint(null);
         }
         setPlacedDevices(prev => prev.map(d => d.uid === dragUid ? { ...d, x:newX, y:newY } : d));
-      } else if (dev.type === "display") {
-        // Displays move freely and stick flush to the nearest wall — boundary
-        // or drawn — when within snapping distance. The free (unsnapped)
-        // position follows the cursor so dragging away from a wall un-sticks.
+      } else if (dev.type === "display" && dev.mountWall !== "ceiling") {
+        // Displays move freely and stick flush to the nearest wall —
+        // boundary or drawn — when within snapping distance. The free
+        // (unsnapped) position follows the cursor so dragging away from a
+        // wall un-sticks. A display can legitimately sit away from any wall
+        // (e.g. on a credenza), so unlike cameras below it's allowed to
+        // free-float when nothing is close enough to snap to.
         const fp = freeDragPos.current ?? { x: dev.x, y: dev.y };
         const nx = fp.x + dxW, ny = fp.y + dyW;
         freeDragPos.current = { x: nx, y: ny };
@@ -1190,6 +1325,30 @@ export default function RoomDesignerPage() {
         if (snap && snap.dist < 1.5) {
           setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:snap.x, y:snap.y, mountWall:snap.mountWall, wallUid:snap.wallUid, rotation:snap.angleDeg} : d));
         } else {
+          const fx = Math.max(cMinX, Math.min(cMaxX, nx)), fy = Math.max(cMinY, Math.min(cMaxY, ny));
+          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:fx, y:fy} : d));
+        }
+      } else if (dev.type === "camera" && dev.mountWall !== "ceiling") {
+        // A wall camera always belongs on some wall — there's no meaningful
+        // "floating in open space" state for it the way there is for a
+        // display — so unlike displays above, this always snaps to whichever
+        // wall (boundary or custom-drawn) is nearest, with no minimum-
+        // distance gate. Gating on distance (as displays do) let a drag path
+        // that passed a room corner land more than the gate's radius from
+        // every wall segment at once — the camera then free-floated, clamped
+        // to a padded box outside the actual drawn room, and stayed stuck
+        // there since nothing pulled it back in: exactly the reported
+        // "invisible wall" — unable to drag it further inward.
+        const fp = freeDragPos.current ?? { x: dev.x, y: dev.y };
+        const nx = fp.x + dxW, ny = fp.y + dyW;
+        freeDragPos.current = { x: nx, y: ny };
+        const snap = snapDeviceToNearestWall(nx, ny);
+        if (snap) {
+          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:snap.x, y:snap.y, mountWall:snap.mountWall, wallUid:snap.wallUid, rotation:snap.angleDeg} : d));
+        } else {
+          // No wall to snap to at all (e.g. a custom room with no walls
+          // drawn yet) — fall back to plain clamped movement rather than
+          // getting stuck with no update.
           const fx = Math.max(cMinX, Math.min(cMaxX, nx)), fy = Math.max(cMinY, Math.min(cMaxY, ny));
           setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:fx, y:fy} : d));
         }
@@ -1357,6 +1516,36 @@ export default function RoomDesignerPage() {
   };
 
   const removeDevice = (uid: number) => { pushUndo(); setPlacedDevices(prev=>prev.filter(d=>d.uid!==uid)); };
+
+  const handleDeviceContextMenu = (e: React.MouseEvent, uid: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedUid(uid);
+    setDeviceContextMenu({x:e.clientX, y:e.clientY, uid});
+  };
+
+  const duplicateDevice = (uid: number) => {
+    const dev = placedDevices.find(d=>d.uid===uid);
+    if (!dev) return;
+    pushUndo();
+    const newUid = Date.now();
+    const offset = Math.min(1, Math.max(roomW, roomL) * 0.05);
+    setPlacedDevices(prev=>[...prev, {...dev, uid:newUid, x:dev.x+offset, y:dev.y+offset}]);
+    setSelectedUid(newUid);
+  };
+
+  // Manual rotate: sets the camera's facing-direction nudge (on top of
+  // whatever the auto wall-snap computed — see facingOverrideDeg on
+  // PlacedDevice, which is what the camera's own FOV-cone rendering reads)
+  // to an exact value typed into the rotate popup, since a camera's true
+  // facing can't just be set to an absolute compass angle without redoing
+  // the same inside/outside wall-normal resolution its renderer already does.
+  const setCameraRotation = (uid: number, deg: number) => {
+    const dev = placedDevices.find(d=>d.uid===uid);
+    if (!dev) return;
+    pushUndo();
+    setPlacedDevices(prev=>prev.map(d=>d.uid===uid?{...d, facingOverrideDeg:deg}:d));
+  };
 
   // Snap world coords to nearest wall, return wall name and position (0-1) along that wall
   const snapToWall = (wx: number, wy: number): { wall: "north"|"south"|"east"|"west"|"drawn"; pos: number; wallUid?: number } => {
@@ -2079,7 +2268,15 @@ export default function RoomDesignerPage() {
   // Keyboard handler for wall drawing escape + wall edge delete
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isInputFocused = document.activeElement === wallInputRef.current;
+      // Any focused text input should suppress the app-level Delete/Backspace
+      // shortcut below — not just the one wall-length input this used to
+      // check for. Without this, typing into e.g. the camera rotate popup
+      // (backspacing the default "0" before typing a real angle) fell
+      // through to "no input is focused" and deleted the selected device
+      // instead of editing the text field.
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInputFocused = activeEl === wallInputRef.current
+        || activeEl?.tagName === "INPUT" || activeEl?.tagName === "TEXTAREA" || !!activeEl?.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         popUndo();
@@ -2467,13 +2664,42 @@ export default function RoomDesignerPage() {
   // In custom blank mode, use drawn room dimensions; nil if nothing drawn
   const hasRoomContent = !isCustomBlank || (showTable && !tableDeleted) || drawnBounds !== null;
   const validRoom = hasRoomContent && !multipleRooms;
-  // North wall is the display wall by convention: depth is the north→south
-  // extent (y axis), width the east→west extent (x axis)
+  // Depth is the north→south extent (y axis), width the east→west extent
+  // (x axis) — independent of which wall the guide below is evaluating.
   const effectiveDepth = isCustomBlank ? (drawnBounds ? drawnBounds.maxY - drawnBounds.minY : 0) : roomL;
   const effectiveWidth = isCustomBlank ? (drawnBounds ? drawnBounds.maxX - drawnBounds.minX : 0) : roomW;
-  const farthestViewer = !validRoom ? 0
-    : showTable && !tableDeleted ? tableWallDist + tL + Math.max(seatDist, 0.35)
-    : Math.max(0, effectiveDepth - 4);
+
+  // Which wall the Display Size Guide / Camera Guide evaluate as the
+  // display wall — the table itself doesn't move, this just recomputes
+  // "what if the display were on this wall instead" using the room/table
+  // geometry that's already there. The table is placed at `tableWallDist`
+  // from the north wall (north/south share that depth axis) and is assumed
+  // centered left-right (so it's symmetric for east/west).
+  const [guideWall, setGuideWall] = useState<"north" | "south" | "east" | "west">("north");
+  const guideIsNS = guideWall === "north" || guideWall === "south";
+  const guideDepth = guideIsNS ? effectiveDepth : effectiveWidth;
+  const seatMargin = Math.max(seatDist, 0.35);
+
+  let closestViewer = 0, farthestViewer = 0;
+  if (validRoom) {
+    if (showTable && !tableDeleted) {
+      if (guideWall === "north") {
+        closestViewer = tableWallDist;
+        farthestViewer = tableWallDist + tL + seatMargin;
+      } else if (guideWall === "south") {
+        closestViewer = effectiveDepth - (tableWallDist + tL);
+        farthestViewer = effectiveDepth - tableWallDist + seatMargin;
+      } else {
+        // East/west: table assumed centered across the room's width.
+        const nearSide = (effectiveWidth - tW) / 2;
+        closestViewer = nearSide;
+        farthestViewer = effectiveWidth - nearSide + seatMargin;
+      }
+    } else {
+      closestViewer = 4;
+      farthestViewer = Math.max(0, guideDepth - 4);
+    }
+  }
   const imageHeightIn = farthestViewer / 6 * 12;  // VR 6:1 = 3% element height, converted to inches
   const ar16x9 = 16 / 9;
   const reqDiagIn = imageHeightIn * Math.sqrt(ar16x9 * ar16x9 + 1);
@@ -2482,11 +2708,11 @@ export default function RoomDesignerPage() {
   const showDisplayGuide = farthestViewer > 0;
 
   // ── Camera Guide ───────────────────────────────────────────────────────
-  const closestViewer = !validRoom ? 0
-    : showTable && !tableDeleted ? tableWallDist : 4;
   const chairMargin = 1;  // 1 foot chair margin
   const seatingWidth = !validRoom ? 0
-    : showTable && !tableDeleted ? tW + 2 * (Math.max(seatDist, 0.35) + chairMargin) : effectiveWidth;
+    : showTable && !tableDeleted
+      ? (guideIsNS ? tW : tL) + 2 * (seatMargin + chairMargin)
+      : (guideIsNS ? effectiveWidth : effectiveDepth);
   const reqHFOV = closestViewer > 0
     ? 2 * Math.atan((seatingWidth / 2) / closestViewer) * (180 / Math.PI)
     : 0;
@@ -2858,7 +3084,23 @@ export default function RoomDesignerPage() {
           {/* Display Size Guide */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
             <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:3}}>Display Size Guide</div>
-            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:10}}>Assuming North Wall As Display Wall</div>
+            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:8}}>Select the display wall to see its DISCAS calculation</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,marginBottom:10}}>
+              {(["north","south","east","west"] as const).map(w => (
+                <button
+                  key={w}
+                  onClick={() => setGuideWall(w)}
+                  style={{
+                    padding:"5px 0",borderRadius:6,fontSize:12,fontWeight:600,textTransform:"capitalize",cursor:"pointer",
+                    border:"1px solid " + (guideWall===w ? "#8b5cf6" : "rgb(var(--border))"),
+                    background: guideWall===w ? "rgba(139,92,246,0.15)" : "rgb(var(--forge-surface))",
+                    color: guideWall===w ? "#a78bfa" : "rgb(var(--text-subtle))",
+                  }}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
             <div style={{padding:10,background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveWidth) : "—"}</span>
@@ -2886,7 +3128,23 @@ export default function RoomDesignerPage() {
           {/* Camera Guide */}
           <div style={{padding:"12px 20px",borderBottom:"1px solid rgb(var(--border))",opacity:1}}>
             <div style={{fontSize:14,fontWeight:600,color:"rgb(var(--text-subtle))",textTransform:"uppercase",marginBottom:3}}>Camera Guide</div>
-            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:10}}>Assuming North Wall As Display Wall</div>
+            <div style={{fontSize:12,fontStyle:"italic",color:"rgb(var(--text-faint))",marginBottom:8}}>Select the display wall to see its calculation</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,marginBottom:10}}>
+              {(["north","south","east","west"] as const).map(w => (
+                <button
+                  key={w}
+                  onClick={() => setGuideWall(w)}
+                  style={{
+                    padding:"5px 0",borderRadius:6,fontSize:12,fontWeight:600,textTransform:"capitalize",cursor:"pointer",
+                    border:"1px solid " + (guideWall===w ? "#22c55e" : "rgb(var(--border))"),
+                    background: guideWall===w ? "rgba(34,197,94,0.15)" : "rgb(var(--forge-surface))",
+                    color: guideWall===w ? "#4ade80" : "rgb(var(--text-subtle))",
+                  }}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
             <div style={{padding:10,background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Seating width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(seatingWidth) : "—"}</span>
@@ -2919,7 +3177,7 @@ export default function RoomDesignerPage() {
             {/* Create group */}
             <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
               <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
-                <button onClick={()=>{setShowAddModal(true);setModalSearch("");setModalSelected(null);}} title="Add equipment to canvas"
+                <button onClick={()=>{setShowAddModal(true);setModalSearch("");setModalSelected(null);setModalGlobalSearch(false);}} title="Add equipment to canvas"
                   style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:56}}
                   onMouseEnter={e=>{e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}
                   onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
@@ -3623,7 +3881,7 @@ export default function RoomDesignerPage() {
                   // Draw centered at the device's own position, rotated to its wall angle
                   const angle = dev.rotation ?? ((dev.mountWall==="west"||dev.mountWall==="east") ? 90 : 0);
                   const rx2=devPx-dw/2, ry2=devPy-3, rw2=dw, rh2=6;
-                  return (<g key={dev.uid} transform={`rotate(${angle} ${devPx} ${devPy})`} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  return (<g key={dev.uid} transform={`rotate(${angle} ${devPx} ${devPy})`} style={{cursor:isDragging?"grabbing":"move"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                     {/* Invisible hit-area padding so thin wall bars are easy to click */}
                     <rect x={rx2-4} y={ry2-10} width={rw2+8} height={rh2+20} fill="transparent" pointerEvents="all"/>
                     {isSelected&&<rect x={rx2-4} y={ry2-4} width={rw2+8} height={rh2+8} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
@@ -3634,10 +3892,17 @@ export default function RoomDesignerPage() {
                     {/* Screen inset */}
                     <rect x={rx2+1} y={ry2+0.5} width={rw2-2} height={rh2-1} rx={0.3} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
                     <text x={rx2+rw2/2} y={ry2+rh2+12} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600} className="dev-label">{dev.name}</text>
+                    {isSelected && (
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <circle cx={rx2+rw2+8} cy={ry2-4} r={7} fill="#ef4444"/>
+                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${rx2+rw2+8},${ry2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                      </g>
+                    )}
                   </g>);
                 }
                 if(dev.type==="camera"){
                   const mw=dev.mountWall||"north", isCeiling=dev.wall==="ceiling";
+                  const isDrawnWall = mw==="drawn";
                   const isSoundbarCam = dev.id==="soundbar-cam";
                   const hfovDeg = dev.hfov || 70;
                   const halfAngle = (hfovDeg / 2) * Math.PI / 180;
@@ -3645,8 +3910,17 @@ export default function RoomDesignerPage() {
                   const fovReachN = roomL * planScale;
                   const fovReachW = roomW * planScale;
                   let cpx:number,cpy:number;
-                  // Room boundary in plan-view pixels
-                  const rxMin=pX(0), rxMax=pX(roomW), ryMin=pY(0), ryMax=pY(roomL);
+                  // Room boundary in plan-view pixels — a custom-drawn room can
+                  // sit anywhere in world space (its walls aren't necessarily at
+                  // x/y 0..roomW/roomL, which are stale leftover numbers once
+                  // walls are hand-drawn), so clip against the actual drawn
+                  // extent there instead of a phantom rectangle anchored at the
+                  // origin — otherwise the FOV cone gets clipped against a
+                  // boundary that doesn't correspond to anything actually drawn.
+                  const rxMin = isCustomBlank && drawnBounds ? pX(drawnBounds.minX) : pX(0);
+                  const rxMax = isCustomBlank && drawnBounds ? pX(drawnBounds.maxX) : pX(roomW);
+                  const ryMin = isCustomBlank && drawnBounds ? pY(drawnBounds.minY) : pY(0);
+                  const ryMax = isCustomBlank && drawnBounds ? pY(drawnBounds.maxY) : pY(roomL);
                   // Clip a line from (ox,oy)->(ex,ey) to the room rect, return clamped endpoint
                   const clipToRoom=(ox:number,oy:number,ex:number,ey:number)=>{
                     let t=1;const dx=ex-ox,dy=ey-oy;
@@ -3656,33 +3930,65 @@ export default function RoomDesignerPage() {
                     return {x:ox+dx*t,y:oy+dy*t};
                   };
                   let fovL1:{x:number,y:number}|null=null, fovL2:{x:number,y:number}|null=null;
+                  // Direction the camera faces into the room, and how far its
+                  // cone reaches before hitting the far side — computed once
+                  // per mount case here, then shared by a single generic
+                  // direction/perpendicular calculation below (rather than
+                  // each cardinal case hand-rolling its own cpx±spread,cpy±reach
+                  // formula). That unification is what makes a manual rotation
+                  // nudge (facingOverrideDeg, from the "Rotate" context-menu
+                  // actions) apply uniformly to every mount case instead of
+                  // only the custom-wall one.
+                  let facingA=0, reach=0;
                   if(isCeiling){cpx=devPx;cpy=pY(dev.y);}
-                  else if(mw==="north"){
-                    cpx=devPx;cpy=pY(0.1);
-                    const reach=Math.min(fovReachN,200);const spread=reach*Math.tan(halfAngle);
-                    fovL1=clipToRoom(cpx,cpy,cpx-spread,cpy+reach); fovL2=clipToRoom(cpx,cpy,cpx+spread,cpy+reach);
-                  } else if(mw==="south"){
-                    cpx=devPx;cpy=pY(roomL-0.1);
-                    const reach=Math.min(fovReachN,200);const spread=reach*Math.tan(halfAngle);
-                    fovL1=clipToRoom(cpx,cpy,cpx-spread,cpy-reach); fovL2=clipToRoom(cpx,cpy,cpx+spread,cpy-reach);
-                  } else if(mw==="west"){
-                    cpx=pX(0.1);cpy=pY(dev.y);
-                    const reach=Math.min(fovReachW,200);const spread=reach*Math.tan(halfAngle);
-                    fovL1=clipToRoom(cpx,cpy,cpx+reach,cpy-spread); fovL2=clipToRoom(cpx,cpy,cpx+reach,cpy+spread);
-                  } else {
-                    cpx=pX(roomW-0.1);cpy=pY(dev.y);
-                    const reach=Math.min(fovReachW,200);const spread=reach*Math.tan(halfAngle);
-                    fovL1=clipToRoom(cpx,cpy,cpx-reach,cpy-spread); fovL2=clipToRoom(cpx,cpy,cpx-reach,cpy+spread);
+                  else if(isDrawnWall){
+                    // A wall drawn freeform (not one of the room's four boundary
+                    // sides) has no fixed position to hang the camera on the way
+                    // the cardinal cases below do — it can be anywhere, at any
+                    // angle. Using the device's own tracked x/y (already kept
+                    // correct by dragging/snapping) instead of re-deriving a
+                    // phantom cardinal-wall position is what makes dragging a
+                    // camera onto a custom-drawn wall actually work, instead of
+                    // it silently rendering pinned near a hardcoded east wall
+                    // regardless of where it was really placed.
+                    cpx=devPx;cpy=pY(dev.y);
+                    const wallDev = placedDevices.find(d=>d.uid===dev.wallUid && d.wallAngle!==undefined);
+                    if(wallDev){
+                      const angle=wallDev.wallAngle!;
+                      let nx0=-Math.sin(angle), ny0=Math.cos(angle);
+                      const refX = drawnBounds ? drawnBounds.centerX : dev.x, refY = drawnBounds ? drawnBounds.centerY : dev.y;
+                      if(nx0*(refX-dev.x)+ny0*(refY-dev.y) < 0){ nx0=-nx0; ny0=-ny0; }
+                      facingA = Math.atan2(ny0,nx0);
+                    }
+                    reach=Math.min(Math.max(effectiveRoomW,effectiveRoomL)*planScale,200);
+                  }
+                  else if(mw==="north"){ facingA=Math.PI/2; cpx=devPx;cpy=pY(0.1); reach=Math.min(fovReachN,200); }
+                  else if(mw==="south"){ facingA=-Math.PI/2; cpx=devPx;cpy=pY(roomL-0.1); reach=Math.min(fovReachN,200); }
+                  else if(mw==="west"){ facingA=0; cpx=pX(0.1);cpy=pY(dev.y); reach=Math.min(fovReachW,200); }
+                  else { facingA=Math.PI; cpx=pX(roomW-0.1);cpy=pY(dev.y); reach=Math.min(fovReachW,200); }
+                  if(!isCeiling){
+                    // Manual fine-rotation on top of the auto-computed wall
+                    // facing — lets the user correct a placement the auto-snap
+                    // logic can't get exactly right (e.g. a camera wedged into
+                    // a room corner) without fighting the snap system.
+                    facingA += (dev.facingOverrideDeg??0)*Math.PI/180;
+                    const spread=reach*Math.tan(halfAngle);
+                    const dirX=Math.cos(facingA), dirY=Math.sin(facingA), perpX=-dirY, perpY=dirX;
+                    fovL1=clipToRoom(cpx,cpy,cpx+dirX*reach+perpX*spread,cpy+dirY*reach+perpY*spread);
+                    fovL2=clipToRoom(cpx,cpy,cpx+dirX*reach-perpX*spread,cpy+dirY*reach-perpY*spread);
                   }
                   const fovLines = fovL1&&fovL2 ? (()=>{
                     const arcR=20;
-                    const a1=Math.atan2(fovL1.y-cpy,fovL1.x-cpx);
-                    const a2=Math.atan2(fovL2.y-cpy,fovL2.x-cpx);
+                    // The cone's edges are exactly facingA ± halfAngle by
+                    // definition — computing them directly (rather than via
+                    // atan2 on the clipped fovL1/fovL2 points) avoids a
+                    // degenerate, direction-less arc when a wall clips one
+                    // edge down to (near) zero length, e.g. a camera placed
+                    // right at a room corner.
+                    const a1=facingA+halfAngle, a2=facingA-halfAngle;
                     const ax1=cpx+arcR*Math.cos(a1), ay1=cpy+arcR*Math.sin(a1);
                     const ax2=cpx+arcR*Math.cos(a2), ay2=cpy+arcR*Math.sin(a2);
                     const largeArc=hfovDeg>180?1:0;
-                    // Direction camera faces into room
-                    const facingA=mw==="north"?Math.PI/2:mw==="south"?-Math.PI/2:mw==="west"?0:Math.PI;
                     // Sweep should go from a1 to a2 through the facing direction
                     // Use cross product to determine if sweep=1 gives the correct arc
                     let sweep=1;
@@ -3710,9 +4016,9 @@ export default function RoomDesignerPage() {
                   if(isSoundbarCam){
                     // Top-down view: slim rectangle (width × depth) like Rally Bar from above
                     const barW=dev.w*planScale, barD=Math.max(dev.h*planScale, 6);
-                    const isHoriz=mw==="north"||mw==="south";
+                    const isHoriz=mw==="north"||mw==="south"||(isDrawnWall&&Math.abs(Math.sin(facingA))>0.5);
                     const bw=isHoriz?barW:barD, bh=isHoriz?barD:barW;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={cpx-bw/2-3} y={cpy-bh/2-3} width={bw+6} height={bh+6} rx={4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {fovLines}
                       {/* Green boundary outline */}
@@ -3722,28 +4028,74 @@ export default function RoomDesignerPage() {
                       {/* Fabric mesh area */}
                       <rect x={cpx-bw*0.44} y={cpy-bh*0.35} width={bw*0.88} height={bh*0.7} rx={1.5} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.3}/>
                       <text x={cpx} y={cpy-(isHoriz?bh:bw)/2-6} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <>
+                          <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                            <circle cx={cpx+bw/2+8} cy={cpy-bh/2-4} r={7} fill="#ef4444"/>
+                            <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+bw/2+8},${cpy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                          </g>
+                          <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setRotatePopup({x:e.clientX,y:e.clientY,uid:dev.uid,value:String(dev.facingOverrideDeg??0)});}}>
+                            <circle cx={cpx+bw/2-10} cy={cpy-bh/2-4} r={7} fill="#8b5cf6"/>
+                            <g transform={`translate(${cpx+bw/2-14},${cpy-bh/2-8}) scale(0.333)`}>
+                              <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                              <polyline points="21 3 21 6.7 17.3 6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                            </g>
+                          </g>
+                        </>
+                      )}
                     </g>);
                   }
                   if(isCeiling){
                     const purpleColor="#a855f7";
                     const cw=16, ch=10;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={cpx-cw/2-3} y={cpy-ch/2-3} width={cw+6} height={ch+6} rx={5} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={cpx-cw/2-1} y={cpy-ch/2-1} width={cw+2} height={ch+2} rx={4} fill="none" stroke={purpleColor+"88"} strokeWidth={0.8}/>
                       {/* Body */}
                       <rect x={cpx-cw/2} y={cpy-ch/2} width={cw} height={ch} rx={3} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.8}/>
                       <text x={cpx} y={cpy-ch/2-6} textAnchor="middle" fontSize={7} fill={purpleColor} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={cpx+cw/2+8} cy={cpy-ch/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+cw/2+8},${cpy-ch/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
-                  {const camRot=mw==="west"?90:mw==="east"?-90:mw==="south"?180:0;
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  {
+                  // The body rect's long edge starts horizontal (screen angle
+                  // 0°), which needs to be perpendicular to the direction the
+                  // camera faces — i.e. at facingA±90°. `facingA-90` happens to
+                  // equal `90-facingA` (mod 180°, so visually identical on this
+                  // point-symmetric rect) at exactly the four cardinal angles,
+                  // which is why a `90-facingA` version of this line looked
+                  // right for wall-mounted cameras but silently rotated the
+                  // body 90° off from the actual cone direction at any other
+                  // angle — exactly what a manual rotation produces.
+                  const camRot=facingA*180/Math.PI-90;
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                     {isSelected&&<rect x={cpx-14} y={cpy-10} width={28} height={20} rx={4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" transform={`rotate(${camRot},${cpx},${cpy})`}/>}
                     {fovLines}
                     <g transform={`rotate(${camRot},${cpx},${cpy})`}>
                       <rect x={cpx-8} y={cpy-5} width={16} height={10} rx={2.5} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
                     </g>
-                    <text x={cpx} y={cpy-(mw==="west"||mw==="east"?12:14)} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    <text x={cpx} y={cpy-(mw==="west"||mw==="east"||(isDrawnWall&&Math.abs(Math.sin(facingA))<0.5)?12:14)} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    {isSelected && (
+                      <>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={cpx+14} cy={cpy-10} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+14},${cpy-10})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setRotatePopup({x:e.clientX,y:e.clientY,uid:dev.uid,value:String(dev.facingOverrideDeg??0)});}}>
+                          <circle cx={cpx-4} cy={cpy-10} r={7} fill="#8b5cf6"/>
+                          <g transform={`translate(${cpx-8},${cpy-14}) scale(0.333)`}>
+                            <path d="M21 12a9 9 0 1 1-3-6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                            <polyline points="21 3 21 6.7 17.3 6.7" fill="none" stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                          </g>
+                        </g>
+                      </>
+                    )}
                   </g>);}
                 }
                 // Floor furniture (chairs, tables, etc.)
@@ -3800,7 +4152,7 @@ export default function RoomDesignerPage() {
                     const hAboveEar=roomH-4;
                     const eprFt=2*hAboveEar*Math.tan((dispDeg/2)*Math.PI/180);
                     const eprPx=(eprFt/2)*planScale;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<circle cx={mpx} cy={mpy} r={r+5} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Coverage area - EPR based */}
                       <circle cx={mpx} cy={mpy} r={eprPx} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
@@ -3812,6 +4164,12 @@ export default function RoomDesignerPage() {
                       {/* Center cone */}
                       <circle cx={mpx} cy={mpy} r={r*0.25} fill="#334155" stroke="#475569" strokeWidth={0.3}/>
                       <text x={mpx} y={mpy-r-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={mpx+r+5} cy={mpy-r-5} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+r+5},${mpy-r-5})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
                   // Ceiling mic array - Shure MXA920 style square tile
@@ -3822,7 +4180,7 @@ export default function RoomDesignerPage() {
                     const cRadius=(dev.covDiameter||6)/2*planScale;
                     const cHalfW=(dev.covW||6)/2*planScale;
                     const cHalfL=(dev.covL||6)/2*planScale;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={mpx-tileS/2-4} y={mpy-tileS/2-4} width={tileS+8} height={tileS+8} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Coverage area - round or square */}
                       {cShape==="round"
@@ -3834,6 +4192,12 @@ export default function RoomDesignerPage() {
                       {/* Mic hole grid - 3x3 */}
                       {[-1,0,1].map(r=>[-1,0,1].map(c=><circle key={`${r}${c}`} cx={mpx+c*tileS*0.25} cy={mpy+r*tileS*0.25} r={1} fill="#334155"/>))}
                       <text x={mpx} y={mpy-tileS/2-5} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={mpx+tileS/2+5} cy={mpy-tileS/2-5} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+tileS/2+5},${mpy-tileS/2-5})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
                   // Table mic - Shure MXA310 style
@@ -3841,7 +4205,7 @@ export default function RoomDesignerPage() {
                   if(isTableMic){
                     const mr=7;
                     const tmCovR=(dev.covDiameter||2)/2*planScale;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<circle cx={mpx} cy={mpy} r={mr+4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Coverage area */}
                       <circle cx={mpx} cy={mpy} r={tmCovR} fill={dev.color} opacity={0.04} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>
@@ -3854,6 +4218,12 @@ export default function RoomDesignerPage() {
                       {/* Center dot */}
                       <circle cx={mpx} cy={mpy} r={mr*0.15} fill="#334155"/>
                       <text x={mpx} y={mpy-mr-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={mpx+mr+4} cy={mpy-mr-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+mr+4},${mpy-mr-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
                   // Wall speaker - JBL Control 25-1 style box
@@ -3868,21 +4238,33 @@ export default function RoomDesignerPage() {
                     else if(mw2==="south") sy=pY(roomL)-bh/2;
                     else if(mw2==="west") sx=pX(0)+bw/2;
                     else sx=pX(roomW)-bw/2;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Speaker body */}
                       <rect x={sx-bw/2} y={sy-bh/2} width={bw} height={bh} rx={1.5} fill={cc.device} stroke={dev.color+"88"} strokeWidth={0.8}/>
                       {/* Grille */}
                       <rect x={sx-bw*0.35} y={sy-bh*0.35} width={bw*0.7} height={bh*0.7} rx={1} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.3}/>
                       <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={sx+bw/2+8} cy={sy-bh/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${sx+bw/2+8},${sy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                     {isSelected&&<circle cx={mpx} cy={mpy} r={covR+6} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                     {dev.wall==="ceiling"&&<circle cx={mpx} cy={mpy} r={covR} fill={dev.color} opacity={0.05} stroke={dev.color} strokeWidth={0.5} strokeDasharray="3 2"/>}
                     <circle cx={mpx} cy={mpy} r={5} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1.5}/>
                     <circle cx={mpx} cy={mpy} r={2} fill={dev.color}/>
                     <text x={mpx} y={mpy-10} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    {isSelected && (
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <circle cx={mpx+covR+6} cy={mpy-covR-6} r={7} fill="#ef4444"/>
+                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+covR+6},${mpy-covR-6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                      </g>
+                    )}
                   </g>);
                 }
                 if(dev.type==="control"){
@@ -3904,7 +4286,7 @@ export default function RoomDesignerPage() {
                     else if(mw==="south") sy=pY(roomL)-bh/2;
                     else if(mw==="west") sx=pX(0)+bw/2;
                     else if(mw==="east") sx=pX(roomW)-bw/2;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={sx-bw/2-1} y={sy-bh/2-1} width={bw+2} height={bh+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -3913,13 +4295,19 @@ export default function RoomDesignerPage() {
                       {/* Screen */}
                       <rect x={sx-bw/2+1} y={sy-bh/2+0.5} width={bw-2} height={bh-1} rx={0.5} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.3}/>
                       <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={sx+bw/2+8} cy={sy-bh/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${sx+bw/2+8},${sy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
                   // Logitech Tap style table touch panel
                   const isTableTouch=dev.id==="table-touch";
                   if(isTableTouch){
                     const tw=dev.w*planScale, th=dev.h*planScale;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={cpx2-tw/2-3} y={cpy2-th/2-3} width={tw+6} height={th+6} rx={4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={cpx2-tw/2-1} y={cpy2-th/2-1} width={tw+2} height={th+2} rx={3} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -3928,13 +4316,19 @@ export default function RoomDesignerPage() {
                       {/* Screen area */}
                       <rect x={cpx2-tw/2+1.5} y={cpy2-th/2+1} width={tw-3} height={th-2} rx={1} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
                       <text x={cpx2} y={cpy2-th/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={cpx2+tw/2+8} cy={cpy2-th/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+tw/2+8},${cpy2-th/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
                   // Cable Cubby - Extron Cable Cubby 1202 style
                   const isCableCubby=dev.id==="byod-hub";
                   if(isCableCubby){
                     const cw=dev.w*planScale, ch=dev.h*planScale;
-                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={cpx2-cw/2-3} y={cpy2-ch/2-3} width={cw+6} height={ch+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={cpx2-cw/2-1} y={cpy2-ch/2-1} width={cw+2} height={ch+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -3945,12 +4339,24 @@ export default function RoomDesignerPage() {
                       {/* Cable port slots */}
                       {[-1,0,1].map(i=><rect key={i} x={cpx2+i*cw*0.25-2} y={cpy2-ch/2+3} width={4} height={ch-6} rx={1} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.2}/>)}
                       <text x={cpx2} y={cpy2-ch/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                      {isSelected && (
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <circle cx={cpx2+cw/2+8} cy={cpy2-ch/2-4} r={7} fill="#ef4444"/>
+                          <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+cw/2+8},${cpy2-ch/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                        </g>
+                      )}
                     </g>);
                   }
-                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} opacity={isDragging?0.7:1}>
+                  return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                     {isSelected&&<rect x={cpx2-8} y={cpy2-6} width={16} height={12} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
                     <rect x={cpx2-5} y={cpy2-3.5} width={10} height={7} rx={2} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1}/>
                     <text x={cpx2} y={cpy2+14} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
+                    {isSelected && (
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <circle cx={cpx2+8} cy={cpy2-6} r={7} fill="#ef4444"/>
+                        <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+8},${cpy2-6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
+                      </g>
+                    )}
                   </g>);
                 }
                 return null;
@@ -5125,6 +5531,95 @@ export default function RoomDesignerPage() {
 
     </div>
 
+    {/* Device Context Menu — mirrors Signal Flow Builder's right-click menu */}
+    {deviceContextMenu && (
+      <>
+        <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setDeviceContextMenu(null)} onContextMenu={e=>{e.preventDefault();setDeviceContextMenu(null);}} />
+        <div style={{position:"fixed",left:deviceContextMenu.x,top:deviceContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:190,overflow:"hidden",padding:"4px 0"}}>
+          <button onClick={()=>{
+            const dev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
+            if(dev) setEditingDevice({...dev, ports: dev.ports ? dev.ports.map(p=>({...p})) : []});
+            setDeviceContextMenu(null);
+          }}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Edit equipment
+          </button>
+          <button onClick={()=>{
+            duplicateDevice(deviceContextMenu.uid);
+            setDeviceContextMenu(null);
+          }}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Duplicate
+          </button>
+          <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
+          <button onClick={()=>{
+            removeDevice(deviceContextMenu.uid);
+            setDeviceContextMenu(null);
+          }}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,cursor:"pointer",textAlign:"left"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            Delete equipment
+          </button>
+        </div>
+      </>
+    )}
+
+    {/* Rotate popup — opened from the small purple button next to a selected
+        camera's delete "×"; typing a value and pressing Enter/Apply sets the
+        camera's manual facing offset directly. */}
+    {rotatePopup && (
+      <>
+        <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setRotatePopup(null)} />
+        <div style={{position:"fixed",left:rotatePopup.x,top:rotatePopup.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",padding:10,display:"flex",alignItems:"center",gap:8}}
+          onClick={e=>e.stopPropagation()}>
+          <label style={{fontSize:11,color:"rgb(var(--text-subtle))",whiteSpace:"nowrap"}}>Rotation (°)</label>
+          <input autoFocus type="number" value={rotatePopup.value}
+            onChange={e=>setRotatePopup({...rotatePopup, value:e.target.value})}
+            onKeyDown={e=>{
+              if(e.key==="Enter"){
+                const deg=Number(rotatePopup.value);
+                if(!Number.isNaN(deg)) setCameraRotation(rotatePopup.uid, deg);
+                setRotatePopup(null);
+              } else if(e.key==="Escape"){
+                setRotatePopup(null);
+              }
+            }}
+            style={{width:70,padding:"5px 8px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:4,color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+          <button onClick={()=>{
+            const deg=Number(rotatePopup.value);
+            if(!Number.isNaN(deg)) setCameraRotation(rotatePopup.uid, deg);
+            setRotatePopup(null);
+          }} style={{padding:"5px 10px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:4,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            Apply
+          </button>
+        </div>
+      </>
+    )}
+
+    {/* Edit Equipment modal — same shared form Signal Flow Builder/Rack Planner use */}
+    {editingDevice && (
+      <EquipmentFormModal
+        title="Edit Equipment"
+        value={deviceToFormValue(editingDevice)}
+        onChange={(v)=>setEditingDevice(applyFormValueToDevice(editingDevice, v))}
+        onCancel={()=>setEditingDevice(null)}
+        onSave={()=>{
+          pushUndo();
+          setPlacedDevices(prev=>prev.map(d=>d.uid===editingDevice.uid?editingDevice:d));
+          setEditingDevice(null);
+        }}
+        saving={false}
+        saveDisabled={!(editingDevice.name||"").trim()}
+        notesLabel="Description"
+        categories={deviceCatalog.map(g=>g.cat)}
+      />
+    )}
+
     {/* Add Equipment Modal */}
     {showAddModal && (
       <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}}
@@ -5147,7 +5642,7 @@ export default function RoomDesignerPage() {
           {/* Search bar */}
           <div style={{padding:"0 20px 14px",flexShrink:0}}>
             <div style={{display:"flex",gap:0}}>
-              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);}}
+              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);setModalGlobalSearch(false);}}
                 placeholder="Search displays, cameras, speakers, microphones, or control panels"
                 style={{flex:1,padding:"9px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRight:"none",borderRadius:"6px 0 0 6px",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}
               />
@@ -5161,26 +5656,37 @@ export default function RoomDesignerPage() {
 
           {/* Search results */}
           {modalSearch.trim() && (
-            <div style={{maxHeight:220,overflowY:"auto",margin:"0 20px",marginBottom:8,border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
-              {modalLoading ? (
-                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Searching…</div>
-              ) : modalResults.length === 0 ? (
-                <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>No results for &ldquo;{modalSearch}&rdquo;</div>
-              ) : modalResults.map((item:any,i:number)=>{
-                const isSel = modalSelected===item;
-                return (
-                  <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
-                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(139,92,246,0.1)":"transparent",transition:"background 0.1s"}}
-                    onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
-                    <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.type}</div>
-                      <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.mfr||"Generic"}{item.cat?" · "+item.cat:""}</div>
+            <div style={{margin:"0 20px",marginBottom:8}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"rgb(var(--text-subtle))",marginBottom:6}}>
+                {modalGlobalSearch ? "AV Forge Equipment Library" : "My Organization's Equipment Library"}
+              </div>
+              <div style={{maxHeight:220,overflowY:"auto",border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
+                {modalLoading ? (
+                  <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>Searching…</div>
+                ) : modalResults.length === 0 ? (
+                  <div style={{padding:"14px",textAlign:"center",color:"rgb(var(--text-subtle))",fontSize:12}}>No results for &ldquo;{modalSearch}&rdquo;</div>
+                ) : modalResults.map((item:any,i:number)=>{
+                  const isSel = modalSelected===item;
+                  return (
+                    <div key={i} onClick={()=>setModalSelected(isSel?null:item)}
+                      style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:i<modalResults.length-1?"1px solid rgb(var(--border))":"none",background:isSel?"rgba(139,92,246,0.1)":"transparent",transition:"background 0.1s"}}
+                      onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
+                      <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.type}</div>
+                        <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.mfr||"Generic"}{item.cat?" · "+item.cat:""}</div>
+                      </div>
+                      {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                     </div>
-                    {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              {!modalGlobalSearch && !modalLoading && modalResults.length === 0 && (
+                <button onClick={()=>setModalGlobalSearch(true)}
+                  style={{marginTop:8,width:"100%",padding:"9px 12px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:6,color:"#8b5cf6",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                  Search in Global Library
+                </button>
+              )}
             </div>
           )}
 

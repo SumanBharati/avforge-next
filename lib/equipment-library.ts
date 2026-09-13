@@ -43,11 +43,14 @@ export interface OrgEquipmentItem {
   coverage_depth_ft: number | null;
 }
 
-const SEARCHABLE_LIBRARY_COLUMNS = ["manufacturer", "model", "category", "part_number", "description"];
+const SEARCHABLE_LIBRARY_COLUMNS = ["manufacturer", "model", "part_number"];
 
-// Fuzzy, multi-field search across Manufacturer, Model, Category, Part number,
-// and Description. See searchProducts (lib/av-products.ts) for the same
-// broaden-then-rank approach applied to the org's own equipment library.
+// Fuzzy search restricted to Manufacturer, Model, and Part Number only —
+// deliberately excludes Category/Description, which used to pull in every
+// item in a broad category (e.g. searching "camera" surfacing unrelated
+// makes/models just because their category field said "Camera"). See
+// searchProducts (lib/av-products.ts) for the same broaden-then-rank approach
+// applied to the global product library.
 export async function searchOrgLibrary(query: string, orgId: string, limit = 30): Promise<OrgEquipmentItem[]> {
   const trimmed = query.trim();
   if (!trimmed || !orgId) return [];
@@ -69,7 +72,7 @@ export async function searchOrgLibrary(query: string, orgId: string, limit = 30)
   }
 
   return rankByFuzzyMatch(trimmed, candidates, (i: any) => [
-    i.manufacturer, i.model, i.category, i.part_number, i.description,
+    i.manufacturer, i.model, i.part_number,
   ], limit);
 }
 

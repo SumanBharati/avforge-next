@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { supabase } from "@/lib/supabase";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Project { id: string; name: string; job_number: string; }
@@ -278,6 +279,13 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
   const [activeView, setActiveView] = useState<ActiveView | null>(null);
   const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState(false);
+  // Whether there are edits not yet confirmed saved — starts false (a
+  // freshly loaded survey has nothing new), flips true on every edit via
+  // persist(), and only clears once a save that covers the LATEST edit
+  // actually completes (see saveVersionRef below) so a slow save from an
+  // older edit can't race past a newer one and falsely clear this.
+  const [dirty, setDirty] = useState(false);
+  const saveVersionRef = useRef(0);
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiMinimized, setAiMinimized] = useState(false);
   const [aiRecording, setAiRecording] = useState(false);
@@ -285,6 +293,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
   const [generatingScope, setGeneratingScope] = useState(false);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [editingRoomName, setEditingRoomName] = useState("");
+  const [deleteRoomConfirm, setDeleteRoomConfirm] = useState<{ buildingId: string; roomId: string; name: string } | null>(null);
 
   useEffect(() => {
     // Load project
@@ -313,7 +322,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const autoSave = useCallback(async (surveyData: SurveyState) => {
+  const autoSave = useCallback(async (surveyData: SurveyState, version: number) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -332,14 +341,21 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
       await supabase.from("site_surveys")
         .insert({ project_id: params.id, user_id: user.id, data: surveyData });
     }
+    // Only clear "dirty" if no newer edit has come in since this save was
+    // queued — otherwise a slow save from an older edit could resolve after
+    // a newer one and wrongly signal everything's saved.
+    if (version === saveVersionRef.current) setDirty(false);
   }, [params.id]);
 
   function persist(next: SurveyState) {
     setSurvey(next);
     setSaved(false);
+    setDirty(true);
+    saveVersionRef.current += 1;
+    const version = saveVersionRef.current;
     // Debounced auto-save
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => autoSave(next), 1000);
+    saveTimerRef.current = setTimeout(() => autoSave(next, version), 1000);
   }
 
   /* ── Building CRUD ──────────────────────────────── */
@@ -433,7 +449,8 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
   }
 
   async function handleSave() {
-    await autoSave(survey);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    await autoSave(survey, saveVersionRef.current);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -522,7 +539,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
               </svg>
               Create with AI
             </button>
-            <button onClick={handleSave} className="forge-btn-primary text-[13px]">
+            <button onClick={handleSave} disabled={!dirty && !saved} className="forge-btn-primary text-[13px] disabled:cursor-not-allowed disabled:opacity-40">
               {saved ? (
                 <><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Saved</>
               ) : (
@@ -625,10 +642,11 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
                           </button>
                         )}
                         <button
-                          onClick={() => removeRoom(building.id, room.id)}
-                          className="shrink-0 rounded p-1 text-faint transition-colors hover:text-red-400"
+                          onClick={() => setDeleteRoomConfirm({ buildingId: building.id, roomId: room.id, name: room.data.room_name || room.name })}
+                          title="Delete room"
+                          className="shrink-0 rounded p-1 text-faint opacity-0 transition-all group-hover/room:opacity-100 hover:text-red-400"
                         >
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
                         </button>
                       </div>
 
@@ -1118,7 +1136,13 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               </button>
             ) : (
-              <button onClick={handleSave} className="forge-btn-primary text-[13px]">Complete Survey</button>
+              <button onClick={handleSave} disabled={!dirty && !saved} className="forge-btn-primary text-[13px] disabled:cursor-not-allowed disabled:opacity-40">
+                {saved ? (
+                  <><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Saved</>
+                ) : (
+                  <>Complete Survey</>
+                )}
+              </button>
             )}
             </div>
           </div>
@@ -1168,16 +1192,24 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
             const next = { ...survey, ai_summaries: [...(((survey as any).ai_summaries as any[]) || []), summary] } as any;
             persist(next);
           }}
-          onUpdateSummary={(index: number, summary: any) => {
+          onDeleteSummary={(index: number) => {
+            // Only removes the history entry itself — whatever it already
+            // applied lives in buildings/rooms data, entirely separate from
+            // ai_summaries, so deleting this record never touches it.
             const current = (((survey as any).ai_summaries as any[]) || []).slice();
             if (index < 0 || index >= current.length) return;
-            current[index] = summary;
+            current.splice(index, 1);
             const next = { ...survey, ai_summaries: current } as any;
             persist(next);
           }}
           onApply={(aiData: any) => {
             const next = { ...survey };
-            const building = next.buildings[0];
+            // Apply into whichever building is currently being viewed, not
+            // always the first one — a survey with more than one building
+            // (or the user simply not being on building #1) was silently
+            // writing the AI's data, including any new room, into the wrong
+            // building, making it look like room creation had failed.
+            const building = next.buildings.find(b => b.id === activeView?.buildingId) || next.buildings[0];
             if (!building) return;
 
             // Apply building-level data
@@ -1188,10 +1220,20 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
             }
 
             // Apply room data
+            const activeRoomId = activeView?.type === "room" ? activeView.roomId : null;
             if (aiData.rooms && Array.isArray(aiData.rooms)) {
               aiData.rooms.forEach((aiRoom: any) => {
                 const roomName = aiRoom.room_name || "";
-                let room = building.rooms.find(r => (r.data.room_name || r.name).toLowerCase() === roomName.toLowerCase());
+                let room = roomName
+                  ? building.rooms.find(r => (r.data.room_name || r.name).toLowerCase() === roomName.toLowerCase())
+                  : undefined;
+                // No name came back from the AI for this room (or it's the
+                // only room extracted) — rather than silently discarding its
+                // data, apply it to whichever room the user is actively
+                // viewing, since that's almost always what they meant.
+                if (!room && !roomName && aiData.rooms.length === 1 && activeRoomId) {
+                  room = building.rooms.find(r => r.id === activeRoomId);
+                }
                 if (!room && roomName) {
                   room = { id: crypto.randomUUID(), name: roomName, data: { room_name: roomName } };
                   building.rooms.push(room);
@@ -1207,17 +1249,31 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
             }
 
             persist(next);
-            setShowAIModal(false);
+            // Don't close the modal — applyAndFlash already auto-saves this
+            // to Past Summaries; leaving it open lets the user keep recording
+            // or apply again. They close it themselves.
           }}
         />
         </div>
+      )}
+
+      {deleteRoomConfirm && (
+        <ConfirmDialog
+          title="Delete this room?"
+          message={<>Delete <span className="font-semibold text-heading">{deleteRoomConfirm.name}</span>? This removes it — and everything recorded for it — from Site Survey and every design tool (Design Engineering, Room Designer, Signal Flow, Rack Builder, Proposal). This can&apos;t be undone.</>}
+          onCancel={() => setDeleteRoomConfirm(null)}
+          onConfirm={() => {
+            removeRoom(deleteRoomConfirm.buildingId, deleteRoomConfirm.roomId);
+            setDeleteRoomConfirm(null);
+          }}
+        />
       )}
     </div>
   );
 }
 
 /* ── AI Recording Modal ───────────────────────────────────── */
-function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAndClose, existingRooms, onApply, savedSummaries, onSaveSummary, onUpdateSummary }: {
+function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAndClose, existingRooms, onApply, savedSummaries, onSaveSummary, onDeleteSummary }: {
   onClose: () => void;
   onMinimize: () => void;
   onRecordingChange: (recording: boolean) => void;
@@ -1226,11 +1282,10 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
   onApply: (data: any) => void;
   savedSummaries: any[];
   onSaveSummary: (summary: any) => void;
-  onUpdateSummary: (index: number, summary: any) => void;
+  onDeleteSummary: (index: number) => void;
 }) {
   const [consented, setConsented] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
-  const [summaryLabel, setSummaryLabel] = useState("");
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -1238,12 +1293,95 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState<any>(null);
   const [viewingSaved, setViewingSaved] = useState(false);
-  const [savedIndex, setSavedIndex] = useState<number | null>(null);
-  const [saveFlash, setSaveFlash] = useState<"idle" | "saved" | "updated">("idle");
+  const [applyFlash, setApplyFlash] = useState(false);
+  const [appliedHistoryIndex, setAppliedHistoryIndex] = useState<number | null>(null);
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Auto-generated save label — no manual naming step. Uses whichever
+  // room(s) this extraction covered (the actual distinguishing detail
+  // between saved summaries on the same project) plus a date/time stamp.
+  function autoSummaryLabel(_data: any): string {
+    return new Date().toLocaleString();
+  }
+
+  function applyAndFlash(data: any) {
+    onApply(data);
+    // Only auto-save a fresh extraction — reapplying an already-saved
+    // Past Summary would otherwise create a duplicate entry of itself.
+    if (!viewingSaved) {
+      onSaveSummary({
+        label: autoSummaryLabel(data),
+        date: new Date().toISOString(),
+        transcript: transcript.replace(/\[\.\.\..*?\]/g, "").trim(),
+        data,
+        fieldsExtracted: countFields(data),
+      });
+    }
+    setApplyFlash(true);
+    setTimeout(() => setApplyFlash(false), 2000);
+  }
+
+  function applyHistoryAndFlash(data: any, i: number) {
+    onApply(data);
+    setAppliedHistoryIndex(i);
+    setTimeout(() => setAppliedHistoryIndex((cur) => (cur === i ? null : cur)), 2000);
+  }
+
+  // Auto-cap: if someone forgets to hit Stop, the recording (and the mic)
+  // would otherwise run forever. After 2 hours of wall-clock time since
+  // recording first started (not "active recording" time — a forgotten,
+  // left-paused session should still get rescued), automatically stop,
+  // summarize, and apply whatever was captured, so the work isn't lost.
+  const MAX_RECORDING_MS = 2 * 60 * 60 * 1000;
+  const autoCapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const transcriptRef = useRef(transcript);
+  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+  useEffect(() => () => { if (autoCapTimerRef.current) clearTimeout(autoCapTimerRef.current); }, []);
+
+  async function handleAutoCapReached() {
+    autoCapTimerRef.current = null;
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setRecording(false);
+    setPaused(false);
+    onRecordingChange(false);
+    const cleanTranscript = transcriptRef.current.replace(/\[\.\.\..*?\]/g, "").trim();
+    setTranscript(cleanTranscript);
+    if (cleanTranscript.length < 20) return;
+
+    setProcessing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/summarize-survey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: cleanTranscript, existingRooms }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to process");
+      setAiResult(json.data);
+      onSaveSummary({
+        label: `${autoSummaryLabel(json.data)} · Auto-applied (2hr limit)`,
+        date: new Date().toISOString(),
+        transcript: cleanTranscript,
+        data: json.data,
+        fieldsExtracted: countFields(json.data),
+      });
+      onApply(json.data);
+    } catch (e: any) {
+      setError(`Recording auto-stopped after 2 hours, but summarizing failed: ${e.message || "Failed to summarize"}. Your transcript is still here — you can retry "Summarize with AI" manually.`);
+    } finally {
+      setProcessing(false);
+    }
+  }
 
   useEffect(() => {
     if (!shouldSaveAndClose) return;
+    if (autoCapTimerRef.current) { clearTimeout(autoCapTimerRef.current); autoCapTimerRef.current = null; }
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
@@ -1251,7 +1389,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
     }
     const cleanTranscript = transcript.replace(/\[\.\.\..*?\]/g, "").trim();
     if (cleanTranscript || aiResult) {
-      const label = summaryLabel.trim() || new Date().toLocaleString();
+      const label = autoSummaryLabel(aiResult);
       onSaveSummary({
         label,
         date: new Date().toISOString(),
@@ -1317,9 +1455,13 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
     recognitionRef.current = recognition;
     setRecording(true);
     onRecordingChange(true);
+    if (!autoCapTimerRef.current) {
+      autoCapTimerRef.current = setTimeout(handleAutoCapReached, MAX_RECORDING_MS);
+    }
   }
 
   function stopRecording() {
+    if (autoCapTimerRef.current) { clearTimeout(autoCapTimerRef.current); autoCapTimerRef.current = null; }
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
@@ -1459,7 +1601,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
               <div className="mb-3 flex items-center justify-between">
                 <div className="text-sm font-semibold text-heading">Past Summaries</div>
                 <button
-                  onClick={() => setShowHistory(false)}
+                  onClick={() => { setShowHistory(false); setViewingSaved(false); }}
                   className="text-xs font-medium text-subtle transition-colors hover:text-secondary"
                 >
                   ← Back
@@ -1480,16 +1622,27 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
                       )}
                       <div className="flex gap-2">
                         <button
-                          onClick={() => { setAiResult(s.data); setTranscript(s.transcript || ""); setSummaryLabel(s.label || ""); setConsented(true); setViewingSaved(true); setSavedIndex(i); setShowHistory(false); }}
+                          onClick={() => { setAiResult(s.data); setTranscript(s.transcript || ""); setConsented(true); setViewingSaved(true); setShowHistory(false); }}
                           className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-secondary transition-colors hover:bg-forge-surface"
                         >
                           View Details
                         </button>
                         <button
-                          onClick={() => onApply(s.data)}
-                          className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/20"
+                          onClick={() => applyHistoryAndFlash(s.data, i)}
+                          className="flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/20"
                         >
-                          Apply to Survey
+                          {appliedHistoryIndex === i ? (
+                            <><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>Applied</>
+                          ) : (
+                            <>Apply to Survey</>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setPendingDeleteIndex(i)}
+                          title="Delete this summary"
+                          className="ml-auto rounded-md p-1.5 text-faint transition-colors hover:bg-red-500/10 hover:text-red-400"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M4 4v9a1 1 0 001 1h6a1 1 0 001-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
                         </button>
                       </div>
                     </div>
@@ -1500,6 +1653,16 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
           )}
 
           {consented && !showHistory && <>
+          {viewingSaved && (
+            <div className="mb-4 flex items-center justify-end">
+              <button
+                onClick={() => setShowHistory(true)}
+                className="text-xs font-medium text-subtle transition-colors hover:text-secondary"
+              >
+                ← Back
+              </button>
+            </div>
+          )}
           {/* Step 1: Record */}
           {!viewingSaved && (
           <div className="mb-5">
@@ -1621,68 +1784,20 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
               Apply to Survey
             </div>
             <button
-              onClick={() => aiResult && onApply(aiResult)}
+              onClick={() => aiResult && applyAndFlash(aiResult)}
               disabled={!aiResult}
               title={!aiResult ? "Run step 3 to extract survey data first" : undefined}
               className="flex items-center gap-2 rounded-lg bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-500"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Apply to Survey
+              {applyFlash ? "Applied to Survey" : "Apply to Survey"}
             </button>
+            {applyFlash && (
+              <p className="mt-2 text-xs text-emerald-400">Applied — and automatically saved to Past Summaries with a date/time stamp.</p>
+            )}
           </div>
           </>}
         </div>
-
-        {/* Save summary input */}
-        {consented && aiResult && !showHistory && (
-          <div className="border-t border-border px-6 py-3">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={summaryLabel}
-                onChange={(e) => setSummaryLabel(e.target.value)}
-                placeholder="Name this summary (e.g. Initial walkthrough)"
-                className="forge-input flex-1 text-sm"
-              />
-              <button
-                disabled={!summaryLabel.trim()}
-                title={!summaryLabel.trim() ? "Enter a name for this summary" : undefined}
-                onClick={() => {
-                  const payload = {
-                    label: summaryLabel.trim(),
-                    date: new Date().toISOString(),
-                    transcript: transcript.replace(/\[\.\.\..*?\]/g, "").trim(),
-                    data: aiResult,
-                    fieldsExtracted: countFields(aiResult),
-                  };
-                  if (viewingSaved && savedIndex !== null) {
-                    onUpdateSummary(savedIndex, payload);
-                    setSaveFlash("updated");
-                  } else {
-                    onSaveSummary(payload);
-                    setSummaryLabel("");
-                    setSaveFlash("saved");
-                  }
-                  setTimeout(() => setSaveFlash("idle"), 2000);
-                }}
-                className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-500/10 ${
-                  saveFlash !== "idle"
-                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400"
-                    : "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
-                }`}
-              >
-                {saveFlash === "idle" ? (
-                  <>Save Summary</>
-                ) : (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    {saveFlash === "updated" ? "Updated" : "Saved"}
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-border px-6 py-4">
@@ -1697,6 +1812,18 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
         </div>
 
       </div>
+
+      {pendingDeleteIndex !== null && (
+        <ConfirmDialog
+          title="Delete this summary?"
+          message={<>Delete <span className="font-semibold text-heading">{savedSummaries[pendingDeleteIndex]?.label}</span> from Past Summaries? This only removes the saved record — anything already applied to the survey stays exactly as it is.</>}
+          onCancel={() => setPendingDeleteIndex(null)}
+          onConfirm={() => {
+            onDeleteSummary(pendingDeleteIndex);
+            setPendingDeleteIndex(null);
+          }}
+        />
+      )}
     </div>
   );
 }
