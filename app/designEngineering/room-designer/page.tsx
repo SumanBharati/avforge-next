@@ -98,6 +98,13 @@ interface PlacedDevice extends DeviceCatalogItem {
   // ambiguity `rotation` alone can't resolve, and this is purely a user
   // override on top of it.
   facingOverrideDeg?: number;
+  // User-adjusted position of this device's automatic call-out label,
+  // stored as a feet offset from the device (so the callout translates
+  // along with it if the device moves later) — set by dragging the
+  // callout's text/handle. Undefined until the user actually drags one,
+  // at which point it defaults to fanning outward from the room's center
+  // (see defaultCalloutOffset).
+  calloutDx?: number; calloutDy?: number;
   // Equipment spec fields, editable via the same "Edit Equipment" form used
   // by Signal Flow Builder/Rack Planner — mostly informational for a floor
   // plan (this tool has no cabling/rack concept of its own), kept here only
@@ -809,7 +816,7 @@ export default function RoomDesignerPage() {
       rect: (x: number, y: number, w: number, h: number, layer?: string) => dxf.rect(x, -(y + h), w, h, layer),
       circle: (cx: number, cy: number, r: number, layer?: string) => dxf.circle(cx, -cy, r, layer),
       line: (x1: number, y1: number, x2: number, y2: number, layer?: string) => dxf.line(x1, -y1, x2, -y2, layer),
-      text: (x: number, y: number, h: number, value: string, layer?: string) => dxf.text(x, -y, h, value, layer),
+      text: (x: number, y: number, h: number, value: string, layer?: string, align?: "left" | "center" | "right") => dxf.text(x, -y, h, value, layer, align),
     };
 
     const drawnWallItems = placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined);
@@ -838,7 +845,23 @@ export default function RoomDesignerPage() {
     placedDevices.filter(d => !(d.id === "wall-partition" && d.wallAngle !== undefined)).forEach(dev => {
       const layer = (dev.type || "device").toUpperCase();
       flip.rect(dev.x - dev.w / 2, dev.y - dev.h / 2, dev.w, dev.h, layer);
-      flip.text(dev.x - dev.w / 2, dev.y - dev.h / 2 - 0.3, 0.4, dev.name, layer);
+
+      // Call-out leader (matches the on-screen plan view: a short straight
+      // stub off the text, then an angled run back to the equipment) rather
+      // than the old plain name glued just above the box — this is the same
+      // user-adjustable position (calloutDx/calloutDy), so a manually
+      // decluttered arrangement on screen exports looking the same way.
+      {
+        const def = defaultCalloutOffset(dev);
+        const dxFt = dev.calloutDx ?? def.dx, dyFt = dev.calloutDy ?? def.dy;
+        const labelPt = { x: dev.x + dxFt, y: dev.y + dyFt };
+        const side = dxFt >= 0 ? 1 : -1;
+        const stubFt = 0.6;
+        const elbow = { x: labelPt.x - side * stubFt, y: labelPt.y };
+        flip.line(dev.x, dev.y, elbow.x, elbow.y, layer);
+        flip.line(elbow.x, elbow.y, labelPt.x, labelPt.y, layer);
+        flip.text(labelPt.x + side * 0.05, labelPt.y - 0.15, 0.35, calloutLabel(dev), layer, side > 0 ? "left" : "right");
+      }
 
       if (dev.covShape === "round" && dev.covDiameter) {
         flip.circle(dev.x, dev.y, dev.covDiameter / 2, "COVERAGE");
@@ -1136,6 +1159,46 @@ export default function RoomDesignerPage() {
   const pX = (x: number) => planOffX + x * planScale;
   const pY = (y: number) => planOffY + y * planScale;
 
+  // Automatic equipment call-outs (plan view only) — a professional-drawing
+  // style label (make/model) connected to its device by a leader line,
+  // instead of the plain caption that used to sit glued to each icon.
+  // Position is stored as a feet offset from the device (so it translates
+  // along with the device if it's later moved) and only gets written once
+  // the user actually drags a callout — until then, this computes a
+  // reasonable default direction so callouts on a full room don't all pile
+  // up in the middle pointing the same way.
+  //
+  // For wall-mounted equipment (a display/camera/mic/etc. on north/south/
+  // east/west), the default points *into* the room — away from the wall,
+  // not out through it — since that's where the open floor space actually
+  // is; pointing outward instead would send a north-wall device's call-out
+  // up past the top of the canvas, e.g. right under the floating toolbar
+  // row above it. Anything else (ceiling/floor/table-mounted) falls back to
+  // fanning outward from the room's center, which has no such wall to key
+  // off but still spreads callouts apart reasonably.
+  const CALLOUT_DEFAULT_DIST = 2.5;
+  const defaultCalloutOffset = (dev: PlacedDevice) => {
+    const wallDir: Record<string, {dx:number;dy:number}> = {
+      north: { dx: 0, dy: 1 }, south: { dx: 0, dy: -1 }, west: { dx: 1, dy: 0 }, east: { dx: -1, dy: 0 },
+    };
+    const dir = wallDir[dev.mountWall];
+    if (dir) return { dx: dir.dx * CALLOUT_DEFAULT_DIST, dy: dir.dy * CALLOUT_DEFAULT_DIST };
+    const cx = roomW / 2, cy = roomL / 2;
+    let vx = dev.x - cx, vy = dev.y - cy;
+    const len = Math.hypot(vx, vy);
+    if (len < 0.01) { vx = 1; vy = -1; }
+    const norm = Math.hypot(vx, vy) || 1;
+    return { dx: (vx / norm) * CALLOUT_DEFAULT_DIST, dy: (vy / norm) * CALLOUT_DEFAULT_DIST };
+  };
+  // Same "Generic"/"—" placeholder-skipping convention Signal Flow Builder
+  // uses for its own device labels — falls back to the device's own name
+  // (e.g. '43" Display') when it isn't linked to a real catalog mfr/model.
+  const calloutLabel = (dev: PlacedDevice) => {
+    const mfr = dev.mfr && dev.mfr !== "Generic" ? dev.mfr : null;
+    const model = dev.model && dev.model !== "—" ? dev.model : null;
+    return [mfr, model].filter(Boolean).join(" ") || dev.name || "Device";
+  };
+
   // Zoom extents: fit the room (or the drawn walls' extents in custom-blank
   // mode) into the 600×420 view of the given canvas. All five canvases fit
   // their content into a ≤380×270 box centered at (300,210), so the room
@@ -1380,6 +1443,104 @@ export default function RoomDesignerPage() {
     setTrackGuides([]); setWallSnapPoint(null);
     freeDragPos.current = null;
     setDragUid(null); setDragStart(null); setWallDragEdge(null); setWallDragStart(null); setWallDragged(false); setMultiDrag(null); setTableResizeDrag(null); setDoorDragId(null); setDoorDragStart(null); setRotDragUid(null); setRotDragCenter(null); setRotatingTable(false); setTableRotCenter(null);
+  };
+
+  // Dragging a callout label — kept fully independent of dragUid/dragStart
+  // (the device-drag mechanism above) since several of its branches key off
+  // dev.type/mountWall to do wall-snapping that must never apply to a
+  // callout's own offset, and a callout can be mid-drag while its owning
+  // device isn't selected or being dragged at all.
+  const [calloutDragUid, setCalloutDragUid] = useState<number | null>(null);
+  const [calloutDragStart, setCalloutDragStart] = useState<{ x: number; y: number } | null>(null);
+  const calloutDragOrigin = useRef<{ dx: number; dy: number } | null>(null);
+
+  const handleCalloutMouseDown = (e: React.MouseEvent, dev: PlacedDevice) => {
+    e.stopPropagation();
+    pushUndo();
+    setSelectedUid(dev.uid); clearSelection();
+    const def = defaultCalloutOffset(dev);
+    calloutDragOrigin.current = { dx: dev.calloutDx ?? def.dx, dy: dev.calloutDy ?? def.dy };
+    setCalloutDragUid(dev.uid);
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    setCalloutDragStart({ x: svgP.x, y: svgP.y });
+  };
+
+  const handleCalloutMouseMove = (e: React.MouseEvent) => {
+    if (!calloutDragUid || !calloutDragStart || !calloutDragOrigin.current) return;
+    const svg = svgRef.current; if (!svg) return;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    const dxW = (svgP.x - calloutDragStart.x) / planScale;
+    const dyW = (svgP.y - calloutDragStart.y) / planScale;
+    const newDx = calloutDragOrigin.current.dx + dxW;
+    const newDy = calloutDragOrigin.current.dy + dyW;
+    setPlacedDevices(prev => prev.map(d => d.uid === calloutDragUid ? { ...d, calloutDx: newDx, calloutDy: newDy } : d));
+  };
+
+  const handleCalloutMouseUp = () => {
+    setCalloutDragUid(null); setCalloutDragStart(null); calloutDragOrigin.current = null;
+  };
+
+  // Renders one device's call-out: the make/model label, a short straight
+  // stub off the text, then an angled leader running the rest of the way
+  // back to the equipment. Drawn as its own pass over the plan-view devices
+  // (rather than inline inside each device's own type branch) so the label
+  // always stays upright — several device types (e.g. a wall display) wrap
+  // their own icon in an SVG rotate() transform to match wall orientation,
+  // and a label inside that group would rotate sideways along with it.
+  const CALLOUT_STUB_PX = 20;
+  const renderCallout = (dev: PlacedDevice) => {
+    const anchorPx = pX(dev.x), anchorPy = pY(dev.y || 0.1);
+    const def = defaultCalloutOffset(dev);
+    const dxFt = dev.calloutDx ?? def.dx, dyFt = dev.calloutDy ?? def.dy;
+    const labelX = anchorPx + dxFt * planScale, labelY = anchorPy + dyFt * planScale;
+    const side = labelX >= anchorPx ? 1 : -1;
+    const elbowX = labelX - side * CALLOUT_STUB_PX, elbowY = labelY;
+    const label = calloutLabel(dev);
+    const isSelected = selectedUid === dev.uid || selectedUids.has(dev.uid);
+    return (
+      // pointerEvents="none" on the whole leader-line group (the label/handle
+      // below opt back in explicitly): the anchor dot sits at the device's
+      // own on-screen center, exactly where its icon is — undoing that would
+      // let a purely decorative line/dot silently steal clicks meant for the
+      // device underneath, since this callout's <g> is a sibling drawn in a
+      // later pass, not a descendant of the device's own <g>, so the device's
+      // click/drag handlers would never fire at all for a click that lands on
+      // callout graphics instead.
+      <g key={`callout-${dev.uid}`} pointerEvents="none">
+        <line x1={anchorPx} y1={anchorPy} x2={elbowX} y2={elbowY} stroke="#4b5563" strokeWidth={0.6} />
+        <line x1={elbowX} y1={elbowY} x2={labelX} y2={labelY} stroke="#4b5563" strokeWidth={0.6} />
+        <circle cx={anchorPx} cy={anchorPy} r={1.2} fill="#4b5563" />
+        {/* A bare <text> only hit-tests its actual glyph ink, not its logical
+            bounding box, so a click landing in the gap between characters
+            (or in the box's padding) falls through instead of starting a
+            drag — this invisible padded rect behind it widens the
+            draggable area to the label's full apparent extent. */}
+        <rect x={side > 0 ? labelX : labelX - Math.max(30, label.length * 4.6)} y={labelY - 5}
+          width={Math.max(30, label.length * 4.6)} height={9} fill="transparent" pointerEvents="auto"
+          style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)} />
+        {/* Deliberately NOT className="dev-label" — that class (globals.css)
+            is hover-only opacity:0 by default, built for the old glued-on
+            caption in a busy room. A call-out is meant to read like a
+            permanent drawing annotation, always visible, not a tooltip. */}
+        <text
+          x={labelX + side * 4} y={labelY + 2.5}
+          textAnchor={side > 0 ? "start" : "end"}
+          fontSize={7} fontWeight={600} fill="#1f2937" fontFamily="Inter, sans-serif"
+          pointerEvents="auto"
+          style={{ cursor: "move" }}
+          onMouseDown={e => handleCalloutMouseDown(e, dev)}
+        >{label}</text>
+        {isSelected && (
+          <circle cx={labelX} cy={labelY} r={2.5} fill="#8b5cf6" stroke="#fff" strokeWidth={0.5} pointerEvents="auto"
+            style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)} />
+        )}
+      </g>
+    );
   };
 
   const handleMoveDrag = (e: React.MouseEvent) => {
@@ -3256,9 +3417,9 @@ export default function RoomDesignerPage() {
         <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
           style={{background:cc.card,userSelect:"none",cursor:(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
-          onMouseMove={e=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleMarqueeMove(e);}}
-          onMouseUp={()=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
-          onMouseLeave={()=>{if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();}}
+          onMouseMove={e=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleCalloutMouseMove(e);handleMarqueeMove(e);}}
+          onMouseUp={()=>{if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
+          onMouseLeave={()=>{if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
           onDoubleClick={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleDoubleClick(e);}}}
           onMouseDown={e=>{if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0||annotate.hasSelection)){e.preventDefault();pushUndo();if(annotate.hasSelection)annotate.beginChange();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
           onClick={e=>{if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();annotate.clearSelection();}}}>
@@ -4372,6 +4533,11 @@ export default function RoomDesignerPage() {
                 }
                 return null;
               })}
+
+              {/* Automatic equipment call-outs — a separate pass over the
+                  same plan-view devices (not inline inside the loop above),
+                  see renderCallout for why. */}
+              {placedDevices.filter(d => d.wall !== "ceiling" && d.mountWall !== "ceiling" && !(d.id === "wall-partition" && d.wallAngle !== undefined)).map(dev => renderCallout(dev))}
 
               {/* Marquee selection rectangle */}
               {marquee && (() => {
