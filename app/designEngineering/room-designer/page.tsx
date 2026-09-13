@@ -1113,11 +1113,17 @@ export default function RoomDesignerPage() {
   const effectiveRoomW = isCustomBlank && drawnBounds ? drawnBounds.width : roomW;
   const effectiveRoomL = isCustomBlank && drawnBounds ? drawnBounds.depth : roomL;
 
-  // Drag clamp bounds — in custom wall mode use the drawn walls' axis-aligned extents (+ padding)
-  const cMinX = isCustomBlank ? (drawnBounds ? drawnBounds.minX - 1 : -50) : 0;
-  const cMaxX = isCustomBlank ? (drawnBounds ? drawnBounds.maxX + 1 : 50)  : roomW;
-  const cMinY = isCustomBlank ? (drawnBounds ? drawnBounds.minY - 1 : -50) : 0;
-  const cMaxY = isCustomBlank ? (drawnBounds ? drawnBounds.maxY + 1 : 50)  : roomL;
+  // Drag clamp bounds — in custom wall mode use the drawn walls' axis-aligned
+  // extents (+ padding). CANVAS_PAD gives real working room beyond the walls
+  // themselves (a 1ft pad used to leave devices with nowhere to go once
+  // dragged away from every wall — stuck against this exact clamp, which
+  // read as an invisible boundary — and a standard room had *zero* pad at
+  // all, so nothing could be moved even slightly outside its four walls).
+  const CANVAS_PAD = 20;
+  const cMinX = isCustomBlank ? (drawnBounds ? drawnBounds.minX - CANVAS_PAD : -50) : -CANVAS_PAD;
+  const cMaxX = isCustomBlank ? (drawnBounds ? drawnBounds.maxX + CANVAS_PAD : 50)  : roomW + CANVAS_PAD;
+  const cMinY = isCustomBlank ? (drawnBounds ? drawnBounds.minY - CANVAS_PAD : -50) : -CANVAS_PAD;
+  const cMaxY = isCustomBlank ? (drawnBounds ? drawnBounds.maxY + CANVAS_PAD : 50)  : roomL + CANVAS_PAD;
 
   const scale = Math.min(1, 20 / Math.max(roomW, roomL));
   const sX = (x: number, y: number, _z?: number) => 300 + (x - y) * 32 * scale;
@@ -1311,13 +1317,20 @@ export default function RoomDesignerPage() {
           setWallSnapPoint(null);
         }
         setPlacedDevices(prev => prev.map(d => d.uid === dragUid ? { ...d, x:newX, y:newY } : d));
-      } else if (dev.type === "display" && dev.mountWall !== "ceiling") {
-        // Displays move freely and stick flush to the nearest wall —
-        // boundary or drawn — when within snapping distance. The free
-        // (unsnapped) position follows the cursor so dragging away from a
-        // wall un-sticks. A display can legitimately sit away from any wall
-        // (e.g. on a credenza), so unlike cameras below it's allowed to
-        // free-float when nothing is close enough to snap to.
+      } else if (
+        (dev.type === "display" || dev.type === "camera" || dev.type === "mic" || dev.type === "speaker" || dev.type === "control")
+        && (dev.mountWall === "north" || dev.mountWall === "south" || dev.mountWall === "west" || dev.mountWall === "east" || dev.mountWall === "drawn")
+      ) {
+        // Wall-mounted AV equipment moves completely freely with the cursor
+        // — including off the wall it started on, or away from any wall
+        // entirely — and only snaps flush to a wall when dragged within a
+        // close distance of one. Each type used to have its own more
+        // restrictive rule here: cameras always snapped to the nearest wall
+        // with no way to rest anywhere else, and mic/speaker/control could
+        // only slide along whichever wall they were already on or flip to
+        // the exact opposite one, never reaching another wall or open floor
+        // space at all — the actual cause of "equipment does not move
+        // freely around the canvas".
         const fp = freeDragPos.current ?? { x: dev.x, y: dev.y };
         const nx = fp.x + dxW, ny = fp.y + dyW;
         freeDragPos.current = { x: nx, y: ny };
@@ -1328,43 +1341,6 @@ export default function RoomDesignerPage() {
           const fx = Math.max(cMinX, Math.min(cMaxX, nx)), fy = Math.max(cMinY, Math.min(cMaxY, ny));
           setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:fx, y:fy} : d));
         }
-      } else if (dev.type === "camera" && dev.mountWall !== "ceiling") {
-        // A wall camera always belongs on some wall — there's no meaningful
-        // "floating in open space" state for it the way there is for a
-        // display — so unlike displays above, this always snaps to whichever
-        // wall (boundary or custom-drawn) is nearest, with no minimum-
-        // distance gate. Gating on distance (as displays do) let a drag path
-        // that passed a room corner land more than the gate's radius from
-        // every wall segment at once — the camera then free-floated, clamped
-        // to a padded box outside the actual drawn room, and stayed stuck
-        // there since nothing pulled it back in: exactly the reported
-        // "invisible wall" — unable to drag it further inward.
-        const fp = freeDragPos.current ?? { x: dev.x, y: dev.y };
-        const nx = fp.x + dxW, ny = fp.y + dyW;
-        freeDragPos.current = { x: nx, y: ny };
-        const snap = snapDeviceToNearestWall(nx, ny);
-        if (snap) {
-          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:snap.x, y:snap.y, mountWall:snap.mountWall, wallUid:snap.wallUid, rotation:snap.angleDeg} : d));
-        } else {
-          // No wall to snap to at all (e.g. a custom room with no walls
-          // drawn yet) — fall back to plain clamped movement rather than
-          // getting stuck with no update.
-          const fx = Math.max(cMinX, Math.min(cMaxX, nx)), fy = Math.max(cMinY, Math.min(cMaxY, ny));
-          setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d, x:fx, y:fy} : d));
-        }
-      } else if (dev.mountWall === "north" || dev.mountWall === "south") {
-        // Slide freely along the wall; crossing the room's midline flips it to the opposite wall
-        const rawX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
-        const rawY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
-        const newMountWall = rawY > roomL / 2 ? "south" : "north";
-        const sy = newMountWall === "north" ? 0.02 : roomL - 0.02;
-        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:rawX,y:sy,mountWall:newMountWall} : d));
-      } else if (dev.mountWall === "west" || dev.mountWall === "east") {
-        const rawX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
-        const rawY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
-        const newMountWall = rawX > roomW / 2 ? "east" : "west";
-        const sx = newMountWall === "west" ? 0.02 : roomW - 0.02;
-        setPlacedDevices(prev => prev.map(d => d.uid===dragUid ? {...d,x:sx,y:rawY,mountWall:newMountWall} : d));
       } else {
         const newX = Math.max(cMinX, Math.min(cMaxX, dev.x + dxW));
         const newY = Math.max(cMinY, Math.min(cMaxY, dev.y + dyW));
@@ -3962,10 +3938,18 @@ export default function RoomDesignerPage() {
                     }
                     reach=Math.min(Math.max(effectiveRoomW,effectiveRoomL)*planScale,200);
                   }
-                  else if(mw==="north"){ facingA=Math.PI/2; cpx=devPx;cpy=pY(0.1); reach=Math.min(fovReachN,200); }
-                  else if(mw==="south"){ facingA=-Math.PI/2; cpx=devPx;cpy=pY(roomL-0.1); reach=Math.min(fovReachN,200); }
-                  else if(mw==="west"){ facingA=0; cpx=pX(0.1);cpy=pY(dev.y); reach=Math.min(fovReachW,200); }
-                  else { facingA=Math.PI; cpx=pX(roomW-0.1);cpy=pY(dev.y); reach=Math.min(fovReachW,200); }
+                  // Cardinal mounts use the device's own tracked x/y for
+                  // position too (not a hardcoded point on the wall line) —
+                  // a camera dragged off its wall into open floor space still
+                  // has mountWall:"north" etc. (free-floating doesn't change
+                  // that, only snapping does), so hardcoding the position
+                  // here rendered it glued to the wall regardless of how far
+                  // it had actually been dragged, even though the drag
+                  // itself moved dev.x/dev.y correctly.
+                  else if(mw==="north"){ facingA=Math.PI/2; cpx=devPx;cpy=devPy; reach=Math.min(fovReachN,200); }
+                  else if(mw==="south"){ facingA=-Math.PI/2; cpx=devPx;cpy=devPy; reach=Math.min(fovReachN,200); }
+                  else if(mw==="west"){ facingA=0; cpx=devPx;cpy=devPy; reach=Math.min(fovReachW,200); }
+                  else { facingA=Math.PI; cpx=devPx;cpy=devPy; reach=Math.min(fovReachW,200); }
                   if(!isCeiling){
                     // Manual fine-rotation on top of the auto-computed wall
                     // facing — lets the user correct a placement the auto-snap
@@ -4233,11 +4217,10 @@ export default function RoomDesignerPage() {
                     const spkW=dev.w*planScale, spkD=Math.max(dev.w*0.9*planScale, 5);
                     const isHoriz=mw2==="north"||mw2==="south";
                     const bw=isHoriz?spkW:spkD, bh=isHoriz?spkD:spkW;
-                    let sx=mpx, sy=mpy;
-                    if(mw2==="north") sy=pY(0)+bh/2;
-                    else if(mw2==="south") sy=pY(roomL)-bh/2;
-                    else if(mw2==="west") sx=pX(0)+bw/2;
-                    else sx=pX(roomW)-bw/2;
+                    // Use the device's own tracked position as-is — no longer
+                    // re-pinned to the exact wall line, so a speaker dragged
+                    // off its wall renders where it actually was moved to.
+                    const sx=mpx, sy=mpy;
                     return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Speaker body */}
@@ -4269,23 +4252,24 @@ export default function RoomDesignerPage() {
                 }
                 if(dev.type==="control"){
                   const mw=dev.mountWall||"floor";
-                  let cpx2:number,cpy2:number;
-                  if(mw==="north")      {cpx2=devPx;cpy2=pY(0.05);}
-                  else if(mw==="south") {cpx2=devPx;cpy2=pY(roomL-0.05);}
-                  else if(mw==="west")  {cpx2=pX(0.05);cpy2=pY(dev.y);}
-                  else if(mw==="east")  {cpx2=pX(roomW-0.05);cpy2=pY(dev.y);}
-                  else                  {cpx2=devPx;cpy2=pY(dev.y);}
+                  // Always render at the device's own tracked position rather
+                  // than a hardcoded point on the wall line — a panel dragged
+                  // off its wall into open floor space still has
+                  // mountWall:"north" etc. (free-floating doesn't change
+                  // that, only snapping does), so hardcoding the position
+                  // rendered it glued to the wall regardless of how far it
+                  // had actually been dragged.
+                  const cpx2=devPx, cpy2=devPy;
                   // TSW-1070 style wall touch panel
                   const isWallPanel=dev.id==="touch-panel";
                   if(isWallPanel){
                     const pw=dev.w*planScale, pd=Math.max(4, dev.h*planScale*0.3);
                     const isHoriz=mw==="north"||mw==="south";
                     const bw=isHoriz?pw:pd, bh=isHoriz?pd:pw;
-                    let sx=cpx2, sy=cpy2;
-                    if(mw==="north") sy=pY(0)+bh/2;
-                    else if(mw==="south") sy=pY(roomL)-bh/2;
-                    else if(mw==="west") sx=pX(0)+bw/2;
-                    else if(mw==="east") sx=pX(roomW)-bw/2;
+                    // Use the device's own tracked position (cpx2/cpy2) as-is
+                    // — no longer re-pinned to the exact wall line here, for
+                    // the same reason as cpx2/cpy2 above.
+                    const sx=cpx2, sy=cpy2;
                     return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}

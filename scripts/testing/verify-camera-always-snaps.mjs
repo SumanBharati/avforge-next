@@ -8,10 +8,17 @@
 //
 // Seeds a camera already stuck in that exact state (positioned diagonally
 // outside the top-left corner of a custom-drawn 8x10 room, past the old
-// 1.5ft gate from both the top and left walls) and drags it — since cameras
-// now always snap to the nearest wall with no distance gate, the very next
-// drag tick should pull it back onto a real wall instead of staying stuck
-// in the padded dead zone outside the room.
+// 1.5ft gate from both the top and left walls) and drags it.
+//
+// Note: the actual fix that stuck (see verify-camera-body-rotation-alignment
+// and the "move freely" follow-up) is not an unconditional snap — cameras
+// use the same 1.5ft distance-gated snap as every other wall-mounted device,
+// so they can rest anywhere on the canvas. What actually resolves the dead
+// zone is CANVAS_PAD: the free-float clamp bounds now extend a generous 20ft
+// past the drawn room instead of 1ft, so a device dragged away from every
+// wall always has real room to move through and back — nothing pins it at
+// an artificially tight boundary anymore. This test still nudges the camera
+// and confirms it ends up on a real wall rather than stuck outside the room.
 //
 // Prereqs: node --env-file=.env.local scripts/testing/create-test-user.mjs
 //          node --env-file=.env.local scripts/testing/seed-fixture.mjs
