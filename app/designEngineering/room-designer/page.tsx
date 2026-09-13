@@ -2894,6 +2894,19 @@ export default function RoomDesignerPage() {
   // from the north wall (north/south share that depth axis) and is assumed
   // centered left-right (so it's symmetric for east/west).
   const [guideWall, setGuideWall] = useState<"north" | "south" | "east" | "west">("north");
+  // Which aspect ratio the recommended diagonal is computed for — displays
+  // aren't all 16:9 (videowalls/LED often run 21:9 or wider, older systems
+  // 4:3), so the diagonal a user actually needs to shop for depends on this,
+  // not a fixed assumption. Not persisted, same as guideWall — this is a
+  // "what if" exploration control, not part of the saved room design.
+  const [guideAspectRatio, setGuideAspectRatio] = useState(16 / 9);
+  const guideAspectPresets = [
+    { label: "16:9", val: 16 / 9 },
+    { label: "16:10", val: 16 / 10 },
+    { label: "4:3", val: 4 / 3 },
+    { label: "21:9", val: 21 / 9 },
+  ];
+  const guideAspectLabel = guideAspectPresets.find(p => Math.abs(p.val - guideAspectRatio) < 0.005)?.label ?? `${guideAspectRatio.toFixed(2)}:1`;
   const guideIsNS = guideWall === "north" || guideWall === "south";
   const guideDepth = guideIsNS ? effectiveDepth : effectiveWidth;
   const seatMargin = Math.max(seatDist, 0.35);
@@ -2919,8 +2932,7 @@ export default function RoomDesignerPage() {
     }
   }
   const imageHeightIn = farthestViewer / 6 * 12;  // VR 6:1 = 3% element height, converted to inches
-  const ar16x9 = 16 / 9;
-  const reqDiagIn = imageHeightIn * Math.sqrt(ar16x9 * ar16x9 + 1);
+  const reqDiagIn = imageHeightIn * Math.sqrt(guideAspectRatio * guideAspectRatio + 1);
   const standardSizes = [43, 50, 55, 65, 75, 86, 98, 110];
   const recommendedSize = standardSizes.find(s => s >= reqDiagIn) || standardSizes[standardSizes.length - 1];
   const showDisplayGuide = farthestViewer > 0;
@@ -3347,6 +3359,27 @@ export default function RoomDesignerPage() {
                 </button>
               ))}
             </div>
+            {/* Display aspect ratio — drives Calc. diagonal below. Displays
+                aren't all 16:9 (LED walls/ultra-wide often aren't), so the
+                diagonal a user actually shops for needs to match whatever's
+                actually being planned, not an assumed default. */}
+            <div style={{fontSize:11,color:"rgb(var(--text-faint))",marginBottom:4}}>Display aspect ratio</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,marginBottom:10}}>
+              {guideAspectPresets.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => setGuideAspectRatio(p.val)}
+                  style={{
+                    padding:"5px 0",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",
+                    border:"1px solid " + (Math.abs(guideAspectRatio-p.val)<0.005 ? "#8b5cf6" : "rgb(var(--border))"),
+                    background: Math.abs(guideAspectRatio-p.val)<0.005 ? "rgba(139,92,246,0.15)" : "rgb(var(--forge-surface))",
+                    color: Math.abs(guideAspectRatio-p.val)<0.005 ? "#a78bfa" : "rgb(var(--text-subtle))",
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
             <div style={{padding:10,background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)",borderRadius:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:15,color:"rgb(var(--text-muted))",marginBottom:6}}>
                 <span>Room width</span><span style={{fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))"}}>{validRoom ? toDisplay(effectiveWidth) : "—"}</span>
@@ -3367,7 +3400,7 @@ export default function RoomDesignerPage() {
                 <span style={{fontSize:15,fontWeight:600,color:"rgb(var(--text-body))"}}>Recommended</span>
                 <span style={{fontSize:18,fontWeight:700,color:"#a78bfa",fontFamily:"'JetBrains Mono',monospace"}}>{validRoom ? `${recommendedSize}"` : "—"}</span>
               </div>
-              <div style={{fontSize:13,color:"#475569",marginTop:4}}>AVIXA DISCAS · 3% element height · 16:9</div>
+              <div style={{fontSize:13,color:"#475569",marginTop:4}}>AVIXA DISCAS · 3% element height · {guideAspectLabel}</div>
             </div>
           </div>
 
