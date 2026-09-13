@@ -12,6 +12,8 @@ import { useOrg } from "@/components/OrgProvider";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
+import { dxfToBackgroundImage } from "@/lib/dxf-import";
+import { pdfToBackgroundImage } from "@/lib/pdf-import";
 import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
 
 /* Theme-aware canvas colors */
@@ -634,9 +636,10 @@ export default function RoomDesignerPage() {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
+        floorPlanImg, floorPlanScale, floorPlanOffset,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, saveDesign]);
 
   // Auto-save on changes (after step 2 is active, and only once this room's
   // own saved design has actually finished loading — otherwise the reset
@@ -939,11 +942,12 @@ export default function RoomDesignerPage() {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
+        floorPlanImg, floorPlanScale, floorPlanOffset,
       });
     };
     window.addEventListener("avforge-save", handler);
     return () => window.removeEventListener("avforge-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
   // the room or project actually changes (not just on mount), since switching
@@ -968,6 +972,7 @@ export default function RoomDesignerPage() {
     setUndoStack([]);
     setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
     setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
+    setFloorPlanImg(null); setFloorPlanScale(50); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]);
 
     currentProjectId.current = projectId;
     currentRoomId.current = roomId || "default";
@@ -1028,6 +1033,9 @@ export default function RoomDesignerPage() {
           if (saved.config.selectedWall) setSelectedWall(saved.config.selectedWall as string);
           if (saved.config.placedDoors) setPlacedDoors(saved.config.placedDoors as PlacedDoor[]);
           if (saved.config.annotations) annotate.setAnnotations(saved.config.annotations as any[]);
+          if (saved.config.floorPlanImg) setFloorPlanImg(saved.config.floorPlanImg as string);
+          if (saved.config.floorPlanScale) setFloorPlanScale(saved.config.floorPlanScale as number);
+          if (saved.config.floorPlanOffset) setFloorPlanOffset(saved.config.floorPlanOffset as {x:number;y:number});
           setStep(2);
         }
       });
@@ -2578,29 +2586,60 @@ export default function RoomDesignerPage() {
     }
   }, [isDrawingWall, wallPoints.length]);
 
-  // Floor plan import handler
+  // Floor plan import handler — accepts a photo/scan (jpg/png, used as-is),
+  // a PDF (rendered to a flat image via pdfjs-dist, first page only), or a
+  // DXF/AutoCAD export (its LINE/LWPOLYLINE/CIRCLE/ARC geometry rasterized
+  // to a flat image — see lib/dxf-import.ts for why this doesn't try to stay
+  // vector, or trust the file's own units). All three end up as the exact
+  // same floorPlanImg background, calibrated the same way afterward via
+  // "Set Scale" — a DXF/PDF's nominal scale is never assumed correct.
+  const [floorPlanImportError, setFloorPlanImportError] = useState<string | null>(null);
   const handleFloorPlanUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFloorPlanImg(reader.result as string);
-      setFloorPlanScale(50); // default: 50 pixels per foot
+    setFloorPlanImportError(null);
+    const applyBackground = (dataUrl: string) => {
+      setFloorPlanImg(dataUrl);
+      setFloorPlanScale(50); // default: 50 pixels per foot, until calibrated
       setFloorPlanOffset({x: 0, y: 0});
       setIsScalingFloorPlan(false);
       setScaleRefPoints([]);
     };
-    reader.readAsDataURL(file);
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext === "dxf") {
+      file.text()
+        .then(text => {
+          const dataUrl = dxfToBackgroundImage(text);
+          if (!dataUrl) { setFloorPlanImportError("No supported geometry (lines, polylines, circles, or arcs) found in this DXF file."); return; }
+          applyBackground(dataUrl);
+        })
+        .catch(() => setFloorPlanImportError("Couldn't read this DXF file."));
+    } else if (ext === "pdf") {
+      pdfToBackgroundImage(file)
+        .then(applyBackground)
+        .catch(() => setFloorPlanImportError("Couldn't render this PDF file."));
+    } else {
+      const reader = new FileReader();
+      reader.onload = () => applyBackground(reader.result as string);
+      reader.onerror = () => setFloorPlanImportError("Couldn't read this image file.");
+      reader.readAsDataURL(file);
+    }
+    e.target.value = ""; // allow re-selecting the same file after an error
   };
 
+  // Reference-distance entered in inches — matching the equipment library's
+  // own dimension unit — rather than feet, so a doorway, a ceiling tile, or
+  // an outlet spacing (the kind of small, precisely-known dimensions an
+  // actual floor plan/photo shows) can be used as the calibration reference
+  // without converting to a fraction of a foot by hand.
   const applyScaleReference = () => {
     if (scaleRefPoints.length !== 2 || !scaleRefLength) return;
     const dx = scaleRefPoints[1].x - scaleRefPoints[0].x;
     const dy = scaleRefPoints[1].y - scaleRefPoints[0].y;
     const pixelDist = Math.sqrt(dx*dx + dy*dy) * planScale; // distance in SVG pixels
-    const realDist = parseFloat(scaleRefLength);
-    if (realDist > 0 && pixelDist > 0) {
-      setFloorPlanScale(prev => prev * (pixelDist / (realDist * prev)));
+    const realDistFt = parseFloat(scaleRefLength) / 12;
+    if (realDistFt > 0 && pixelDist > 0) {
+      setFloorPlanScale(prev => prev * (pixelDist / (realDistFt * prev)));
     }
     setIsScalingFloorPlan(false);
     setScaleRefPoints([]);
@@ -3193,9 +3232,10 @@ export default function RoomDesignerPage() {
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   <div style={{fontSize:12,color:"rgb(var(--text-muted))",marginBottom:8}}>Drop or upload a floor plan</div>
-                  <div style={{fontSize:10,color:"rgb(var(--text-faint))",marginBottom:10}}>JPG, JPEG, or PNG formats</div>
+                  <div style={{fontSize:10,color:"rgb(var(--text-faint))",marginBottom:10}}>JPG, PNG, PDF, or DXF (AutoCAD)</div>
                   <button onClick={()=>floorPlanInputRef.current?.click()} style={{padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",color:"rgb(var(--text-body))",cursor:"pointer"}}>Upload</button>
-                  <input ref={floorPlanInputRef} type="file" accept=".jpg,.jpeg,.png" onChange={handleFloorPlanUpload} style={{display:"none"}} />
+                  <input ref={floorPlanInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf,.dxf" onChange={handleFloorPlanUpload} style={{display:"none"}} />
+                  {floorPlanImportError && <div style={{marginTop:8,fontSize:11,color:"#f87171"}}>{floorPlanImportError}</div>}
                 </div>
               ) : (
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -3211,10 +3251,10 @@ export default function RoomDesignerPage() {
                       {scaleRefPoints.length === 1 && "Click the second point"}
                       {scaleRefPoints.length === 2 && (
                         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                          <div>Enter the real distance between the two points:</div>
+                          <div>Enter the real distance between the two points, in inches:</div>
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                            <input type="number" step="0.1" value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder="e.g. 15" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
-                            <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>ft</span>
+                            <input type="number" step="0.5" value={scaleRefLength} onChange={e=>setScaleRefLength(e.target.value)} placeholder="e.g. 120" className="no-spin" style={{flex:1,padding:"4px 8px",borderRadius:4,border:"1px solid rgba(139,92,246,0.3)",background:"rgb(var(--forge-surface) / 0.6)",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}} />
+                            <span style={{fontSize:11,color:"rgb(var(--text-subtle))"}}>in</span>
                           </div>
                           <div style={{display:"flex",gap:4}}>
                             <button onClick={applyScaleReference} style={{flex:1,padding:"5px",borderRadius:4,fontSize:11,fontWeight:600,background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Apply Scale</button>
