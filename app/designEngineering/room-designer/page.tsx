@@ -128,7 +128,26 @@ interface PlacedDevice extends DeviceCatalogItem {
 // render time (see computeElevation below) — so moving/adding devices in
 // the plan always keeps every marker's elevation current with no manual
 // re-sync step.
-interface ElevationMarker { id: number; x: number; y: number; angle: number; label: string; }
+// Standard architectural "interior elevation" tag — a diamond with 4
+// direction flags (N/E/S/W) around a circle. Each flag is independently
+// toggleable (see toggleElevationDirection) so one marker can drive up to 4
+// elevation views from a single position; a flag renders solid black when
+// its direction is active, matching the drafting convention, and empty
+// (outline only) otherwise. North is the only one on by default.
+//
+// `directions` is an ORDERED list of the active flags, in the order they
+// were turned on — not a fixed N/E/S/W order. Its index+1 is that flag's
+// view number (first one enabled = 1, next = 2, ...), which is what's shown
+// next to the flag on the diamond and appended to the marker's own letter
+// to name that elevation view (e.g. "A1", "A2") — so removing then re-adding
+// a flag gives it a new number rather than reclaiming its old one, and the
+// remaining flags renumber contiguously when one is removed.
+interface ElevationMarker { id: number; x: number; y: number; label: string; directions: ElevationDirKey[]; }
+type ElevationDirKey = "n" | "e" | "s" | "w";
+const ELEVATION_DIR_ANGLES: Record<ElevationDirKey, number> = { n: 0, e: 90, s: 180, w: 270 };
+const ELEVATION_DIR_LABELS: Record<ElevationDirKey, string> = { n: "North", e: "East", s: "South", w: "West" };
+const ELEVATION_DIR_KEYS: ElevationDirKey[] = ["n", "e", "s", "w"];
+const elevationDirNumber = (m: ElevationMarker, dir: ElevationDirKey) => m.directions.indexOf(dir) + 1;
 
 // Room Designer's own placed-device model has no separate manufacturer/model
 // breakdown or ports/rack/power spec — "name" (e.g. '43" Display') is the one
@@ -488,35 +507,42 @@ export default function RoomDesignerPage() {
   const [ceilDragUid,   setCeilDragUid]   = useState<number|null>(null);
   const [ceilDragStart, setCeilDragStart] = useState<{x:number,y:number}|null>(null);
   const ceilSvgRef = useRef<SVGSVGElement>(null);
-  const [micZoom,       setMicZoom]       = useState(1.5);
-  const [micPan,        setMicPan]        = useState({x:0,y:0});
-  const [isMicPanning,  setIsMicPanning]  = useState(false);
-  const [micPanStart,   setMicPanStart]   = useState({x:0,y:0,px:0,py:0});
-  const [micDragUid,    setMicDragUid]    = useState<number|null>(null);
-  const [micDragStart,  setMicDragStart]  = useState<{x:number,y:number}|null>(null);
-  const micSvgRef = useRef<SVGSVGElement>(null);
-  const [wallSpkZoom,      setWallSpkZoom]      = useState(1.5);
-  const [wallSpkPan,       setWallSpkPan]       = useState({x:0,y:0});
-  const [isWallSpkPanning, setIsWallSpkPanning] = useState(false);
-  const [wallSpkPanStart,  setWallSpkPanStart]  = useState({x:0,y:0,px:0,py:0});
-  const [wallSpkDragUid,   setWallSpkDragUid]   = useState<number|null>(null);
-  const wallSpkSvgRef = useRef<SVGSVGElement>(null);
-  const [wallMicZoom,      setWallMicZoom]      = useState(1.5);
-  const [wallMicPan,       setWallMicPan]       = useState({x:0,y:0});
-  const [isWallMicPanning, setIsWallMicPanning] = useState(false);
-  const [wallMicPanStart,  setWallMicPanStart]  = useState({x:0,y:0,px:0,py:0});
-  const [wallMicDragUid,   setWallMicDragUid]   = useState<number|null>(null);
-  const wallMicSvgRef = useRef<SVGSVGElement>(null);
+  // Elevations pane pan/zoom — same wheel/lock conventions as Floor Plan
+  // and Ceiling Plan (no draggable devices in here, so no dragUid needed).
+  const [elevZoom,      setElevZoom]      = useState(1.5);
+  const [elevPan,       setElevPan]       = useState({x:0,y:0});
+  const [isElevPanning, setIsElevPanning] = useState(false);
+  const [elevPanStart,  setElevPanStart]  = useState({x:0,y:0,px:0,py:0});
+  const elevSvgRef = useRef<SVGSVGElement>(null);
+  // Floor Plan / Ceiling Plan side-by-side split — fraction (0-1) of the
+  // shared row's width given to Floor Plan; drag the divider to resize.
+  const [floorCeilSplit, setFloorCeilSplit] = useState(0.5);
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const floorCeilRowRef = useRef<HTMLDivElement>(null);
+  // Floor+Ceiling row / Elevations row vertical split — height given to the
+  // top row, as a percent of viewport height (vh), matching the vh units
+  // both rows already used before this was resizable; Elevations always
+  // gets the rest. Tracked as an incremental drag (mouse Y delta -> vh
+  // delta) rather than measuring a container rect, since — unlike the
+  // side-by-side split — there's no single shared-height container these
+  // two stacked, independently-scrollable rows both live inside.
+  const [topRowHeightVh, setTopRowHeightVh] = useState(50);
+  const [isDraggingRowSplit, setIsDraggingRowSplit] = useState(false);
 
   // Elevation markers — see the ElevationMarker type above. `placingElevationMarker`
   // arms a single click-to-drop on the plan canvas (mirrors how door/chair/table
-  // placement already works); `elevMarkerDrag` tracks an in-progress
-  // reposition ("move") or direction change ("rotate", dragging the arrowhead).
+  // placement already works); `elevMarkerDrag` tracks an in-progress reposition
+  // drag; `elevMarkerContextMenu` is the right-click menu used to toggle which
+  // of the 4 direction flags (N/E/S/W) are active on a marker. A marker can
+  // drive up to 4 simultaneous elevation views, so the pane below is keyed by
+  // `${markerId}-${dirKey}`, not just marker id — `activeElevationKey` tracks
+  // which one is currently shown.
   const [elevationMarkers,       setElevationMarkers]       = useState<ElevationMarker[]>([]);
   const [placingElevationMarker, setPlacingElevationMarker] = useState(false);
   const [selectedElevationId,    setSelectedElevationId]    = useState<number | null>(null);
-  const [activeElevationId,      setActiveElevationId]      = useState<number | null>(null);
-  const [elevMarkerDrag,         setElevMarkerDrag]         = useState<{id: number; mode: "move" | "rotate"} | null>(null);
+  const [activeElevationKey,     setActiveElevationKey]     = useState<string | null>(null);
+  const [elevMarkerDrag,         setElevMarkerDrag]         = useState<{id: number} | null>(null);
+  const [elevMarkerContextMenu,  setElevMarkerContextMenu]  = useState<{x: number; y: number; id: number} | null>(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -530,36 +556,104 @@ export default function RoomDesignerPage() {
       return { x: p.x, y: p.y };
     },
     getZoom: () => zoom,
+    // The Dimension tool measures in this SVG's own user-space units, which
+    // are plan pixels (px/ft = min(380/roomW, 270/roomL), same formula as
+    // the later `planScale` const) — convert back to feet-inches for the
+    // label, matching the rest of the plan view's own formatting. Computed
+    // inline (not via the shared `planScale`/`toDisplay` consts declared
+    // further down the component) because `useCanvasAnnotations` renders any
+    // already-loaded annotation immediately when called here — before this
+    // component's own later `const`s have run in this render pass, so a
+    // dimension annotation loaded from a save would hit them mid-TDZ.
+    formatDistance: (px) => {
+      const ftScale = Math.min(380 / roomW, 270 / roomL);
+      const totalQ = Math.round((px / ftScale) * 12 * 4);
+      const f = Math.floor(totalQ / 48), remQ = totalQ % 48;
+      const wholeIn = Math.floor(remQ / 4), q = remQ % 4;
+      const frac = q === 0 ? "" : q === 1 ? "¼" : q === 2 ? "½" : "¾";
+      return `${f}′ ${wholeIn}${frac}″`;
+    },
   });
 
-  // Wheel pan/zoom for all five canvases (same gestures as Signal Flow):
-  // wheel pans, shift+wheel pans horizontally, ctrl/cmd+wheel zooms.
-  // Latest zoom values and locks are mirrored into a ref so the single
-  // document-level listener never sees stale state.
-  const rdWheelState = useRef({ zoom: 1.5, ceilZoom: 1.5, micZoom: 1.5, wallSpkZoom: 1.5, wallMicZoom: 1.5, lockedViews: {} as Record<string, boolean> });
-  rdWheelState.current = { zoom, ceilZoom, micZoom, wallSpkZoom, wallMicZoom, lockedViews };
+  // Wheel pan/zoom for both canvases (same gestures as Signal Flow): wheel
+  // pans, shift+wheel pans horizontally, ctrl/cmd+wheel zooms. Latest zoom
+  // values and locks are mirrored into a ref so the single document-level
+  // listener never sees stale state.
+  const rdWheelState = useRef({ zoom: 1.5, ceilZoom: 1.5, elevZoom: 1.5, lockedViews: {} as Record<string, boolean> });
+  rdWheelState.current = { zoom, ceilZoom, elevZoom, lockedViews };
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       const el = (e.target as Element).closest?.("[data-rd-canvas]");
       if (!el) return;
+      // A plain wheel (no modifiers) is left alone entirely — it scrolls the
+      // whole page (Floor Plan, Ceiling Plan, and Elevations together)
+      // normally, instead of being hijacked to pan whichever individual
+      // canvas happens to be under the cursor. Only the deliberate
+      // ctrl/cmd-zoom and shift-horizontal-pan gestures still take over the
+      // wheel, since those aren't something a user would trigger by accident
+      // while just trying to scroll past a canvas.
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return;
       e.preventDefault();
       const key = el.getAttribute("data-rd-canvas")!;
       const s = rdWheelState.current;
       if (s.lockedViews[key]) return;
-      const z = key==="plan" ? s.zoom : key==="ceil" ? s.ceilZoom : key==="mic" ? s.micZoom : key==="wallSpk" ? s.wallSpkZoom : s.wallMicZoom;
-      const setZ = key==="plan" ? setZoom : key==="ceil" ? setCeilZoom : key==="mic" ? setMicZoom : key==="wallSpk" ? setWallSpkZoom : setWallMicZoom;
-      const setP = key==="plan" ? setPan : key==="ceil" ? setCeilPan : key==="mic" ? setMicPan : key==="wallSpk" ? setWallSpkPan : setWallMicPan;
+      const z = key==="plan" ? s.zoom : key==="ceil" ? s.ceilZoom : s.elevZoom;
+      const setZ = key==="plan" ? setZoom : key==="ceil" ? setCeilZoom : setElevZoom;
+      const setP = key==="plan" ? setPan : key==="ceil" ? setCeilPan : setElevPan;
       if (e.ctrlKey || e.metaKey) {
         setZ(zv => Math.min(3, Math.max(0.25, zv * Math.exp(-e.deltaY * 0.0015))));
-      } else if (e.shiftKey) {
-        setP(p => ({ x: p.x - (e.deltaY || e.deltaX) / z, y: p.y }));
       } else {
-        setP(p => ({ x: p.x - e.deltaX / z, y: p.y - e.deltaY / z }));
+        setP(p => ({ x: p.x - (e.deltaY || e.deltaX) / z, y: p.y }));
       }
     };
     document.addEventListener("wheel", onWheel, { passive: false, capture: true });
     return () => document.removeEventListener("wheel", onWheel, { capture: true } as any);
   }, []);
+
+  // Floor Plan / Ceiling Plan divider drag — recomputes the split fraction
+  // from the shared row's own bounding box so it stays correct regardless of
+  // window width, clamped so neither half can be dragged away to nothing.
+  useEffect(() => {
+    if (!isDraggingSplit) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = floorCeilRowRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const frac = (e.clientX - rect.left) / rect.width;
+      setFloorCeilSplit(Math.min(0.8, Math.max(0.2, frac)));
+    };
+    const onUp = () => setIsDraggingSplit(false);
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = "col-resize";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isDraggingSplit]);
+
+  // Floor+Ceiling row / Elevations row divider drag — same idea as the
+  // side-by-side split above, but vertical: accumulates the mouse's
+  // per-event Y movement as a vh delta, clamped so neither row can be
+  // dragged down to nothing.
+  useEffect(() => {
+    if (!isDraggingRowSplit) return;
+    const onMove = (e: MouseEvent) => {
+      const deltaVh = (e.movementY / window.innerHeight) * 100;
+      setTopRowHeightVh(prev => Math.min(80, Math.max(20, prev + deltaVh)));
+    };
+    const onUp = () => setIsDraggingRowSplit(false);
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = "row-resize";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isDraggingRowSplit]);
 
   // AutoCAD-style zoom extents: double-click the middle mouse button on a
   // canvas to re-fit the room in the view. The listener is mounted once and
@@ -614,9 +708,14 @@ export default function RoomDesignerPage() {
   // Legacy compat
   const wallStart = wallPoints.length > 0 ? wallPoints[wallPoints.length - 1] : null;
 
-  // Floor plan image import
+  // Floor plan image import — floorPlanWidthFt is the image's real-world
+  // width (calibrated via Set Scale below); floorPlanNativeSize is its raw
+  // pixel dimensions (captured once on load, purely to preserve aspect
+  // ratio when rendering). Height in feet is always derived from these two,
+  // never stored separately, so the two can't drift out of proportion.
   const [floorPlanImg,       setFloorPlanImg]       = useState<string | null>(null);
-  const [floorPlanScale,     setFloorPlanScale]     = useState(1); // pixels per foot
+  const [floorPlanWidthFt,   setFloorPlanWidthFt]   = useState(16);
+  const [floorPlanNativeSize, setFloorPlanNativeSize] = useState<{w:number;h:number}|null>(null);
   const [floorPlanOffset,    setFloorPlanOffset]    = useState({x: 0, y: 0});
   const [isScalingFloorPlan, setIsScalingFloorPlan] = useState(false);
   const [scaleRefPoints,     setScaleRefPoints]     = useState<{x:number;y:number}[]>([]);
@@ -631,6 +730,20 @@ export default function RoomDesignerPage() {
   const [scaleRefLength,     setScaleRefLength]     = useState("");
   const [scaleRefInches,     setScaleRefInches]     = useState("");
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
+
+  // Capture the background image's own pixel dimensions whenever it
+  // changes — needed to render it at its correct aspect ratio once
+  // floorPlanWidthFt gives it a real-world size. Runs for every path that
+  // can set floorPlanImg (fresh upload, DXF/PDF import, or loading a saved
+  // design), rather than duplicating this in each of those call sites.
+  useEffect(() => {
+    if (!floorPlanImg) { setFloorPlanNativeSize(null); return; }
+    let cancelled = false;
+    const img = new window.Image();
+    img.onload = () => { if (!cancelled) setFloorPlanNativeSize({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 }); };
+    img.src = floorPlanImg;
+    return () => { cancelled = true; };
+  }, [floorPlanImg]);
 
   // Track current project/room IDs for save
   const currentProjectId = useRef<string | null>(null);
@@ -664,11 +777,11 @@ export default function RoomDesignerPage() {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
-        floorPlanImg, floorPlanScale, floorPlanOffset,
+        floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Auto-save on changes (after step 2 is active, and only once this room's
   // own saved design has actually finished loading — otherwise the reset
@@ -754,7 +867,7 @@ export default function RoomDesignerPage() {
   };
 
   const exportAsPDF = () => {
-    const pageKeys = ["plan", "ceil", "mic", "wallSpk", "wallMic"];
+    const pageKeys = ["plan", "ceil"];
     // Expand every section (so it actually appears in the PDF) and zoom-extend
     // each canvas to fill its page, remembering what was collapsed so we can
     // restore the user's on-screen layout once the print dialog closes.
@@ -801,8 +914,8 @@ export default function RoomDesignerPage() {
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         #rd-canvas-export { background: #fff !important; padding: 8mm !important; box-sizing: border-box !important; }
         #rd-canvas-export button, #rd-canvas-export .rd-print-hide { display: none !important; }
-        #rd-print-title-ceil, #rd-print-title-mic, #rd-print-title-wallSpk, #rd-print-title-wallMic { break-before: page !important; }
-        #rd-print-page-plan, #rd-print-page-ceil, #rd-print-page-mic, #rd-print-page-wallSpk, #rd-print-page-wallMic {
+        #rd-print-title-elev { break-before: page !important; }
+        #rd-print-page-plan, #rd-print-page-elev {
           height: 178mm !important; min-height: 0 !important; max-height: 178mm !important; break-inside: avoid !important;
         }
         /* Chrome only reserves (and prints) the date/URL/page-number header+footer
@@ -927,17 +1040,19 @@ export default function RoomDesignerPage() {
     // dxf.rect/text directly instead of the plan's y-flipping `flip` wrapper.
     let elevSheetX = roomW + 15;
     elevationMarkers.forEach(marker => {
-      const data = computeElevation(marker);
-      const ox = elevSheetX;
-      dxf.rect(ox, 0, data.wallWidthFt, data.roomHFt, "ELEVATION");
-      dxf.text(ox + data.wallWidthFt / 2, data.roomHFt + 1, 0.6, `Elevation ${marker.label} - Facing ${Math.round(marker.angle)} deg`, "ELEVATION", "center");
-      data.items.forEach(it => {
-        const layer = (it.dev.type || "device").toUpperCase();
-        const x0 = ox + it.u - it.wFt / 2;
-        dxf.rect(x0, it.boxBot, it.wFt, Math.max(0.05, it.boxTop - it.boxBot), layer);
-        dxf.text(x0 + it.wFt / 2, it.boxTop + 0.15, 0.3, calloutLabel(it.dev), layer, "center");
+      marker.directions.forEach(dirKey => {
+        const data = computeElevation(marker, ELEVATION_DIR_ANGLES[dirKey]);
+        const ox = elevSheetX;
+        dxf.rect(ox, 0, data.wallWidthFt, data.roomHFt, "ELEVATION");
+        dxf.text(ox + data.wallWidthFt / 2, data.roomHFt + 1, 0.6, `Elevation ${marker.label}${elevationDirNumber(marker, dirKey)} - ${ELEVATION_DIR_LABELS[dirKey]}`, "ELEVATION", "center");
+        data.items.forEach(it => {
+          const layer = (it.dev.type || "device").toUpperCase();
+          const x0 = ox + it.u - it.wFt / 2;
+          dxf.rect(x0, it.boxBot, it.wFt, Math.max(0.05, it.boxTop - it.boxBot), layer);
+          dxf.text(x0 + it.wFt / 2, it.boxTop + 0.15, 0.3, calloutLabel(it.dev), layer, "center");
+        });
+        elevSheetX += data.wallWidthFt + 10;
       });
-      elevSheetX += data.wallWidthFt + 10;
     });
 
     downloadDxf(dxf, `Room Designer${roomParam && roomParam !== "default" ? " - " + roomParam : ""}`);
@@ -991,13 +1106,13 @@ export default function RoomDesignerPage() {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
-        floorPlanImg, floorPlanScale, floorPlanOffset,
+        floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
       });
     };
     window.addEventListener("avforge-save", handler);
     return () => window.removeEventListener("avforge-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanScale, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
   // the room or project actually changes (not just on mount), since switching
@@ -1022,8 +1137,8 @@ export default function RoomDesignerPage() {
     setUndoStack([]);
     setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
     setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
-    setFloorPlanImg(null); setFloorPlanScale(50); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
-    setElevationMarkers([]); setSelectedElevationId(null); setActiveElevationId(null);
+    setFloorPlanImg(null); setFloorPlanWidthFt(16); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
+    setElevationMarkers([]); setSelectedElevationId(null); setActiveElevationKey(null);
 
     currentProjectId.current = projectId;
     currentRoomId.current = roomId || "default";
@@ -1085,9 +1200,30 @@ export default function RoomDesignerPage() {
           if (saved.config.placedDoors) setPlacedDoors(saved.config.placedDoors as PlacedDoor[]);
           if (saved.config.annotations) annotate.setAnnotations(saved.config.annotations as any[]);
           if (saved.config.floorPlanImg) setFloorPlanImg(saved.config.floorPlanImg as string);
-          if (saved.config.floorPlanScale) setFloorPlanScale(saved.config.floorPlanScale as number);
+          if (saved.config.floorPlanWidthFt) setFloorPlanWidthFt(saved.config.floorPlanWidthFt as number);
           if (saved.config.floorPlanOffset) setFloorPlanOffset(saved.config.floorPlanOffset as {x:number;y:number});
-          if (saved.config.elevationMarkers) setElevationMarkers(saved.config.elevationMarkers as ElevationMarker[]);
+          if (saved.config.elevationMarkers) {
+            // Backward-compat across two earlier shapes of this field: the
+            // original design used a single continuous `angle`; a later
+            // revision used an unordered {n,e,s,w} boolean map before this
+            // one switched to an ORDERED array (so a flag's position in the
+            // array — not a fixed compass slot — gives it its view number).
+            type LegacyMarker = { id: number; x: number; y: number; label: string; angle?: number; directions?: ElevationDirKey[] | Record<ElevationDirKey, boolean> };
+            const rawMarkers = saved.config.elevationMarkers as LegacyMarker[];
+            setElevationMarkers(rawMarkers.map(m => {
+              let directions: ElevationDirKey[];
+              if (Array.isArray(m.directions)) {
+                directions = m.directions;
+              } else if (m.directions) {
+                directions = ELEVATION_DIR_KEYS.filter(k => (m.directions as Record<ElevationDirKey, boolean>)[k]);
+              } else {
+                const nearest = ELEVATION_DIR_KEYS.reduce((best, k) =>
+                  Math.abs(((m.angle||0) - ELEVATION_DIR_ANGLES[k] + 540) % 360 - 180) < Math.abs(((m.angle||0) - ELEVATION_DIR_ANGLES[best] + 540) % 360 - 180) ? k : best, "n" as ElevationDirKey);
+                directions = [nearest];
+              }
+              return { id: m.id, x: m.x, y: m.y, label: m.label, directions };
+            }));
+          }
           setStep(2);
         }
       });
@@ -1276,9 +1412,9 @@ export default function RoomDesignerPage() {
     return { x: Math.cos(a), y: Math.sin(a) };
   };
   const ELEV_EQUIPMENT_TYPES = new Set(["display", "camera", "mic", "speaker", "control"]);
-  const computeElevation = (marker: ElevationMarker) => {
-    const dir = elevationDir(marker.angle);
-    const perp = elevationPerp(marker.angle);
+  const computeElevation = (marker: ElevationMarker, angleDeg: number) => {
+    const dir = elevationDir(angleDeg);
+    const perp = elevationPerp(angleDeg);
     const minX = isCustomBlank && drawnBounds ? drawnBounds.minX : 0;
     const maxX = isCustomBlank && drawnBounds ? drawnBounds.maxX : roomW;
     const minY = isCustomBlank && drawnBounds ? drawnBounds.minY : 0;
@@ -1315,26 +1451,25 @@ export default function RoomDesignerPage() {
   };
   const placeElevationMarker = (pos: {x:number;y:number}) => {
     const id = Date.now();
-    setElevationMarkers(prev => [...prev, { id, x: pos.x, y: pos.y, angle: 0, label: nextElevationLabel() }]);
+    setElevationMarkers(prev => [...prev, { id, x: pos.x, y: pos.y, label: nextElevationLabel(), directions: ["n"] }]);
     setSelectedElevationId(id);
-    setActiveElevationId(id);
+    setActiveElevationKey(`${id}-n`);
     setPlacingElevationMarker(false);
   };
   const handleElevMarkerMouseMove = (e: React.MouseEvent) => {
     if (!elevMarkerDrag) return;
     const pos = screenToWorld(e);
     if (!pos) return;
-    setElevationMarkers(prev => prev.map(m => {
-      if (m.id !== elevMarkerDrag.id) return m;
-      if (elevMarkerDrag.mode === "move") return { ...m, x: pos.x, y: pos.y };
-      const dx = pos.x - m.x, dy = pos.y - m.y;
-      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return m;
-      let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
-      if (deg < 0) deg += 360;
-      return { ...m, angle: deg };
-    }));
+    setElevationMarkers(prev => prev.map(m => m.id === elevMarkerDrag.id ? { ...m, x: pos.x, y: pos.y } : m));
   };
   const handleElevMarkerMouseUp = () => setElevMarkerDrag(null);
+  const toggleElevationDirection = (id: number, dir: ElevationDirKey) => {
+    setElevationMarkers(prev => prev.map(m => {
+      if (m.id !== id) return m;
+      const has = m.directions.includes(dir);
+      return { ...m, directions: has ? m.directions.filter(d => d !== dir) : [...m.directions, dir] };
+    }));
+  };
 
   // Zoom extents: fit the room (or the drawn walls' extents in custom-blank
   // mode) into the 600×420 view of the given canvas. All five canvases fit
@@ -1342,6 +1477,11 @@ export default function RoomDesignerPage() {
   // dimensions describe the extents on every canvas.
   const zoomExtents = (key: string, marginFactor = 1.08) => {
     if (lockedViews[key]) return;
+    // Elevations already fits its own content (a wall's width × the room's
+    // ceiling height) into the 600×420 space on every render via its own
+    // eScale — there's no separate "room extents" to compute here the way
+    // plan/ceil need, so "zoom extents" for it just means "back to 1:1".
+    if (key === "elev") { setElevZoom(1); setElevPan({ x: 0, y: 0 }); return; }
     const margin = marginFactor; // breathing room around the extents (labels like "Front Wall" and the width/length dimensions sit outside the room rect, so PDF export asks for extra margin)
     let w = roomW * planScale, h = roomL * planScale, cx = 300, cy = 210;
     // Custom-drawn rooms live wherever the walls were drawn, not in the
@@ -1354,8 +1494,8 @@ export default function RoomDesignerPage() {
       cy = pY((drawnBounds.minY + drawnBounds.maxY) / 2);
     }
     const z = Math.min(3, Math.max(0.25, Math.min(600 / (w * margin), 420 / (h * margin))));
-    const setZ = key === "plan" ? setZoom : key === "ceil" ? setCeilZoom : key === "mic" ? setMicZoom : key === "wallSpk" ? setWallSpkZoom : setWallMicZoom;
-    const setP = key === "plan" ? setPan : key === "ceil" ? setCeilPan : key === "mic" ? setMicPan : key === "wallSpk" ? setWallSpkPan : setWallMicPan;
+    const setZ = key === "plan" ? setZoom : setCeilZoom;
+    const setP = key === "plan" ? setPan : setCeilPan;
     setZ(z);
     setP({ x: 300 - cx, y: 210 - cy });
   };
@@ -2729,7 +2869,7 @@ export default function RoomDesignerPage() {
     setFloorPlanImportError(null);
     const applyBackground = (dataUrl: string) => {
       setFloorPlanImg(dataUrl);
-      setFloorPlanScale(50); // default: 50 pixels per foot, until calibrated
+      setFloorPlanWidthFt(roomW); // default: fill the room's current width, until calibrated
       setFloorPlanOffset({x: 0, y: 0});
       setIsScalingFloorPlan(false);
       setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
@@ -2775,19 +2915,23 @@ export default function RoomDesignerPage() {
   };
 
   // Bluebeam-style calibration: the two clicked points already mark a known
-  // real-world distance on the drawing — this just converts whatever unit it
-  // was entered in to inches, then rescales the whole background so that
-  // pixel distance now represents exactly that many inches.
+  // real-world distance on the (possibly currently-mis-sized) drawing —
+  // screenToWorld already resolved them to feet using the room's own
+  // coordinate mapping, which is exactly how far apart they currently
+  // render, so the fix is just "how far off was that guess": rescale the
+  // image's whole real-world width by the ratio of true-to-measured
+  // distance, which stays correct regardless of what the width happened to
+  // be guessed at before (an arbitrary default, or an earlier calibration).
   const applyScaleReference = () => {
     if (scaleRefPoints.length !== 2) return;
     const realDistIn = scaleRefToInches();
     if (realDistIn === null || realDistIn <= 0) return;
     const dx = scaleRefPoints[1].x - scaleRefPoints[0].x;
     const dy = scaleRefPoints[1].y - scaleRefPoints[0].y;
-    const pixelDist = Math.sqrt(dx*dx + dy*dy) * planScale; // distance in SVG pixels
+    const currentDistFt = Math.hypot(dx, dy);
     const realDistFt = realDistIn / 12;
-    if (pixelDist > 0) {
-      setFloorPlanScale(prev => prev * (pixelDist / (realDistFt * prev)));
+    if (currentDistFt > 0) {
+      setFloorPlanWidthFt(prev => Math.max(0.1, prev * (realDistFt / currentDistFt)));
     }
     setIsScalingFloorPlan(false);
     setScaleRefPoints([]);
@@ -3452,8 +3596,6 @@ export default function RoomDesignerPage() {
                       )}
                     </div>
                   )}
-                  <input type="range" min={10} max={200} step={1} value={floorPlanScale} onChange={e=>setFloorPlanScale(parseFloat(e.target.value))} style={{width:"100%",accentColor:"#8b5cf6",height:4} as React.CSSProperties}/>
-                  <div style={{fontSize:10,color:"rgb(var(--text-faint))",textAlign:"center"}}>Scale: {floorPlanScale.toFixed(0)} px/ft</div>
                 </div>
               )}
             </div>
@@ -3634,14 +3776,18 @@ export default function RoomDesignerPage() {
             {/* Elevation group */}
             <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
               <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
-                <button onClick={()=>{setPlacingElevationMarker(v=>!v);setPanMode(false);setMoveMode(false);}} title="Drop an elevation marker — point it at a wall to generate that wall's elevation below"
-                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:placingElevationMarker?"rgba(14,165,233,0.12)":"transparent",border:`1px solid ${placingElevationMarker?"#0ea5e9":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                <button onClick={()=>{setPlacingElevationMarker(v=>!v);setPanMode(false);setMoveMode(false);}} title="Drop an elevation marker — right-click it to choose which walls (N/E/S/W) to view"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:placingElevationMarker?"rgba(0,0,0,0.08)":"transparent",border:`1px solid ${placingElevationMarker?"#000":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
                   onMouseEnter={e=>{if(!placingElevationMarker){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
                   onMouseLeave={e=>{if(!placingElevationMarker){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))"} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="8"/><path d="M12 4 L15 9 L9 9 Z" fill={placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))"} stroke="none"/>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={placingElevationMarker?"#000":"rgb(var(--text-subtle))"} strokeWidth={1.2} strokeLinejoin="round">
+                    <polygon points="12,4.93 8.46,8.46 15.54,8.46" fill={placingElevationMarker?"#000":"rgb(var(--text-subtle))"}/>
+                    <polygon points="19.07,12 15.54,8.46 15.54,15.54" fill="none"/>
+                    <polygon points="12,19.07 15.54,15.54 8.46,15.54" fill="none"/>
+                    <polygon points="4.93,12 8.46,15.54 8.46,8.46" fill="none"/>
+                    <circle cx="12" cy="12" r="5" fill="#fff"/>
                   </svg>
-                  <span style={{fontSize:9,color:placingElevationMarker?"#0ea5e9":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Elevation</span>
+                  <span style={{fontSize:9,color:placingElevationMarker?"#000":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Elevation</span>
                 </button>
               </div>
               <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Views</span>
@@ -3676,13 +3822,28 @@ export default function RoomDesignerPage() {
       {/* ── Canvas sections (scrollable) ───────────────── */}
       <div id="rd-canvas-export" style={{flex:1,overflowY:"auto"}}>
         <>
-        {/* Row 1: Video Calculations */}
+        {/* Row 1: Floor Plan / Ceiling Plan — side by side, drag the divider
+            between them to resize. Only two plan views now (down from five):
+            Ceiling Speakers + Ceiling Microphones merged into one Ceiling
+            Plan showing every ceiling-mounted device, and Wall Speakers /
+            Wall Microphones were dropped (already visible in Floor Plan). */}
         <div id="rd-print-title-plan" style={{flexShrink:0}}>
-          <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Video Calculations{collapseToggle("plan")}</div>
+          <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Floor Plan &amp; Ceiling Plan{collapseToggle("plan")}</div>
         </div>
-        <div id="rd-print-page-plan" style={{display:collapsedCanvases.has("plan")?"none":"flex",height:"50vh",minHeight:400}}>
-        {/* Floor Plan */}
-        <div ref={canvasContainerRef} data-rd-canvas="plan" style={{flex:1,position:"relative",background:cc.card,overflow:"hidden",borderRight:"1px solid rgb(var(--border))"}}>
+        {/* Per-half labels — their own row above the resizable content row so
+            the divider (a flex sibling of the two canvases below) only spans
+            the canvas area instead of stretching up through the labels too. */}
+        {!collapsedCanvases.has("plan") && (
+          <div style={{display:"flex",flexShrink:0}}>
+            <div style={{width:`${floorCeilSplit*100}%`,padding:"4px 10px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",borderBottom:"1px solid rgb(var(--border))"}}>Floor Plan</div>
+            <div style={{width:8,flexShrink:0,borderBottom:"1px solid rgb(var(--border))"}}/>
+            <div style={{width:`${(1-floorCeilSplit)*100}%`,padding:"4px 10px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",borderBottom:"1px solid rgb(var(--border))"}}>Ceiling Plan</div>
+          </div>
+        )}
+        <div id="rd-print-page-plan" ref={floorCeilRowRef} style={{display:collapsedCanvases.has("plan")?"none":"flex",height:`${topRowHeightVh}vh`,minHeight:400,position:"relative"}}>
+        {/* Floor Plan half */}
+        <div style={{width:`${floorCeilSplit*100}%`,position:"relative",overflow:"hidden"}}>
+        <div ref={canvasContainerRef} data-rd-canvas="plan" style={{position:"absolute",inset:0,background:cc.card,overflow:"hidden"}}>
         <svg ref={svgRef} width="100%" height="100%" viewBox={`${300-300/zoom-pan.x} ${210-210/zoom-pan.y} ${600/zoom} ${420/zoom}`}
           style={{background:cc.card,userSelect:"none",cursor:placingElevationMarker?"crosshair":(annotate.activeTool&&!isDrawingWall?annotate.cursor:null)||(isDrawingWall?"crosshair":isPanning?"grabbing":moveDragStart?"grabbing":wallStretchDrag?"move":dragUid?"grabbing":multiDrag?"grabbing":tableResizeDrag?(tableResizeDrag.edge==="left"||tableResizeDrag.edge==="right"?"ew-resize":"ns-resize"):wallDragEdge?(wallDragEdge==="east"||wallDragEdge==="west"?"ew-resize":"ns-resize"):moveMode?"move":panMode?"grab":"default")}}
           onMouseMove={e=>{if(elevMarkerDrag){handleElevMarkerMouseMove(e);return;}if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleMove(e);return;}if(moveDragStart){handleMoveDrag(e);return;}handleRotDragMove(e);handleTableRotDragMove(e);handleNewDeviceDrag(e);handleNewChairDrag(e);handleNewTableDrag(e);handleNewDoorDrag(e);handleDoorDragMove(e);handleTableResizeMove(e);handleMultiDragMove(e);handleWallEdgeDrag(e);handleWallStretchMove(e);handleWallMouseMove(e);if(isPanning){const dx=(e.clientX-panStart.x)/zoom;const dy=(e.clientY-panStart.y)/zoom;setPan({x:panStart.px+dx,y:panStart.py+dy});return;}handleSvgMouseMove(e);handleCalloutMouseMove(e);handleMarqueeMove(e);}}
@@ -3714,19 +3875,34 @@ export default function RoomDesignerPage() {
                   {deletedWalls.has("east") && <line x1={pX(roomW)} y1={pY(0)} x2={pX(roomW)} y2={pY(roomL)} stroke="#475569" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />}
                 </>
               )}
-              {/* Floor plan image overlay */}
-              {floorPlanImg && (
-                <image
-                  href={floorPlanImg}
-                  x={pX(floorPlanOffset.x)}
-                  y={pY(floorPlanOffset.y)}
-                  width={roomW * planScale}
-                  height={roomL * planScale}
-                  preserveAspectRatio="xMidYMid meet"
-                  opacity={0.5}
-                  clipPath="url(#roomClip)"
-                />
-              )}
+              {/* Floor plan image overlay — sized from its own calibrated
+                  real-world width (floorPlanWidthFt), not stretched to fill
+                  the room rectangle, so Set Scale actually has a visible
+                  effect. Height follows from the image's native aspect
+                  ratio, so it can never look stretched/squashed. Deliberately
+                  NOT clipped to the room rectangle (roomClip): a real floor
+                  plan is almost always bigger than just this one room —
+                  clipping to roomClip here used to be harmless only because
+                  the image was always force-sized to exactly match the room;
+                  now that Set Scale can legitimately make it larger, that
+                  same clip would silently crop away everything past the
+                  room's own walls (reported as "hid half the floor plan"
+                  after calibrating a bigger scale) instead of leaving the
+                  rest visible to pan/zoom around. */}
+              {floorPlanImg && floorPlanNativeSize && (() => {
+                const imgHFt = floorPlanWidthFt * (floorPlanNativeSize.h / floorPlanNativeSize.w);
+                return (
+                  <image
+                    href={floorPlanImg}
+                    x={pX(floorPlanOffset.x)}
+                    y={pY(floorPlanOffset.y)}
+                    width={floorPlanWidthFt * planScale}
+                    height={imgHFt * planScale}
+                    preserveAspectRatio="xMidYMid meet"
+                    opacity={0.5}
+                  />
+                );
+              })()}
               {!isCustomBlank ? (
                 <g clipPath="url(#roomClip)">
                 </g>
@@ -4825,34 +5001,47 @@ export default function RoomDesignerPage() {
                 );
               })()}
 
-              {/* Elevation markers — Revit-style circle+arrow tags. Drag the
-                  circle to reposition, the arrowhead to point it at a wall;
-                  the Elevations pane below renders whichever one is active. */}
+              {/* Elevation markers — standard architectural interior-elevation
+                  tags (diamond + circle, one flag per compass direction).
+                  Drag the body to reposition; right-click to choose which
+                  direction flags are active (North is on by default) — the
+                  Elevations pane below renders one tab per active flag. */}
               {elevationMarkers.map(m => {
                 const mx = pX(m.x), my = pY(m.y);
                 const isSelected = selectedElevationId === m.id;
-                const r = 10;
-                const dir = elevationDir(m.angle);
-                const edgeX = mx + dir.x * r, edgeY = my + dir.y * r;
-                const tipX = mx + dir.x * (r + 10), tipY = my + dir.y * (r + 10);
+                const R = 13, D = R * Math.SQRT2;
                 return (
-                  <g key={"elevm" + m.id}>
-                    <line x1={edgeX} y1={edgeY} x2={tipX} y2={tipY} stroke="#0ea5e9" strokeWidth={1.5}/>
-                    <circle cx={mx} cy={my} r={r} fill="rgba(14,165,233,0.15)" stroke="#0ea5e9" strokeWidth={isSelected?2.5:1.5}
-                      style={{cursor:"grab"}}
-                      onMouseDown={e=>{e.stopPropagation();setElevMarkerDrag({id:m.id,mode:"move"});setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
-                      onClick={e=>{e.stopPropagation();setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
-                    />
-                    <text x={mx} y={my+3.5} textAnchor="middle" fontSize={9} fontWeight={700} fill="#0ea5e9" pointerEvents="none">{m.label}</text>
-                    <circle cx={tipX} cy={tipY} r={5} fill="#0ea5e9" style={{cursor:"crosshair"}}
-                      onMouseDown={e=>{e.stopPropagation();setElevMarkerDrag({id:m.id,mode:"rotate"});setSelectedElevationId(m.id);setActiveElevationId(m.id);}}
-                    />
-                    {isSelected && (
-                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setElevationMarkers(prev=>prev.filter(x=>x.id!==m.id));setActiveElevationId(prev=>prev===m.id?null:prev);setSelectedElevationId(null);}}>
-                        <circle cx={mx+r+6} cy={my-r-6} r={7} fill="#ef4444"/>
-                        <text x={mx+r+6} y={my-r-3} textAnchor="middle" fontSize={10} fill="#fff" fontWeight={700} pointerEvents="none">×</text>
-                      </g>
-                    )}
+                  <g key={"elevm" + m.id} style={{cursor:"grab"}}
+                    onMouseDown={e=>{e.stopPropagation();setElevMarkerDrag({id:m.id});setSelectedElevationId(m.id);setActiveElevationKey(prev=>prev && prev.startsWith(m.id+"-") ? prev : (m.directions[0] ? `${m.id}-${m.directions[0]}` : prev));}}
+                    onClick={e=>{e.stopPropagation();setSelectedElevationId(m.id);}}
+                    onContextMenu={e=>{e.preventDefault();e.stopPropagation();setSelectedElevationId(m.id);setElevMarkerContextMenu({x:e.clientX,y:e.clientY,id:m.id});}}
+                  >
+                    {isSelected && <circle cx={mx} cy={my} r={D+5} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
+                    {ELEVATION_DIR_KEYS.map(dirKey => {
+                      const theta = ELEVATION_DIR_ANGLES[dirKey];
+                      const tip = elevationDir(theta);
+                      const t1 = elevationDir(theta - 45);
+                      const t2 = elevationDir(theta + 45);
+                      const active = m.directions.includes(dirKey);
+                      const pts = `${mx+tip.x*D},${my+tip.y*D} ${mx+t1.x*R},${my+t1.y*R} ${mx+t2.x*R},${my+t2.y*R}`;
+                      return <polygon key={dirKey} points={pts} fill={active ? "#000" : "#fff"} stroke="#000" strokeWidth={1.2}/>;
+                    })}
+                    <circle cx={mx} cy={my} r={R} fill="#fff" stroke="#000" strokeWidth={1.4}/>
+                    <text x={mx} y={my+4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#000" pointerEvents="none">{m.label}</text>
+                    {/* View numbers — one per active flag, in the order it was
+                        turned on (see the ElevationMarker/directions comment),
+                        printed just outside that flag's tip. */}
+                    {m.directions.map(dirKey => {
+                      const theta = ELEVATION_DIR_ANGLES[dirKey];
+                      const tip = elevationDir(theta);
+                      const lx = mx + tip.x * (D + 9), ly = my + tip.y * (D + 9);
+                      return (
+                        <text key={"n"+dirKey} x={lx} y={ly+4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#000" pointerEvents="none"
+                          stroke="#fff" strokeWidth={3} paintOrder="stroke">
+                          {elevationDirNumber(m, dirKey)}
+                        </text>
+                      );
+                    })}
                   </g>
                 );
               })}
@@ -5392,24 +5581,6 @@ export default function RoomDesignerPage() {
           <span>Drag devices to reposition</span>
           <span>Click to select, × to remove</span>
         </div>
-        {/* Ceiling height control */}
-        <div className="rd-print-hide" style={{position:"absolute",bottom:12,right:60,display:"flex",alignItems:"center",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",padding:"5px 8px"}}>
-          <span style={{fontSize:10,color:"rgb(var(--text-subtle))",whiteSpace:"nowrap"}}>Ceiling</span>
-          <input type="number" className="no-spin" step={1} value={Math.floor(roomH)}
-            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(v + (roomH - Math.floor(roomH)))}}
-            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
-            style={{width:30,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
-            onFocus={e=>e.target.style.borderColor="#8b5cf6"}
-          />
-          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>ft</span>
-          <input type="number" className="no-spin" step={1} value={Math.round((roomH - Math.floor(roomH)) * 12)}
-            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(Math.floor(roomH) + v/12)}}
-            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
-            style={{width:26,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
-            onFocus={e=>e.target.style.borderColor="#8b5cf6"}
-          />
-          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>in</span>
-        </div>
         {/* Zoom controls */}
         {zoomCluster("plan")}
 
@@ -5489,14 +5660,21 @@ export default function RoomDesignerPage() {
           </div>
         )}
       </div>
+      </div>{/* end Floor Plan half */}
 
-      </div>{/* end Row 1 */}
-
-      {/* Row: Ceiling Speakers */}
-      <div id="rd-print-title-ceil" style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Speakers{collapseToggle("ceil")}</div>
+      {/* Divider — drag to resize Floor Plan vs Ceiling Plan */}
+      <div
+        onMouseDown={e=>{e.preventDefault();setIsDraggingSplit(true);}}
+        onDoubleClick={()=>setFloorCeilSplit(0.5)}
+        title="Drag to resize — double-click to reset to 50/50"
+        style={{width:8,flexShrink:0,cursor:"col-resize",background:isDraggingSplit?"#8b5cf6":"rgb(var(--border))",display:"flex",alignItems:"center",justifyContent:"center",transition:isDraggingSplit?"none":"background 0.15s"}}
+      >
+        <div style={{width:3,height:32,borderRadius:2,background:isDraggingSplit?"#fff":"rgb(var(--text-subtle))"}}/>
       </div>
-      <div id="rd-print-page-ceil" style={{display:collapsedCanvases.has("ceil")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+
+      {/* Ceiling Plan half */}
+      <div style={{width:`${(1-floorCeilSplit)*100}%`,position:"relative",overflow:"hidden"}}>
+      <div style={{position:"absolute",inset:0,background:cc.card,overflow:"hidden"}}>
         <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
           style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
@@ -5521,7 +5699,11 @@ export default function RoomDesignerPage() {
             const cOffY = (420 - roomL*cScale)/2;
             const cpX = (x: number) => cOffX + x*cScale;
             const cpY = (y: number) => cOffY + y*cScale;
-            const ceilingDevices = placedDevices.filter(d => (d.wall === "ceiling" || d.mountWall === "ceiling") && d.type === "speaker");
+            // Every ceiling-mounted device, not just speakers — Ceiling Plan
+            // consolidates what used to be two separate panes (Ceiling
+            // Speakers, Ceiling Microphones); the per-type branches below
+            // already handled mic/camera/fallback rendering.
+            const ceilingDevices = placedDevices.filter(d => d.wall === "ceiling" || d.mountWall === "ceiling");
             return (
               <g>
                 {!isCustomBlank && (<>
@@ -5608,6 +5790,7 @@ export default function RoomDesignerPage() {
                         <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
                         <circle cx={dx} cy={dy} r={5} fill="#22c55e" opacity={0.8}/>
                         <text x={dx} y={dy+14} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
+                        <text x={dx} y={dy+24} textAnchor="middle" fontSize={6} fill="#22c55e80">{toDisplay(covDia)} dia</text>
                       </g>
                     );
                   }
@@ -5633,379 +5816,60 @@ export default function RoomDesignerPage() {
             );
           })()}
         </svg>
+        {/* Ceiling height control — lives here rather than on Floor Plan
+            since it's specifically the Ceiling Plan's own dimension. */}
+        <div className="rd-print-hide" style={{position:"absolute",bottom:12,right:60,display:"flex",alignItems:"center",gap:4,background:cc.panel,borderRadius:6,border:"1px solid rgb(var(--border))",padding:"5px 8px"}}>
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))",whiteSpace:"nowrap"}}>Ceiling</span>
+          <input type="number" className="no-spin" step={1} value={Math.floor(roomH)}
+            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(v + (roomH - Math.floor(roomH)))}}
+            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
+            style={{width:30,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
+            onFocus={e=>e.target.style.borderColor="#8b5cf6"}
+          />
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>ft</span>
+          <input type="number" className="no-spin" step={1} value={Math.round((roomH - Math.floor(roomH)) * 12)}
+            onChange={e=>{const v=parseInt(e.target.value); if(!isNaN(v)) setRoomH(Math.floor(roomH) + v/12)}}
+            onBlur={()=>setRoomH(Math.min(16,Math.max(7,roomH)))}
+            style={{width:26,background:"rgb(var(--forge-surface) / 0.6)",border:"1px solid rgb(var(--border))",borderRadius:3,padding:"2px 4px",fontFamily:"'JetBrains Mono',monospace",color:"rgb(var(--text-body))",fontSize:11,textAlign:"right",outline:"none"}}
+            onFocus={e=>e.target.style.borderColor="#8b5cf6"}
+          />
+          <span style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>in</span>
+        </div>
         {/* Ceiling zoom controls */}
         {zoomCluster("ceil")}
-      </div>{/* end ceiling speakers */}
-
-      {/* Row 2: Ceiling Microphones */}
-      <div id="rd-print-title-mic" style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Ceiling Microphones{collapseToggle("mic")}</div>
       </div>
-      <div id="rd-print-page-mic" style={{display:collapsedCanvases.has("mic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={micSvgRef} data-rd-canvas="mic" width="100%" height="100%" viewBox={`${300-300/micZoom-micPan.x} ${210-210/micZoom-micPan.y} ${600/micZoom} ${420/micZoom}`}
-          style={{background:cc.card,cursor:isMicPanning?"grabbing":micDragUid?"grabbing":panMode?"grab":"default"}}
-          onMouseMove={e=>{
-            if(isMicPanning){const dx=(e.clientX-micPanStart.x)/micZoom;const dy=(e.clientY-micPanStart.y)/micZoom;setMicPan({x:micPanStart.px+dx,y:micPanStart.py+dy});return;}
-            if(micDragUid && micDragStart && micSvgRef.current){
-              const svg=micSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
-              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
-              const mScale=Math.min(380/roomW,270/roomL);
-              const mOffX=(600-roomW*mScale)/2;const mOffY=(420-roomL*mScale)/2;
-              const worldX=Math.max(0,Math.min(roomW,(svgP.x-mOffX)/mScale));
-              const worldY=Math.max(0,Math.min(roomL,(svgP.y-mOffY)/mScale));
-              setPlacedDevices(prev=>prev.map(d=>d.uid===micDragUid?{...d,x:worldX,y:worldY}:d));
-            }
-          }}
-          onMouseUp={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
-          onMouseLeave={()=>{if(isMicPanning)setIsMicPanning(false);setMicDragUid(null);setMicDragStart(null);}}
-          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.mic){e.preventDefault();setIsMicPanning(true);setMicPanStart({x:e.clientX,y:e.clientY,px:micPan.x,py:micPan.y});}}}
->
-          {(() => {
-            const mScale = Math.min(380/roomW, 270/roomL);
-            const mOffX = (600 - roomW*mScale)/2;
-            const mOffY = (420 - roomL*mScale)/2;
-            const mpX = (x: number) => mOffX + x*mScale;
-            const mpY = (y: number) => mOffY + y*mScale;
-            const micDevices = placedDevices.filter(d => (d.wall === "ceiling" || d.mountWall === "ceiling") && d.type === "mic");
-            return (
-              <g>
-                {!isCustomBlank && (<>
-                  <rect x={mpX(0)} y={mpY(0)} width={roomW*mScale} height={roomL*mScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
-                  <rect x={mpX(roomW)-1} y={mpY(roomL*0.7)} width={3} height={roomL*0.15*mScale} fill="#475569"/>
-                  <text x={mpX(roomW)+10} y={mpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
-                  <text x={mpX(roomW/2)} y={Math.max(12,mpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
-                  <text x={mpX(roomW/2)} y={mpY(roomL)+10} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
-                  <text x={mpX(-0.05)} y={mpY(roomL/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${mpX(-0.05)},${mpY(roomL/2)})`}>{toDisplay(roomL)}</text>
-                  {showTable && (
-                    <rect x={mpX(roomW/2 - tableWidth/2)} y={mpY(tableWallDist)} width={tableWidth*mScale} height={(Math.max(1.5,tableSeats*0.35))*mScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
-                  )}
-                </>)}
-                {/* Drawn walls from floor plan */}
-                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
-                  const angle = dev.wallAngle!;
-                  const len = dev.w;
-                  const wx1 = dev.x - Math.cos(angle) * len / 2;
-                  const wy1 = dev.y - Math.sin(angle) * len / 2;
-                  const wx2 = dev.x + Math.cos(angle) * len / 2;
-                  const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"mw"+dev.uid} x1={mpX(wx1)} y1={mpY(wy1)} x2={mpX(wx2)} y2={mpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
-                })}
-                {/* Doors/windows from floor plan */}
-                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
-                  const c = getDoorCoords(door);
-                  const color = door.type === "window" ? "#a78bfa" : "#475569";
-                  return <g key={"md"+door.id}><line x1={mpX(c.x1)} y1={mpY(c.y1)} x2={mpX(c.x2)} y2={mpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={mpX(c.labelX)} y={mpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
-                })}
-                {/* Table from floor plan */}
-                {showTable && !tableDeleted && (() => {
-                  const tcx = tableCenterX ?? roomW/2;
-                  const tcy = tableWallDist + tL/2;
-                  const tw2 = tW/2 * mScale;
-                  const tl2 = tL/2 * mScale;
-                  return <rect x={mpX(tcx)-tw2} y={mpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${mpX(tcx)},${mpY(tcy)})`}/>;
-                })()}
-                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
-                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
-                  const fw = dev.w * mScale, fl = dev.h * mScale;
-                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
-                    const cW2 = Math.max(6, fw);
-                    return <rect key={"msf"+dev.uid} x={mpX(dev.x)-cW2/2} y={mpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
-                  }
-                  if (dev.id === "round-table") return <ellipse key={"msf"+dev.uid} cx={mpX(dev.x)} cy={mpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
-                  return <rect key={"msf"+dev.uid} x={mpX(dev.x)-fw/2} y={mpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${mpX(dev.x)},${mpY(dev.y)})`}/>;
-                })}
-                {/* Mic devices */}
-                {micDevices.map(dev => {
-                  const dx = mpX(dev.x);
-                  const dy = mpY(dev.y);
-                  const isDragging = micDragUid === dev.uid;
-                  const isSelected = selectedUid === dev.uid;
-                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setMicDragUid(dev.uid); setMicDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
-                  const mouthHeight = 4;  // 4 ft mouth/ear height
-                  const effectiveH = Math.max(0.5, roomH - mouthHeight);
-                  const pickupAngle = 120;
-                  const pickupRad = (pickupAngle / 2) * Math.PI / 180;
-                  const covDia = 2 * effectiveH * Math.tan(pickupRad);
-                  const r = Math.min(covDia / 2 * mScale, Math.max(roomW, roomL) * mScale * 0.6);
-                  return (
-                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
-                      {isSelected && <circle cx={dx} cy={dy} r={9} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
-                      <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
-                      <circle cx={dx} cy={dy} r={5} fill="#22c55e" opacity={0.8}/>
-                      <text x={dx} y={dy+14} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
-                      <text x={dx} y={dy+24} textAnchor="middle" fontSize={6} fill="#22c55e80">{toDisplay(covDia)} dia</text>
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })()}
-        </svg>
-        {/* Mic zoom controls */}
-        {zoomCluster("mic")}
+      </div>{/* end Ceiling Plan half */}
+      </div>{/* end Row 1 (Floor Plan / Ceiling Plan) */}
+
+      {/* Divider — drag to resize the Floor+Ceiling row vs Elevations */}
+      <div
+        onMouseDown={e=>{e.preventDefault();setIsDraggingRowSplit(true);}}
+        onDoubleClick={()=>setTopRowHeightVh(50)}
+        title="Drag to resize — double-click to reset to 50/50"
+        style={{height:8,flexShrink:0,cursor:"row-resize",background:isDraggingRowSplit?"#8b5cf6":"rgb(var(--border))",display:"flex",alignItems:"center",justifyContent:"center",transition:isDraggingRowSplit?"none":"background 0.15s"}}
+      >
+        <div style={{height:3,width:32,borderRadius:2,background:isDraggingRowSplit?"#fff":"rgb(var(--text-subtle))"}}/>
       </div>
 
-      {/* Row 3: Wall Speakers */}
-      <div id="rd-print-title-wallSpk" style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Speakers{collapseToggle("wallSpk")}</div>
-      </div>
-      <div id="rd-print-page-wallSpk" style={{display:collapsedCanvases.has("wallSpk")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={wallSpkSvgRef} data-rd-canvas="wallSpk" width="100%" height="100%" viewBox={`${300-300/wallSpkZoom-wallSpkPan.x} ${210-210/wallSpkZoom-wallSpkPan.y} ${600/wallSpkZoom} ${420/wallSpkZoom}`}
-          style={{background:cc.card,cursor:isWallSpkPanning?"grabbing":wallSpkDragUid?"grabbing":panMode?"grab":"default"}}
-          onMouseMove={e=>{
-            if(isWallSpkPanning){const dx=(e.clientX-wallSpkPanStart.x)/wallSpkZoom;const dy=(e.clientY-wallSpkPanStart.y)/wallSpkZoom;setWallSpkPan({x:wallSpkPanStart.px+dx,y:wallSpkPanStart.py+dy});return;}
-            if(wallSpkDragUid && wallSpkSvgRef.current){
-              const svg=wallSpkSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
-              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
-              const wScale=Math.min(380/roomW,270/roomL);
-              const wOffX=(600-roomW*wScale)/2;const wOffY=(420-roomL*wScale)/2;
-              const dev=placedDevices.find(d=>d.uid===wallSpkDragUid);
-              if(dev){
-                const mw=dev.mountWall||"north";
-                if(mw==="north"||mw==="south"){
-                  const worldX=Math.max(0,Math.min(roomW,(svgP.x-wOffX)/wScale));
-                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallSpkDragUid?{...d,x:worldX}:d));
-                } else {
-                  const worldY=Math.max(0,Math.min(roomL,(svgP.y-wOffY)/wScale));
-                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallSpkDragUid?{...d,y:worldY}:d));
-                }
-              }
-            }
-          }}
-          onMouseUp={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
-          onMouseLeave={()=>{if(isWallSpkPanning)setIsWallSpkPanning(false);setWallSpkDragUid(null);}}
-          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.wallSpk){e.preventDefault();setIsWallSpkPanning(true);setWallSpkPanStart({x:e.clientX,y:e.clientY,px:wallSpkPan.x,py:wallSpkPan.y});}}}
->
-          {(() => {
-            const wScale = Math.min(380/roomW, 270/roomL);
-            const wOffX = (600 - roomW*wScale)/2;
-            const wOffY = (420 - roomL*wScale)/2;
-            const wpX = (x: number) => wOffX + x*wScale;
-            const wpY = (y: number) => wOffY + y*wScale;
-            const wallSpeakers = placedDevices.filter(d => d.type === "speaker" && d.wall !== "ceiling" && d.mountWall !== "ceiling");
-            return (
-              <g>
-                {!isCustomBlank && (<>
-                  <rect x={wpX(0)} y={wpY(0)} width={roomW*wScale} height={roomL*wScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
-                  <text x={wpX(roomW/2)} y={Math.max(12,wpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
-                  <text x={wpX(roomW/2)} y={wpY(roomL)+10} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
-                  <text x={wpX(-0.05)} y={wpY(roomL/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${wpX(-0.05)},${wpY(roomL/2)})`}>{toDisplay(roomL)}</text>
-                  <rect x={wpX(roomW)-1} y={wpY(roomL*0.7)} width={3} height={roomL*0.15*wScale} fill="#475569"/>
-                  <text x={wpX(roomW)+10} y={wpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
-                  {showTable && (
-                    <rect x={wpX(roomW/2 - tableWidth/2)} y={wpY(tableWallDist)} width={tableWidth*wScale} height={(Math.max(1.5,tableSeats*0.35))*wScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
-                  )}
-                </>)}
-                {/* Drawn walls from floor plan */}
-                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
-                  const angle = dev.wallAngle!;
-                  const len = dev.w;
-                  const wx1 = dev.x - Math.cos(angle) * len / 2;
-                  const wy1 = dev.y - Math.sin(angle) * len / 2;
-                  const wx2 = dev.x + Math.cos(angle) * len / 2;
-                  const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"wsw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
-                })}
-                {/* Doors/windows from floor plan */}
-                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
-                  const c = getDoorCoords(door);
-                  const color = door.type === "window" ? "#a78bfa" : "#475569";
-                  return <g key={"wsd"+door.id}><line x1={wpX(c.x1)} y1={wpY(c.y1)} x2={wpX(c.x2)} y2={wpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={wpX(c.labelX)} y={wpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
-                })}
-                {/* Table from floor plan */}
-                {showTable && !tableDeleted && (() => {
-                  const tcx = tableCenterX ?? roomW/2;
-                  const tcy = tableWallDist + tL/2;
-                  const tw2 = tW/2 * wScale;
-                  const tl2 = tL/2 * wScale;
-                  return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
-                })()}
-                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
-                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
-                  const fw = dev.w * wScale, fl = dev.h * wScale;
-                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
-                    const cW2 = Math.max(6, fw);
-                    return <rect key={"wsf"+dev.uid} x={wpX(dev.x)-cW2/2} y={wpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
-                  }
-                  if (dev.id === "round-table") return <ellipse key={"wsf"+dev.uid} cx={wpX(dev.x)} cy={wpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
-                  return <rect key={"wsf"+dev.uid} x={wpX(dev.x)-fw/2} y={wpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
-                })}
-                {/* Wall speaker devices */}
-                {wallSpeakers.map(dev => {
-                  const dx = wpX(dev.x);
-                  const dy = wpY(dev.y);
-                  const mw = dev.mountWall || "north";
-                  const isDragging = wallSpkDragUid === dev.uid;
-                  const isSelected = selectedUid === dev.uid;
-                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setWallSpkDragUid(dev.uid); setSelectedUid(dev.uid); };
-                  // Position on wall edge
-                  let sx = dx, sy = dy;
-                  if (mw === "north") sy = wpY(0) + 4;
-                  else if (mw === "south") sy = wpY(roomL) - 4;
-                  else if (mw === "west") sx = wpX(0) + 4;
-                  else if (mw === "east") sx = wpX(roomW) - 4;
-                  // Coverage cone into room
-                  const coneLen = Math.min(roomW, roomL) * 0.4 * wScale;
-                  const coneSpread = coneLen * 0.6;
-                  let conePts = "";
-                  if (mw === "north") conePts = `${sx},${sy} ${sx-coneSpread},${sy+coneLen} ${sx+coneSpread},${sy+coneLen}`;
-                  else if (mw === "south") conePts = `${sx},${sy} ${sx-coneSpread},${sy-coneLen} ${sx+coneSpread},${sy-coneLen}`;
-                  else if (mw === "west") conePts = `${sx},${sy} ${sx+coneLen},${sy-coneSpread} ${sx+coneLen},${sy+coneSpread}`;
-                  else conePts = `${sx},${sy} ${sx-coneLen},${sy-coneSpread} ${sx-coneLen},${sy+coneSpread}`;
-                  return (
-                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
-                      {isSelected && <circle cx={sx} cy={sy} r={10} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
-                      <polygon points={conePts} fill="rgba(249,115,22,0.08)" stroke="#f97316" strokeWidth={0.6} strokeDasharray="3 2"/>
-                      <rect x={sx-7} y={sy-4} width={14} height={8} rx={2} fill="#f97316" opacity={0.8}/>
-                      <text x={sx} y={sy+18} textAnchor="middle" fontSize={7} fill="#f97316" fontWeight={600}>{dev.name}</text>
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })()}
-        </svg>
-        {/* Wall speaker zoom controls */}
-        {zoomCluster("wallSpk")}
-      </div>
-
-      {/* Row 4: Wall Microphones */}
-      <div id="rd-print-title-wallMic" style={{borderTop:"1px solid rgb(var(--border))"}}>
-        <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Wall Microphones{collapseToggle("wallMic")}</div>
-      </div>
-      <div id="rd-print-page-wallMic" style={{display:collapsedCanvases.has("wallMic")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        <svg ref={wallMicSvgRef} data-rd-canvas="wallMic" width="100%" height="100%" viewBox={`${300-300/wallMicZoom-wallMicPan.x} ${210-210/wallMicZoom-wallMicPan.y} ${600/wallMicZoom} ${420/wallMicZoom}`}
-          style={{background:cc.card,cursor:isWallMicPanning?"grabbing":wallMicDragUid?"grabbing":panMode?"grab":"default"}}
-          onMouseMove={e=>{
-            if(isWallMicPanning){const dx=(e.clientX-wallMicPanStart.x)/wallMicZoom;const dy=(e.clientY-wallMicPanStart.y)/wallMicZoom;setWallMicPan({x:wallMicPanStart.px+dx,y:wallMicPanStart.py+dy});return;}
-            if(wallMicDragUid && wallMicSvgRef.current){
-              const svg=wallMicSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
-              const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());
-              const wScale=Math.min(380/roomW,270/roomL);
-              const wOffX=(600-roomW*wScale)/2;const wOffY=(420-roomL*wScale)/2;
-              const dev=placedDevices.find(d=>d.uid===wallMicDragUid);
-              if(dev){
-                const mw=dev.mountWall||"north";
-                if(mw==="north"||mw==="south"){
-                  const worldX=Math.max(0,Math.min(roomW,(svgP.x-wOffX)/wScale));
-                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallMicDragUid?{...d,x:worldX}:d));
-                } else {
-                  const worldY=Math.max(0,Math.min(roomL,(svgP.y-wOffY)/wScale));
-                  setPlacedDevices(prev=>prev.map(d=>d.uid===wallMicDragUid?{...d,y:worldY}:d));
-                }
-              }
-            }
-          }}
-          onMouseUp={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
-          onMouseLeave={()=>{if(isWallMicPanning)setIsWallMicPanning(false);setWallMicDragUid(null);}}
-          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.wallMic){e.preventDefault();setIsWallMicPanning(true);setWallMicPanStart({x:e.clientX,y:e.clientY,px:wallMicPan.x,py:wallMicPan.y});}}}
->
-          {(() => {
-            const wScale = Math.min(380/roomW, 270/roomL);
-            const wOffX = (600 - roomW*wScale)/2;
-            const wOffY = (420 - roomL*wScale)/2;
-            const wpX = (x: number) => wOffX + x*wScale;
-            const wpY = (y: number) => wOffY + y*wScale;
-            const wallMics = placedDevices.filter(d => d.type === "mic" && d.wall !== "ceiling" && d.mountWall !== "ceiling" && d.wall !== "table");
-            return (
-              <g>
-                {!isCustomBlank && (<>
-                  <rect x={wpX(0)} y={wpY(0)} width={roomW*wScale} height={roomL*wScale} fill="none" stroke="#b0b5be" strokeWidth={2}/>
-                  <text x={wpX(roomW/2)} y={Math.max(12,wpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
-                  <text x={wpX(roomW/2)} y={wpY(roomL)+10} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
-                  <text x={wpX(-0.05)} y={wpY(roomL/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${wpX(-0.05)},${wpY(roomL/2)})`}>{toDisplay(roomL)}</text>
-                  <rect x={wpX(roomW)-1} y={wpY(roomL*0.7)} width={3} height={roomL*0.15*wScale} fill="#475569"/>
-                  <text x={wpX(roomW)+10} y={wpY(roomL*0.77)} fontSize={7} fill="#475569">Door</text>
-                  {showTable && (
-                    <rect x={wpX(roomW/2 - tableWidth/2)} y={wpY(tableWallDist)} width={tableWidth*wScale} height={(Math.max(1.5,tableSeats*0.35))*wScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
-                  )}
-                </>)}
-                {/* Drawn walls from floor plan */}
-                {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
-                  const angle = dev.wallAngle!;
-                  const len = dev.w;
-                  const wx1 = dev.x - Math.cos(angle) * len / 2;
-                  const wy1 = dev.y - Math.sin(angle) * len / 2;
-                  const wx2 = dev.x + Math.cos(angle) * len / 2;
-                  const wy2 = dev.y + Math.sin(angle) * len / 2;
-                  return <line key={"wmw"+dev.uid} x1={wpX(wx1)} y1={wpY(wy1)} x2={wpX(wx2)} y2={wpY(wy2)} stroke={dev.wallType==="solid"?"#475569":"rgb(var(--text-muted))"} strokeWidth={dev.wallType==="solid"?5:2} strokeLinecap="round" opacity={0.7}/>;
-                })}
-                {/* Doors/windows from floor plan */}
-                {placedDoors.filter(d => d.wall !== "drawn" || placedDevices.some(dev => dev.uid === d.wallUid)).map(door => {
-                  const c = getDoorCoords(door);
-                  const color = door.type === "window" ? "#a78bfa" : "#475569";
-                  return <g key={"wmd"+door.id}><line x1={wpX(c.x1)} y1={wpY(c.y1)} x2={wpX(c.x2)} y2={wpY(c.y2)} stroke={color} strokeWidth={2} strokeLinecap="round" opacity={0.5}/><text x={wpX(c.labelX)} y={wpY(c.labelY)} textAnchor="middle" fontSize={6} fill={color} opacity={0.6}>{door.type === "window" ? "W" : "D"}</text></g>;
-                })}
-                {/* Table from floor plan */}
-                {showTable && !tableDeleted && (() => {
-                  const tcx = tableCenterX ?? roomW/2;
-                  const tcy = tableWallDist + tL/2;
-                  const tw2 = tW/2 * wScale;
-                  const tl2 = tL/2 * wScale;
-                  return <rect x={wpX(tcx)-tw2} y={wpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${wpX(tcx)},${wpY(tcy)})`}/>;
-                })()}
-                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
-                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
-                  const fw = dev.w * wScale, fl = dev.h * wScale;
-                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
-                    const cW2 = Math.max(6, fw);
-                    return <rect key={"wmf"+dev.uid} x={wpX(dev.x)-cW2/2} y={wpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
-                  }
-                  if (dev.id === "round-table") return <ellipse key={"wmf"+dev.uid} cx={wpX(dev.x)} cy={wpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
-                  return <rect key={"wmf"+dev.uid} x={wpX(dev.x)-fw/2} y={wpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${wpX(dev.x)},${wpY(dev.y)})`}/>;
-                })}
-                {/* Wall mic devices */}
-                {wallMics.map(dev => {
-                  const dx = wpX(dev.x);
-                  const dy = wpY(dev.y);
-                  const mw = dev.mountWall || "north";
-                  const isDragging = wallMicDragUid === dev.uid;
-                  const isSelected = selectedUid === dev.uid;
-                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setWallMicDragUid(dev.uid); setSelectedUid(dev.uid); };
-                  let sx = dx, sy = dy;
-                  if (mw === "north") sy = wpY(0) + 4;
-                  else if (mw === "south") sy = wpY(roomL) - 4;
-                  else if (mw === "west") sx = wpX(0) + 4;
-                  else if (mw === "east") sx = wpX(roomW) - 4;
-                  // Pickup cone into room
-                  const coneLen = Math.min(roomW, roomL) * 0.35 * wScale;
-                  const coneSpread = coneLen * 0.7;
-                  let conePts = "";
-                  if (mw === "north") conePts = `${sx},${sy} ${sx-coneSpread},${sy+coneLen} ${sx+coneSpread},${sy+coneLen}`;
-                  else if (mw === "south") conePts = `${sx},${sy} ${sx-coneSpread},${sy-coneLen} ${sx+coneSpread},${sy-coneLen}`;
-                  else if (mw === "west") conePts = `${sx},${sy} ${sx+coneLen},${sy-coneSpread} ${sx+coneLen},${sy+coneSpread}`;
-                  else conePts = `${sx},${sy} ${sx-coneLen},${sy-coneSpread} ${sx-coneLen},${sy+coneSpread}`;
-                  return (
-                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
-                      {isSelected && <circle cx={sx} cy={sy} r={10} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
-                      <polygon points={conePts} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.6} strokeDasharray="3 2"/>
-                      <circle cx={sx} cy={sy} r={5} fill="#22c55e" opacity={0.8}/>
-                      <text x={sx} y={sy+18} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })()}
-        </svg>
-        {/* Wall mic zoom controls */}
-        {zoomCluster("wallMic")}
-      </div>
-
-      {/* Row 5: Elevations — Revit-style, generated from whichever Elevation
-          Marker is active (dropped + pointed at a wall in the Plan View). */}
+      {/* Row 5: Elevations — one tab per active direction flag on every
+          Elevation Marker (dropped in the Plan View; right-click a marker to
+          turn on more than the default North flag). */}
       <div id="rd-print-title-elev" style={{borderTop:"1px solid rgb(var(--border))"}}>
         <div style={{position:"relative",padding:"8px 16px",fontSize:12,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",textDecoration:"underline",textUnderlineOffset:"4px"}}>Elevations{collapseToggle("elev")}</div>
       </div>
-      <div id="rd-print-page-elev" style={{display:collapsedCanvases.has("elev")?"none":"block",height:"50vh",minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
-        {elevationMarkers.length === 0 ? (
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:6,color:"rgb(var(--text-subtle))",fontSize:13,textAlign:"center",padding:24}}>
-            <div>No elevation markers placed yet.</div>
-            <div style={{fontSize:11}}>Use the <strong>Elevation</strong> tool in the toolbar above, then click inside the Plan View to drop one — drag its arrow to point it at a wall.</div>
-          </div>
-        ) : (() => {
-          const activeMarker = elevationMarkers.find(m => m.id === activeElevationId) || elevationMarkers[0];
-          const elevData = computeElevation(activeMarker);
+      <div id="rd-print-page-elev" style={{display:collapsedCanvases.has("elev")?"none":"block",height:`${100-topRowHeightVh}vh`,minHeight:400,position:"relative",background:cc.card,overflow:"hidden"}}>
+        {(() => {
+          const activeViews = elevationMarkers.flatMap(m =>
+            m.directions.map(k => ({ marker: m, dir: k, key: `${m.id}-${k}` }))
+          );
+          if (activeViews.length === 0) return (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",flexDirection:"column",gap:6,color:"rgb(var(--text-subtle))",fontSize:13,textAlign:"center",padding:24}}>
+              <div>No elevation views yet.</div>
+              <div style={{fontSize:11}}>Use the <strong>Elevation</strong> tool in the toolbar above, then click inside the Plan View to drop a marker — right-click it to choose which walls (North/East/South/West) to view.</div>
+            </div>
+          );
+          const activeView = activeViews.find(v => v.key === activeElevationKey) || activeViews[0];
+          const elevData = computeElevation(activeView.marker, ELEVATION_DIR_ANGLES[activeView.dir]);
           const eScale = Math.min(500 / elevData.wallWidthFt, 260 / Math.max(1, elevData.roomHFt));
           const eOffX = (600 - elevData.wallWidthFt * eScale) / 2;
           const eFloorY = 370;
@@ -6014,15 +5878,23 @@ export default function RoomDesignerPage() {
           return (
             <>
               <div style={{position:"absolute",top:8,left:8,zIndex:5,display:"flex",gap:4,flexWrap:"wrap",maxWidth:"70%"}}>
-                {elevationMarkers.map(m => (
-                  <button key={m.id} onClick={()=>setActiveElevationId(m.id)}
-                    style={{padding:"4px 10px",fontSize:11,fontWeight:activeMarker.id===m.id?700:400,background:activeMarker.id===m.id?"rgba(14,165,233,0.18)":"rgb(var(--forge-surface))",border:`1px solid ${activeMarker.id===m.id?"#0ea5e9":"rgb(var(--border))"}`,borderRadius:5,cursor:"pointer",color:activeMarker.id===m.id?"#0ea5e9":"rgb(var(--text-muted))"}}>
-                    {m.label}
+                {activeViews.map(v => (
+                  <button key={v.key} onClick={()=>setActiveElevationKey(v.key)}
+                    style={{padding:"4px 10px",fontSize:11,fontWeight:activeView.key===v.key?700:400,background:activeView.key===v.key?"rgba(0,0,0,0.08)":"rgb(var(--forge-surface))",border:`1px solid ${activeView.key===v.key?"#000":"rgb(var(--border))"}`,borderRadius:5,cursor:"pointer",color:activeView.key===v.key?"#000":"rgb(var(--text-muted))"}}>
+                    {v.marker.label}{elevationDirNumber(v.marker, v.dir)}
                   </button>
                 ))}
               </div>
-              <svg width="100%" height="100%" viewBox="0 0 600 420" style={{background:cc.card}}>
-                <text x={300} y={22} textAnchor="middle" fontSize={11} fontWeight={700} fill="rgb(var(--text-body))">Elevation {activeMarker.label} — facing {Math.round(activeMarker.angle)}°</text>
+              <svg ref={elevSvgRef} data-rd-canvas="elev" width="100%" height="100%" viewBox={`${300-300/elevZoom-elevPan.x} ${210-210/elevZoom-elevPan.y} ${600/elevZoom} ${420/elevZoom}`}
+                style={{background:cc.card,cursor:isElevPanning?"grabbing":panMode?"grab":"default"}}
+                onMouseMove={e=>{
+                  if(isElevPanning){const dx=(e.clientX-elevPanStart.x)/elevZoom;const dy=(e.clientY-elevPanStart.y)/elevZoom;setElevPan({x:elevPanStart.px+dx,y:elevPanStart.py+dy});}
+                }}
+                onMouseUp={()=>{if(isElevPanning)setIsElevPanning(false);}}
+                onMouseLeave={()=>{if(isElevPanning)setIsElevPanning(false);}}
+                onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.elev){e.preventDefault();setIsElevPanning(true);setElevPanStart({x:e.clientX,y:e.clientY,px:elevPan.x,py:elevPan.y});}}}
+              >
+                <text x={300} y={22} textAnchor="middle" fontSize={11} fontWeight={700} fill="rgb(var(--text-body))">Elevation {activeView.marker.label}{elevationDirNumber(activeView.marker, activeView.dir)} — {ELEVATION_DIR_LABELS[activeView.dir]}</text>
                 <line x1={ePX(0)} y1={eFloorY} x2={ePX(elevData.wallWidthFt)} y2={eFloorY} stroke="#475569" strokeWidth={2}/>
                 <rect x={ePX(0)} y={ePY(elevData.roomHFt)} width={elevData.wallWidthFt*eScale} height={elevData.roomHFt*eScale} fill="none" stroke="#b0b5be" strokeWidth={1.5}/>
                 <text x={ePX(elevData.wallWidthFt/2)} y={eFloorY+16} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(elevData.wallWidthFt)}</text>
@@ -6033,15 +5905,20 @@ export default function RoomDesignerPage() {
                 {elevData.items.map(it => {
                   const x0 = ePX(it.u - it.wFt/2), x1 = ePX(it.u + it.wFt/2);
                   const y0 = ePY(it.boxTop), y1 = ePY(it.boxBot);
-                  const boxColor = it.dev.color || "#8b5cf6";
+                  // Neutral black/gray, same as the Plan view's own equipment
+                  // call-outs (#1f2937 text, #4b5563 lines) — a professional
+                  // drawing reads in one ink color, not a rainbow of each
+                  // device's own accent color.
                   return (
                     <g key={it.dev.uid}>
-                      <rect x={Math.min(x0,x1)} y={y0} width={Math.abs(x1-x0)} height={Math.max(2,y1-y0)} fill={boxColor} fillOpacity={0.18} stroke={boxColor} strokeWidth={1.2}/>
-                      <text x={(x0+x1)/2} y={y0-5} textAnchor="middle" fontSize={8} fill={boxColor} fontWeight={600}>{calloutLabel(it.dev)}</text>
+                      <rect x={Math.min(x0,x1)} y={y0} width={Math.abs(x1-x0)} height={Math.max(2,y1-y0)} fill="#1f2937" fillOpacity={0.08} stroke="#1f2937" strokeWidth={1.2}/>
+                      <text x={(x0+x1)/2} y={y0-5} textAnchor="middle" fontSize={8} fill="#1f2937" fontWeight={600}>{calloutLabel(it.dev)}</text>
                     </g>
                   );
                 })}
               </svg>
+              {/* Elevations zoom controls */}
+              {zoomCluster("elev")}
             </>
           );
         })()}
@@ -6100,6 +5977,50 @@ export default function RoomDesignerPage() {
         </div>
       </>
     )}
+
+    {/* Elevation marker context menu — right-click a marker to choose which
+        of its 4 direction flags (N/E/S/W) are active. North starts on by
+        default; toggling more on lets one marker drive several elevation
+        views at once, one tab per active flag in the Elevations pane below. */}
+    {elevMarkerContextMenu && (() => {
+      const marker = elevationMarkers.find(m => m.id === elevMarkerContextMenu.id);
+      if (!marker) return null;
+      return (
+        <>
+          <div style={{position:"fixed",inset:0,zIndex:100}} onClick={()=>setElevMarkerContextMenu(null)} onContextMenu={e=>{e.preventDefault();setElevMarkerContextMenu(null);}} />
+          <div style={{position:"fixed",left:elevMarkerContextMenu.x,top:elevMarkerContextMenu.y,zIndex:101,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.35)",width:190,overflow:"hidden",padding:"4px 0"}}>
+            <div style={{padding:"6px 14px 4px",fontSize:10,fontWeight:700,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.05em"}}>Elevation {marker.label} — Views</div>
+            {ELEVATION_DIR_KEYS.map(dirKey => {
+              const active = marker.directions.includes(dirKey);
+              const num = elevationDirNumber(marker, dirKey);
+              return (
+                <button key={dirKey} onClick={()=>toggleElevationDirection(marker.id, dirKey)}
+                  style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                  <span style={{width:16,height:16,borderRadius:3,border:"1.5px solid rgb(var(--text-subtle))",background:active?"#000":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",fontFamily:"'JetBrains Mono',monospace"}}>
+                    {active ? num : ""}
+                  </span>
+                  {ELEVATION_DIR_LABELS[dirKey]}
+                  <span style={{marginLeft:"auto",fontSize:10,color:"rgb(var(--text-subtle))",fontFamily:"'JetBrains Mono',monospace"}}>{active ? `${marker.label}${num}` : ""}</span>
+                </button>
+              );
+            })}
+            <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
+            <button onClick={()=>{
+              setElevationMarkers(prev=>prev.filter(x=>x.id!==marker.id));
+              setSelectedElevationId(prev=>prev===marker.id?null:prev);
+              setActiveElevationKey(prev=>prev && prev.startsWith(marker.id+"-") ? null : prev);
+              setElevMarkerContextMenu(null);
+            }}
+              style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,cursor:"pointer",textAlign:"left"}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              Delete marker
+            </button>
+          </div>
+        </>
+      );
+    })()}
 
     {/* Rotate popup — opened from the small purple button next to a selected
         camera or display's delete "×"; typing a value and pressing

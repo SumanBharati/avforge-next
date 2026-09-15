@@ -5,7 +5,7 @@
 // coordinate mapping; annotations are stored in that canvas space.
 import React, { useState, useRef, useEffect } from 'react';
 
-export type AnnTool = "text" | "shape" | "pencil" | "highlight" | "eraser";
+export type AnnTool = "text" | "shape" | "pencil" | "highlight" | "eraser" | "dimension";
 
 const TOOL_COLORS = ["#1e293b", "#8b5cf6", "#ef4444", "#10b981", "#f59e0b", "#3b82f6"];
 const HL_COLORS = ["#fbbf24", "#a3e635", "#f472b6", "#67e8f9"];
@@ -19,9 +19,16 @@ const ERASER_SIZES = [
 export function useCanvasAnnotations(opts: {
   getPoint: (e: React.MouseEvent) => { x: number; y: number } | null;
   getZoom?: () => number;
+  // Converts a distance in the host's own canvas-space units (whatever
+  // getPoint returns) into a display string for the Dimension tool — e.g.
+  // Room Designer passes pixels/planScale through its feet-inches formatter.
+  // Hosts that don't pass one (no real-world scale to convert against) just
+  // get the raw distance labeled "px".
+  formatDistance?: (dist: number) => string;
 }) {
   const { getPoint } = opts;
   const getZoom = opts.getZoom ?? (() => 1);
+  const formatDistance = opts.formatDistance ?? ((d: number) => `${d.toFixed(1)} px`);
 
   const [annotations, setAnnotations] = useState<any[]>([]);
   const annotationsRef = useRef<any[]>([]);
@@ -79,6 +86,33 @@ export function useCanvasAnnotations(opts: {
   const [editingAnnotId, setEditingAnnotId] = useState<string | null>(null);
 
   const drawRef = useRef<{ sx: number; sy: number; pts?: { x: number; y: number }[] } | null>(null);
+  // Dimension tool draft — a 3-click flow (AutoCAD DIMLINEAR-style): click 1
+  // sets the first extension line's origin, click 2 the second, click 3 sets
+  // how far the dimension line sits off that segment (its perpendicular
+  // offset). Only x1/y1 present = awaiting click 2; all four = awaiting the
+  // offset-placement click.
+  const dimRef = useRef<{ x1: number; y1: number; x2?: number; y2?: number } | null>(null);
+  const perpOffset = (x1: number, y1: number, x2: number, y2: number, px: number, py: number) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    return (px - x1) * nx + (py - y1) * ny;
+  };
+  const dimGeometry = (x1: number, y1: number, x2: number, y2: number, offset: number) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    const d1 = { x: x1 + nx * offset, y: y1 + ny * offset };
+    const d2 = { x: x2 + nx * offset, y: y2 + ny * offset };
+    const gap = 3, overshoot = 4, sign = offset >= 0 ? 1 : -1;
+    const e1a = { x: x1 + nx * gap * sign, y: y1 + ny * gap * sign };
+    const e1b = { x: x1 + nx * (Math.abs(offset) + overshoot) * sign, y: y1 + ny * (Math.abs(offset) + overshoot) * sign };
+    const e2a = { x: x2 + nx * gap * sign, y: y2 + ny * gap * sign };
+    const e2b = { x: x2 + nx * (Math.abs(offset) + overshoot) * sign, y: y2 + ny * (Math.abs(offset) + overshoot) * sign };
+    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+    const textAngle = angleDeg > 90 || angleDeg < -90 ? angleDeg + 180 : angleDeg;
+    return { d1, d2, e1a, e1b, e2a, e2b, midX: (d1.x + d2.x) / 2, midY: (d1.y + d2.y) / 2, angleDeg, textAngle, length: L };
+  };
   const annotDragRef = useRef<{x:number;y:number;ids:Set<string>}|null>(null);
   const annotDragMoved = useRef(false);
   const annotIdRef = useRef(1);
@@ -188,6 +222,22 @@ export function useCanvasAnnotations(opts: {
           if (x >= x0 - R && x <= x0 + wTxt + R && y >= a.y - size - R && y <= a.y + R) { changed = true; continue; }
           out.push(a); continue;
         }
+        if (a.type === "dimension") {
+          // A dimension is one semantic unit (extension lines + dimension
+          // line + label) rather than a cuttable path — the eraser just
+          // removes the whole thing if it touches any of its segments.
+          const distToSeg = (px:number,py:number,ax:number,ay:number,bx:number,by:number) => {
+            const dx=bx-ax, dy=by-ay; const L2=dx*dx+dy*dy;
+            const t = L2 ? Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2)) : 0;
+            return Math.hypot(px-(ax+t*dx), py-(ay+t*dy));
+          };
+          const g = dimGeometry(a.x1, a.y1, a.x2, a.y2, a.offset || 0);
+          const segs: [number,number,number,number][] = [
+            [g.e1a.x,g.e1a.y,g.e1b.x,g.e1b.y], [g.e2a.x,g.e2a.y,g.e2b.x,g.e2b.y], [g.d1.x,g.d1.y,g.d2.x,g.d2.y],
+          ];
+          if (segs.some(([ax,ay,bx,by]) => distToSeg(x,y,ax,ay,bx,by) <= R)) { changed = true; continue; }
+          out.push(a); continue;
+        }
         if (a.type === "shape") {
           let chain: { x: number; y: number }[]; let closed = false;
           if (a.sub === "polyline") chain = a.pts || [];
@@ -255,6 +305,25 @@ export function useCanvasAnnotations(opts: {
       drawRef.current = { sx: x, sy: y };
       return;
     }
+    if (activeTool === "dimension") {
+      if (!dimRef.current) {
+        dimRef.current = { x1: x, y1: y };
+      } else if (dimRef.current.x2 === undefined) {
+        // Shift constrains the measured segment itself to a straight
+        // horizontal/vertical/45° line (same snap the line/arrow shapes
+        // use), not the offset placement that follows.
+        const end = e.shiftKey ? snapTo45(dimRef.current.x1, dimRef.current.y1, x, y) : { x, y };
+        dimRef.current.x2 = end.x; dimRef.current.y2 = end.y;
+      } else {
+        const { x1, y1, x2, y2 } = dimRef.current as { x1: number; y1: number; x2: number; y2: number };
+        const offset = perpOffset(x1, y1, x2, y2, x, y);
+        beginAnnotationChange();
+        setAnnotations(prev => [...prev, { type: "dimension", x1, y1, x2, y2, offset, color: toolColor, sw: strokeW, id: `a${annotIdRef.current++}` }]);
+        setLiveAnnot(null);
+        dimRef.current = null;
+      }
+      return;
+    }
     if (activeTool === "text") {
       if (textInputRef.current) commitTextRef.current();
       textInputRef.current = { x, y };
@@ -300,6 +369,18 @@ export function useCanvasAnnotations(opts: {
       // A click only positions the eraser. Require a real drag before cutting,
       // which prevents an entire small annotation disappearing on pointer-down.
       if (drawRef.current && Math.hypot(p.x-drawRef.current.sx,p.y-drawRef.current.sy) > 1) eraseAtPoint(p.x, p.y);
+      return;
+    }
+    if (activeTool === "dimension" && dimRef.current) {
+      const p = getPoint(e); if (!p) return;
+      const { x1: dx1, y1: dy1, x2: dx2, y2: dy2 } = dimRef.current;
+      if (dx2 === undefined || dy2 === undefined) {
+        const end = e.shiftKey ? snapTo45(dx1, dy1, p.x, p.y) : { x: p.x, y: p.y };
+        setLiveAnnot({ type: "dimension", x1: dx1, y1: dy1, x2: end.x, y2: end.y, offset: 0, color: toolColor, sw: strokeW });
+      } else {
+        const offset = perpOffset(dx1, dy1, dx2, dy2, p.x, p.y);
+        setLiveAnnot({ type: "dimension", x1: dx1, y1: dy1, x2: dx2, y2: dy2, offset, color: toolColor, sw: strokeW });
+      }
       return;
     }
     if (!drawRef.current) return;
@@ -368,7 +449,7 @@ export function useCanvasAnnotations(opts: {
         if (k.textInput) { commitTextRef.current(); e.stopPropagation(); return; }
         if (k.activeTool) {
           if (k.activeTool === "shape" && k.shapeSubtype === "polyline" && drawRef.current?.pts) k.finishPolyline();
-          setActiveTool(null); setLiveAnnot(null); setEraserCursor(null); drawRef.current = null;
+          setActiveTool(null); setLiveAnnot(null); setEraserCursor(null); drawRef.current = null; dimRef.current = null;
           e.stopPropagation(); return;
         }
         if (k.selectedAnnotId) { setSelectedAnnotId(null); e.stopPropagation(); return; }
@@ -434,6 +515,27 @@ export function useCanvasAnnotations(opts: {
         </g>;
       }
     }
+    if (a.type === "dimension") {
+      const g = dimGeometry(a.x1, a.y1, a.x2, a.y2, a.offset || 0);
+      const stroke = a.color || "#374151"; const sw2 = a.sw || 1.5;
+      const headAt = (tipX: number, tipY: number, fromX: number, fromY: number) => {
+        const ang = Math.atan2(tipY - fromY, tipX - fromX), hl = 8, ha = Math.PI / 7;
+        return `${tipX},${tipY} ${tipX - hl * Math.cos(ang - ha)},${tipY - hl * Math.sin(ang - ha)} ${tipX - hl * Math.cos(ang + ha)},${tipY - hl * Math.sin(ang + ha)}`;
+      };
+      return (
+        <g key={key} style={{ cursor, ...selRing }} onMouseDown={startDrag} onClick={sel}>
+          <line x1={g.e1a.x} y1={g.e1a.y} x2={g.e1b.x} y2={g.e1b.y} stroke={stroke} strokeWidth={1} />
+          <line x1={g.e2a.x} y1={g.e2a.y} x2={g.e2b.x} y2={g.e2b.y} stroke={stroke} strokeWidth={1} />
+          <line x1={g.d1.x} y1={g.d1.y} x2={g.d2.x} y2={g.d2.y} stroke={stroke} strokeWidth={sw2} />
+          <polygon points={headAt(g.d1.x, g.d1.y, g.d2.x, g.d2.y)} fill={stroke} />
+          <polygon points={headAt(g.d2.x, g.d2.y, g.d1.x, g.d1.y)} fill={stroke} />
+          <text x={g.midX} y={g.midY} dy={-4} textAnchor="middle" fontSize={11} fill={stroke} fontFamily="'JetBrains Mono',monospace"
+            transform={`rotate(${g.textAngle}, ${g.midX}, ${g.midY})`}>
+            {formatDistance(g.length)}
+          </text>
+        </g>
+      );
+    }
     if (a.type === "text") return (
       <text key={key} x={a.x} y={a.y} fontSize={a.size || 10} fill={a.color || "#374151"} fontFamily="Inter, sans-serif" fontWeight={a.bold ? "700" : "400"} fontStyle={a.italic ? "italic" : "normal"} textAnchor={a.align === "center" ? "middle" : a.align === "right" ? "end" : "start"} style={{ cursor, ...selRing }} onMouseDown={startDrag}
         onClick={sel}
@@ -471,7 +573,7 @@ export function useCanvasAnnotations(opts: {
   const toolBtn = (id: AnnTool, title: string, icon: React.ReactNode, label: string) => {
     const isActive = activeTool === id;
     return (
-      <button key={id} onClick={() => { if (textInput) commitTextRef.current(); setActiveTool(isActive ? null : id); setLiveAnnot(null); drawRef.current = null; setEraserCursor(null); }} title={title}
+      <button key={id} onClick={() => { if (textInput) commitTextRef.current(); const activating = !isActive; setActiveTool(activating ? id : null); if (activating && id === "dimension") setToolColor("#1e293b"); setLiveAnnot(null); drawRef.current = null; dimRef.current = null; setEraserCursor(null); }} title={title}
         style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: "4px 10px", background: isActive ? "rgba(139,92,246,0.12)" : "transparent", border: `1px solid ${isActive ? "#8b5cf6" : "transparent"}`, borderRadius: 4, cursor: "pointer", transition: "all 0.15s", minWidth: 46 }}
         onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "rgb(var(--forge-surface))"; e.currentTarget.style.borderColor = "rgb(var(--border))"; } }}
         onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; } }}>
@@ -489,6 +591,12 @@ export function useCanvasAnnotations(opts: {
       {toolBtn("shape", "Draw shapes",
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("shape")} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 3.5 2.5 9h6z"/><path d="M15 4h6m0 0-2.3-2.3M21 4l-2.3 2.3"/><circle cx="6" cy="17.5" r="3.5"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
         "Shape")}
+      {toolBtn("dimension", "Dimension — click two points (hold Shift for straight/45°), then click again to place the dimension line",
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("dimension")} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+          <line x1="4" y1="5" x2="4" y2="19"/><line x1="20" y1="5" x2="20" y2="19"/><line x1="4" y1="12" x2="20" y2="12"/>
+          <polygon points="4,12 9,9 9,15" fill={ic("dimension")} stroke="none"/><polygon points="20,12 15,9 15,15" fill={ic("dimension")} stroke="none"/>
+        </svg>,
+        "Dimension")}
       {toolBtn("pencil", "Freehand pencil",
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ic("pencil")} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" /></svg>,
         "Pencil")}
@@ -515,6 +623,12 @@ export function useCanvasAnnotations(opts: {
   const sc = (id: string) => shapeSubtype === id ? "#8b5cf6" : "rgb(var(--text-muted))";
   const optionsBar = activeTool && activeTool !== "text" ? (
     <div data-anntexteditor="true" style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "rgb(var(--forge-panel))", border: "1px solid rgb(var(--border))", borderRadius: 8, boxShadow: "0 2px 10px rgba(0,0,0,0.12)", whiteSpace: "nowrap" }}>
+      {activeTool === "dimension" && (
+        <span style={{ fontSize: 11, color: "rgb(var(--text-subtle))", padding: "0 6px" }}>
+          {!dimRef.current ? "Click the first point" : dimRef.current.x2 === undefined ? "Click the second point (hold Shift for straight/45°)" : "Move to set the offset, click to place"}
+        </span>
+      )}
+      {activeTool === "dimension" && divider("dd")}
       {activeTool === "shape" && <>
         {shapeBtn("rect", "Rectangle", <svg width="20" height="20" viewBox="0 0 22 22" fill="none"><rect x="3" y="5" width="16" height="12" rx="1.5" stroke={sc("rect")} strokeWidth="1.7" /></svg>)}
         {shapeBtn("circle", "Circle", <svg width="20" height="20" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="7.5" stroke={sc("circle")} strokeWidth="1.7" /></svg>)}
@@ -524,7 +638,7 @@ export function useCanvasAnnotations(opts: {
         {shapeBtn("polyline", "Polyline (click points, double-click or Enter to finish)", <svg width="20" height="20" viewBox="0 0 22 22" fill="none"><path d="M3 17l5-8 5 4 6-9" stroke={sc("polyline")} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>)}
         {divider("d1")}
       </>}
-      {(activeTool === "shape" || activeTool === "pencil") && <>
+      {(activeTool === "shape" || activeTool === "pencil" || activeTool === "dimension") && <>
         {STROKE_WIDTHS.map(w => (
           <button key={w} onClick={() => setStrokeW(w)} title={`${w}px stroke`} style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", background: strokeW === w ? "rgba(139,92,246,0.15)" : "transparent", border: `1px solid ${strokeW === w ? "#8b5cf6" : "transparent"}`, borderRadius: 6, cursor: "pointer", padding: 0 }}>
             <div style={{ width: 16, height: w, background: strokeW === w ? "#8b5cf6" : "rgb(var(--text-muted))", borderRadius: w }} />

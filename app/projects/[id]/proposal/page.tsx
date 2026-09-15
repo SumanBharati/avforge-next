@@ -19,6 +19,7 @@ interface LineItem {
   category: string;
   manufacturer: string;
   model: string;
+  partNumber?: string;
   description: string;
   qty: number;
   unitCost: number;
@@ -73,6 +74,7 @@ interface EquipmentEntry {
   category: string;
   manufacturer: string;
   model: string;
+  partNumber?: string;
   description: string;
   unitCost: number;
   margin?: number | null;
@@ -114,6 +116,7 @@ function newItem(): LineItem {
     category: CATEGORIES[0],
     manufacturer: "",
     model: "",
+    partNumber: "",
     description: "",
     qty: 1,
     unitCost: 0,
@@ -177,7 +180,7 @@ interface Room {
 // single grouped, editable line-item list. Identical items are combined so
 // e.g. ten ceiling speakers show as one row with qty 10, not ten rows.
 async function fetchRoomBomItems(projectId: string, roomId: string): Promise<LineItem[]> {
-  type Bucket = { category: string; manufacturer: string; model: string; description: string; unitCost: number; qty: number };
+  type Bucket = { category: string; manufacturer: string; model: string; partNumber?: string; description: string; unitCost: number; qty: number };
   const buckets = new Map<string, Bucket>();
   const add = (b: Omit<Bucket, "qty">, qty = 1) => {
     const key = `${b.category}|${b.manufacturer}|${b.model}|${b.description}`;
@@ -196,6 +199,7 @@ async function fetchRoomBomItems(projectId: string, roomId: string): Promise<Lin
         category: d.cat || d.category || "Miscellaneous",
         manufacturer: mfr,
         model,
+        partNumber: d.part_number || undefined,
         description: d.type || [mfr, model].filter(Boolean).join(" ") || "Device",
         unitCost: Number(d.price) || 0,
       });
@@ -222,7 +226,12 @@ async function fetchRoomBomItems(projectId: string, roomId: string): Promise<Lin
 
   try {
     const rp = await loadToolData("rack-planner", roomId, projectId);
-    const items = (rp?.items as any[]) || [];
+    // Rack Planner auto-mirrors any Signal Flow device marked "rack mounted"
+    // into its own rack view (linked back via sourceDeviceId) purely so it
+    // can be positioned in a U-slot — it's the same physical unit, already
+    // counted by the Signal Flow pass above. Only items placed directly in
+    // the rack with no Signal Flow counterpart are genuinely new equipment.
+    const items = ((rp?.items as any[]) || []).filter((item) => !item.sourceDeviceId);
     const enriched = await Promise.all(items.map(async (item) => {
       if (item.productId) {
         try {
@@ -232,6 +241,7 @@ async function fetchRoomBomItems(projectId: string, roomId: string): Promise<Lin
               category: product.category || "Rack Equipment",
               manufacturer: product.manufacturer || "",
               model: product.model_name || "",
+              partNumber: product.part_number || undefined,
               description: product.type || "",
               unitCost: product.price || 0,
             };
@@ -252,6 +262,7 @@ async function fetchRoomBomItems(projectId: string, roomId: string): Promise<Lin
     category: b.category,
     manufacturer: b.manufacturer,
     model: b.model,
+    partNumber: b.partNumber,
     description: b.description,
     qty: b.qty,
     unitCost: b.unitCost,
@@ -282,7 +293,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
   const [modalTab, setModalTab] = useState<"library" | "create">("library");
   const [library, setLibrary] = useState<EquipmentEntry[]>([]);
   const [newEquip, setNewEquip] = useState<Omit<EquipmentEntry, "id">>({
-    category: CATEGORIES[0], manufacturer: "", model: "", description: "", unitCost: 0,
+    category: CATEGORIES[0], manufacturer: "", model: "", partNumber: "", description: "", unitCost: 0,
   });
   const [pendingResync, setPendingResync] = useState<{ sectionId: string; roomId: string; name: string } | null>(null);
   const [resyncing, setResyncing] = useState(false);
@@ -311,7 +322,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
       const { data } = await supabase.from("equipment_library").select("*").eq("org_id", activeOrg.id);
       if (cancelled) return;
       if (data && data.length > 0) {
-        setLibrary(data.map(d => ({ id: d.id, category: d.category, manufacturer: d.manufacturer, model: d.model, description: d.description || "", unitCost: Number(d.unit_cost), margin: d.margin ?? null, markup: d.markup ?? null })));
+        setLibrary(data.map(d => ({ id: d.id, category: d.category, manufacturer: d.manufacturer, model: d.model, partNumber: d.part_number || undefined, description: d.description || "", unitCost: Number(d.unit_cost), margin: d.margin ?? null, markup: d.markup ?? null })));
       } else {
         // Seed default library for this org
         const rows = DEFAULT_LIBRARY.map(e => ({ org_id: activeOrg.id, user_id: user.id, category: e.category, manufacturer: e.manufacturer, model: e.model, description: e.description, unit_cost: e.unitCost }));
@@ -697,6 +708,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
       category: entry.category,
       manufacturer: entry.manufacturer,
       model: entry.model,
+      partNumber: entry.partNumber,
       description: entry.description,
       qty: 1,
       unitCost: entry.unitCost,
@@ -728,12 +740,12 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
     if (user) {
       await supabase.from("equipment_library").insert({
         org_id: activeOrg?.id, user_id: user.id, category: entry.category, manufacturer: entry.manufacturer,
-        model: entry.model, description: entry.description, unit_cost: entry.unitCost,
+        model: entry.model, part_number: entry.partNumber || null, description: entry.description, unit_cost: entry.unitCost,
       });
     }
     setLibrary((prev) => [...prev, entry]);
     addItemFromEquipment(entry);
-    setNewEquip({ category: CATEGORIES[0], manufacturer: "", model: "", description: "", unitCost: 0 });
+    setNewEquip({ category: CATEGORIES[0], manufacturer: "", model: "", partNumber: "", description: "", unitCost: 0 });
     setModalTab("library");
   }
 
@@ -743,6 +755,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
     return (
       e.manufacturer.toLowerCase().includes(q) ||
       e.model.toLowerCase().includes(q) ||
+      (e.partNumber || "").toLowerCase().includes(q) ||
       e.description.toLowerCase().includes(q) ||
       e.category.toLowerCase().includes(q)
     );
@@ -796,18 +809,18 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
 
     proposal.sections.forEach((s) => {
       rows.push([s.name]);
-      rows.push(["Category", "Manufacturer", "Model", "Description", "Qty", "Price", "Line Total"]);
+      rows.push(["Category", "Manufacturer", "Model", "Part #", "Description", "Qty", "Price", "Line Total"]);
       s.items.forEach((i) => {
-        rows.push([i.category, i.manufacturer, i.model, i.description, String(i.qty), itemPrice(i).toFixed(2), itemLineTotal(i).toFixed(2)]);
+        rows.push([i.category, i.manufacturer, i.model, i.partNumber || "", i.description, String(i.qty), itemPrice(i).toFixed(2), itemLineTotal(i).toFixed(2)]);
       });
-      rows.push(["", "", "", "", "", "Section Subtotal", sectionSubtotalPrice(s).toFixed(2)]);
+      rows.push(["", "", "", "", "", "", "Section Subtotal", sectionSubtotalPrice(s).toFixed(2)]);
       rows.push([]);
     });
 
-    rows.push(["", "", "", "", "", "Equipment Total", totalEquipmentPrice.toFixed(2)]);
-    rows.push(["", "", "", "", "", "Labor Total", totalLabor.toFixed(2)]);
-    rows.push(["", "", "", "", "", `Tax (${proposal.taxRate}%)`, tax.toFixed(2)]);
-    rows.push(["", "", "", "", "", "Grand Total", grandTotal.toFixed(2)]);
+    rows.push(["", "", "", "", "", "", "Equipment Total", totalEquipmentPrice.toFixed(2)]);
+    rows.push(["", "", "", "", "", "", "Labor Total", totalLabor.toFixed(2)]);
+    rows.push(["", "", "", "", "", "", `Tax (${proposal.taxRate}%)`, tax.toFixed(2)]);
+    rows.push(["", "", "", "", "", "", "Grand Total", grandTotal.toFixed(2)]);
 
     const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -834,15 +847,15 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
       });
       const rows = Array.from(groups.entries()).map(([category, items]) => {
         const itemRows = items.map((i) => {
-          return `<tr><td>${escapeHtml(i.manufacturer) || "—"}</td><td>${escapeHtml(i.model) || "—"}</td><td>${escapeHtml(i.description) || "—"}</td><td style="text-align:right">${i.qty}</td><td style="text-align:right">$${fmt(itemPrice(i))}</td><td style="text-align:right">$${fmt(itemLineTotal(i))}</td></tr>`;
+          return `<tr><td>${escapeHtml(i.manufacturer) || "—"}</td><td>${escapeHtml(i.model) || "—"}</td><td style="font-family:monospace">${escapeHtml(i.partNumber || "") || "—"}</td><td>${escapeHtml(i.description) || "—"}</td><td style="text-align:right">${i.qty}</td><td style="text-align:right">$${fmt(itemPrice(i))}</td><td style="text-align:right">$${fmt(itemLineTotal(i))}</td></tr>`;
         }).join("");
-        return `<tr class="cat-row"><td colspan="6">${escapeHtml(category)}</td></tr>${itemRows}`;
+        return `<tr class="cat-row"><td colspan="7">${escapeHtml(category)}</td></tr>${itemRows}`;
       }).join("");
       const scope = s.scopeOfWork ? `<p class="scope"><strong>Scope of Work:</strong> ${escapeHtml(s.scopeOfWork).replace(/\n/g, "<br>")}</p>` : "";
       return `<h3>${escapeHtml(s.name)}</h3>${scope}
         <table>
-          <tr><th>Manufacturer</th><th>Model</th><th>Description</th><th>Qty</th><th>Price</th><th>Line Total</th></tr>
-          ${rows || `<tr><td colspan="6" style="text-align:center;color:#94a3b8">No items</td></tr>`}
+          <tr><th>Manufacturer</th><th>Model</th><th>Part #</th><th>Description</th><th>Qty</th><th>Price</th><th>Line Total</th></tr>
+          ${rows || `<tr><td colspan="7" style="text-align:center;color:#94a3b8">No items</td></tr>`}
         </table>
         <p class="section-subtotal">Section Subtotal: $${fmt(sectionSubtotalPrice(s))}</p>`;
     }).join("");
@@ -1260,6 +1273,7 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                       <th className="px-3 py-3">Category</th>
                       <th className="px-3 py-3">Manufacturer</th>
                       <th className="px-3 py-3">Model</th>
+                      <th className="px-3 py-3">Part #</th>
                       <th className="px-3 py-3 min-w-[200px]">Description</th>
                       <th className="px-3 py-3 text-right">Qty</th>
                       <th className="px-3 py-3 text-right">Unit Cost</th>
@@ -1308,6 +1322,14 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                               onChange={(e) => updateItem(currentSection.id, item.id, "model", e.target.value)}
                               placeholder="Model #"
                               className="w-full rounded border-none bg-transparent px-2 py-2 text-[13px] text-secondary outline-none placeholder:text-faint focus:ring-1 focus:ring-blue-500/40"
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <input
+                              value={item.partNumber || ""}
+                              onChange={(e) => updateItem(currentSection.id, item.id, "partNumber", e.target.value)}
+                              placeholder="Part #"
+                              className="w-full rounded border-none bg-transparent px-2 py-2 font-mono text-[12.5px] text-secondary outline-none placeholder:text-faint placeholder:font-sans focus:ring-1 focus:ring-blue-500/40"
                             />
                           </td>
                           <td className="px-1 py-1">
@@ -1541,6 +1563,9 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                               <span className="rounded bg-forge-surface/60 px-1.5 py-0.5 text-[10px] text-subtle">
                                 {entry.category}
                               </span>
+                              {entry.partNumber && (
+                                <span className="font-mono text-[11px] text-faint">PN: {entry.partNumber}</span>
+                              )}
                             </div>
                             <p className="mt-0.5 truncate text-[12px] text-subtle">{entry.description}</p>
                           </div>
@@ -1587,6 +1612,17 @@ export default function ProposalPage({ params }: { params: { id: string } }) {
                         className="forge-input w-full text-[13px]"
                       />
                     </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-subtle">Part Number</label>
+                      <input
+                        value={newEquip.partNumber || ""}
+                        onChange={(e) => setNewEquip((p) => ({ ...p, partNumber: e.target.value }))}
+                        placeholder="e.g. 60-1234-01"
+                        className="forge-input w-full text-[13px]"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-subtle">Unit Cost ($)</label>
                       <input
