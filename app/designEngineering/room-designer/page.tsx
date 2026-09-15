@@ -549,8 +549,13 @@ export default function RoomDesignerPage() {
   // Annotations (Text / Shape / Pencil / Highlight / Eraser) on the floor plan
   // canvas — stored in the plan SVG's user space so they pan/zoom with the view
   const annotate = useCanvasAnnotations({
+    // Uses e.currentTarget rather than a single fixed ref so the exact same
+    // handlers, wired into all three canvases (Floor Plan/Ceiling Plan/
+    // Elevations), each compute points against whichever <svg> they actually
+    // fired on — every one of them shares the same 600x420 viewBox
+    // convention, just with its own independent zoom/pan.
     getPoint: (e) => {
-      const svg = svgRef.current; if (!svg) return null;
+      const svg = e.currentTarget as SVGSVGElement; if (!svg) return null;
       const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
       const p = pt.matrixTransform(svg.getScreenCTM()!.inverse());
       return { x: p.x, y: p.y };
@@ -4981,7 +4986,7 @@ export default function RoomDesignerPage() {
               {/* Automatic equipment call-outs — a separate pass over the
                   same plan-view devices (not inline inside the loop above),
                   see renderCallout for why. */}
-              {placedDevices.filter(d => d.wall !== "ceiling" && d.mountWall !== "ceiling" && !(d.id === "wall-partition" && d.wallAngle !== undefined)).map(dev => renderCallout(dev))}
+              {placedDevices.filter(d => d.wall !== "ceiling" && d.mountWall !== "ceiling" && d.type !== "furniture").map(dev => renderCallout(dev))}
 
               {/* Marquee selection rectangle */}
               {marquee && (() => {
@@ -5676,8 +5681,9 @@ export default function RoomDesignerPage() {
       <div style={{width:`${(1-floorCeilSplit)*100}%`,position:"relative",overflow:"hidden"}}>
       <div style={{position:"absolute",inset:0,background:cc.card,overflow:"hidden"}}>
         <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
-          style={{background:cc.card,cursor:isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
+          style={{background:cc.card,cursor:annotate.activeTool?(annotate.cursor||"crosshair"):isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
+            if(annotate.activeTool||annotate.isDragging()){annotate.handleMove(e);return;}
             if(isCeilPanning){const dx=(e.clientX-ceilPanStart.x)/ceilZoom;const dy=(e.clientY-ceilPanStart.y)/ceilZoom;setCeilPan({x:ceilPanStart.px+dx,y:ceilPanStart.py+dy});return;}
             if(ceilDragUid && ceilDragStart && ceilSvgRef.current){
               const svg=ceilSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
@@ -5689,9 +5695,10 @@ export default function RoomDesignerPage() {
               setPlacedDevices(prev=>prev.map(d=>d.uid===ceilDragUid?{...d,x:worldX,y:worldY}:d));
             }
           }}
-          onMouseUp={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
-          onMouseLeave={()=>{if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
-          onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.ceil){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
+          onMouseUp={()=>{if(annotate.activeTool||annotate.isDragging()){annotate.handleUp();return;}if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
+          onMouseLeave={()=>{annotate.handleLeave();if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
+          onMouseDown={e=>{if(annotate.activeTool&&e.button===0){annotate.handleDown(e);return;}if((e.button===1||(e.button===0&&panMode))&&!lockedViews.ceil){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
+          onDoubleClick={e=>{if(annotate.activeTool)annotate.handleDoubleClick(e);}}
 >
           {(() => {
             const cScale = Math.min(380/roomW, 270/roomL);
@@ -5760,7 +5767,7 @@ export default function RoomDesignerPage() {
                   const dy = cpY(dev.y);
                   const isDragging = ceilDragUid === dev.uid;
                   const isSelected = selectedUid === dev.uid;
-                  const grab = (e: React.MouseEvent) => { e.stopPropagation(); setCeilDragUid(dev.uid); setCeilDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
+                  const grab = (e: React.MouseEvent) => { if(annotate.activeTool)return; e.stopPropagation(); setCeilDragUid(dev.uid); setCeilDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
                   if (dev.type === "speaker") {
                     const earHeight = 4;  // 4 ft ear height
                     const effectiveH = Math.max(0.5, roomH - earHeight);
@@ -5815,6 +5822,7 @@ export default function RoomDesignerPage() {
               </g>
             );
           })()}
+          {annotate.layerFor("ceil")}
         </svg>
         {/* Ceiling height control — lives here rather than on Floor Plan
             since it's specifically the Ceiling Plan's own dimension. */}
@@ -5886,13 +5894,15 @@ export default function RoomDesignerPage() {
                 ))}
               </div>
               <svg ref={elevSvgRef} data-rd-canvas="elev" width="100%" height="100%" viewBox={`${300-300/elevZoom-elevPan.x} ${210-210/elevZoom-elevPan.y} ${600/elevZoom} ${420/elevZoom}`}
-                style={{background:cc.card,cursor:isElevPanning?"grabbing":panMode?"grab":"default"}}
+                style={{background:cc.card,cursor:annotate.activeTool?(annotate.cursor||"crosshair"):isElevPanning?"grabbing":panMode?"grab":"default"}}
                 onMouseMove={e=>{
+                  if(annotate.activeTool||annotate.isDragging()){annotate.handleMove(e);return;}
                   if(isElevPanning){const dx=(e.clientX-elevPanStart.x)/elevZoom;const dy=(e.clientY-elevPanStart.y)/elevZoom;setElevPan({x:elevPanStart.px+dx,y:elevPanStart.py+dy});}
                 }}
-                onMouseUp={()=>{if(isElevPanning)setIsElevPanning(false);}}
-                onMouseLeave={()=>{if(isElevPanning)setIsElevPanning(false);}}
-                onMouseDown={e=>{if((e.button===1||(e.button===0&&panMode))&&!lockedViews.elev){e.preventDefault();setIsElevPanning(true);setElevPanStart({x:e.clientX,y:e.clientY,px:elevPan.x,py:elevPan.y});}}}
+                onMouseUp={()=>{if(annotate.activeTool||annotate.isDragging()){annotate.handleUp();return;}if(isElevPanning)setIsElevPanning(false);}}
+                onMouseLeave={()=>{annotate.handleLeave();if(isElevPanning)setIsElevPanning(false);}}
+                onMouseDown={e=>{if(annotate.activeTool&&e.button===0){annotate.handleDown(e);return;}if((e.button===1||(e.button===0&&panMode))&&!lockedViews.elev){e.preventDefault();setIsElevPanning(true);setElevPanStart({x:e.clientX,y:e.clientY,px:elevPan.x,py:elevPan.y});}}}
+                onDoubleClick={e=>{if(annotate.activeTool)annotate.handleDoubleClick(e);}}
               >
                 <text x={300} y={22} textAnchor="middle" fontSize={11} fontWeight={700} fill="rgb(var(--text-body))">Elevation {activeView.marker.label}{elevationDirNumber(activeView.marker, activeView.dir)} — {ELEVATION_DIR_LABELS[activeView.dir]}</text>
                 <line x1={ePX(0)} y1={eFloorY} x2={ePX(elevData.wallWidthFt)} y2={eFloorY} stroke="#475569" strokeWidth={2}/>
@@ -5916,6 +5926,7 @@ export default function RoomDesignerPage() {
                     </g>
                   );
                 })}
+                {annotate.layerFor("elev")}
               </svg>
               {/* Elevations zoom controls */}
               {zoomCluster("elev")}

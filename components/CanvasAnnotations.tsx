@@ -30,6 +30,20 @@ export function useCanvasAnnotations(opts: {
   const getZoom = opts.getZoom ?? (() => 1);
   const formatDistance = opts.formatDistance ?? ((d: number) => `${d.toFixed(1)} px`);
 
+  // Multi-canvas support: a host with several independent canvases (e.g. Room
+  // Designer's Floor Plan / Ceiling Plan / Elevations) can tag each one with
+  // a `data-rd-canvas="<key>"` attribute and wire this same hook's handlers
+  // into all of them — annotations are tagged with whichever canvas they were
+  // drawn on and `layerFor(key)` renders only that canvas's own set. A host
+  // with a single canvas (Rack Planner) never gets this attribute, so every
+  // annotation defaults to "plan" and the plain `layer` (= layerFor("plan"))
+  // covers it exactly as before.
+  const currentCanvasRef = useRef<string>("plan");
+  const canvasKeyOf = (e: React.MouseEvent): string => {
+    const el = (e.target as Element)?.closest?.("[data-rd-canvas]") as Element | null;
+    return el?.getAttribute("data-rd-canvas") || "plan";
+  };
+
   const [annotations, setAnnotations] = useState<any[]>([]);
   const annotationsRef = useRef<any[]>([]);
   annotationsRef.current = annotations;
@@ -143,7 +157,7 @@ export function useCanvasAnnotations(opts: {
           ? { ...a, text: val, color: toolColor, size: textFontSize, bold: textBold, italic: textItalic, align: textAlign }
           : a));
       } else {
-        setAnnotations(prev => [...prev, { id: `a${annotIdRef.current++}`, type: "text", x: ti.x, y: ti.y + textFontSize, text: val, color: toolColor, size: textFontSize, bold: textBold, italic: textItalic, align: textAlign }]);
+        setAnnotations(prev => [...prev, { id: `a${annotIdRef.current++}`, type: "text", x: ti.x, y: ti.y + textFontSize, text: val, color: toolColor, size: textFontSize, bold: textBold, italic: textItalic, align: textAlign, canvas: currentCanvasRef.current }]);
       }
     }
     textInputRef.current = null;
@@ -204,6 +218,7 @@ export function useCanvasAnnotations(opts: {
       const out: any[] = [];
       let changed = false;
       for (const a of prev) {
+        if ((a.canvas || "plan") !== currentCanvasRef.current) { out.push(a); continue; }
         if (a.type === "pencil" || (a.type === "highlight" && a.sub === "freehand")) {
           const { touched, runs } = cutChain(pathPts(a.d), x, y, R + (a.type === "highlight" ? 8 : (a.sw || 2) / 2));
           if (!touched) { out.push(a); continue; }
@@ -289,7 +304,7 @@ export function useCanvasAnnotations(opts: {
     }
     if (clean.length >= 2) {
       beginAnnotationChange();
-      setAnnotations(prev => [...prev, { type: "shape", sub: "polyline", pts: clean, color: toolColor, sw: strokeW, id: `a${annotIdRef.current++}` }]);
+      setAnnotations(prev => [...prev, { type: "shape", sub: "polyline", pts: clean, color: toolColor, sw: strokeW, canvas: currentCanvasRef.current, id: `a${annotIdRef.current++}` }]);
     }
     setLiveAnnot(null);
     drawRef.current = null;
@@ -298,6 +313,7 @@ export function useCanvasAnnotations(opts: {
   const handleDown = (e: React.MouseEvent) => {
     if (!activeTool || e.button !== 0) return;
     e.stopPropagation();
+    currentCanvasRef.current = canvasKeyOf(e);
     const p = getPoint(e); if (!p) return;
     const { x, y } = p;
     if (activeTool === "eraser") {
@@ -318,7 +334,7 @@ export function useCanvasAnnotations(opts: {
         const { x1, y1, x2, y2 } = dimRef.current as { x1: number; y1: number; x2: number; y2: number };
         const offset = perpOffset(x1, y1, x2, y2, x, y);
         beginAnnotationChange();
-        setAnnotations(prev => [...prev, { type: "dimension", x1, y1, x2, y2, offset, color: toolColor, sw: strokeW, id: `a${annotIdRef.current++}` }]);
+        setAnnotations(prev => [...prev, { type: "dimension", x1, y1, x2, y2, offset, color: toolColor, sw: strokeW, canvas: currentCanvasRef.current, id: `a${annotIdRef.current++}` }]);
         setLiveAnnot(null);
         dimRef.current = null;
       }
@@ -363,6 +379,7 @@ export function useCanvasAnnotations(opts: {
       return;
     }
     if (!activeTool) return;
+    currentCanvasRef.current = canvasKeyOf(e);
     if (activeTool === "eraser") {
       const p = getPoint(e); if (!p) return;
       setEraserCursor(p);
@@ -419,7 +436,7 @@ export function useCanvasAnnotations(opts: {
     if (activeTool === "shape" && shapeSubtype === "polyline") return;
     if (liveAnnot) {
       beginAnnotationChange();
-      setAnnotations(prev => [...prev, { ...liveAnnot, id: `a${annotIdRef.current++}` }]);
+      setAnnotations(prev => [...prev, { ...liveAnnot, canvas: currentCanvasRef.current, id: `a${annotIdRef.current++}` }]);
       setLiveAnnot(null);
     }
     drawRef.current = null;
@@ -559,15 +576,19 @@ export function useCanvasAnnotations(opts: {
     return null;
   };
 
-  const layer = (
+  // Renders only the annotations tagged for one canvas — see the
+  // multi-canvas note above `currentCanvasRef`. `layer` (below) is just
+  // `layerFor("plan")`, kept as the default single-canvas export.
+  const layerFor = (canvasKey: string) => (
     <g>
-      {annotations.filter((a: any) => a.id !== editingAnnotId).map(a => renderAnnotation(a))}
-      {liveAnnot && renderAnnotation(liveAnnot, true)}
-      {activeTool === "eraser" && eraserCursor && (
+      {annotations.filter((a: any) => (a.canvas || "plan") === canvasKey && a.id !== editingAnnotId).map(a => renderAnnotation(a))}
+      {liveAnnot && currentCanvasRef.current === canvasKey && renderAnnotation(liveAnnot, true)}
+      {activeTool === "eraser" && eraserCursor && currentCanvasRef.current === canvasKey && (
         <circle cx={eraserCursor.x} cy={eraserCursor.y} r={eraserSize} fill="rgba(59,130,246,0.05)" stroke="#2563eb" strokeWidth={2 / getZoom()} pointerEvents="none" />
       )}
     </g>
   );
+  const layer = layerFor("plan");
 
   // ── Toolbar (ANNOTATE group) ─────────────────────────────────
   const toolBtn = (id: AnnTool, title: string, icon: React.ReactNode, label: string) => {
@@ -707,7 +728,7 @@ export function useCanvasAnnotations(opts: {
     annotations, setAnnotations,
     activeTool, setActiveTool,
     cursor: annCursorStyle,
-    toolbarButtons, optionsBar, layer, overlay,
+    toolbarButtons, optionsBar, layer, layerFor, overlay,
     handleDown, handleMove, handleUp, handleDoubleClick, handleLeave,
     selectedAnnotIds, hasSelection:selectedAnnotIds.size>0, selectInRect, translateSelected,
     clearSelection:clearAnnotationSelection, beginChange:beginAnnotationChange,
