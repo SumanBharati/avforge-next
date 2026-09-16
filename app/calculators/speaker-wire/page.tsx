@@ -77,8 +77,9 @@ export default function SpeakerWirePage() {
     >
       <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
-        {/* ── Inputs ── */}
-        <div className="min-w-0 flex-1">
+        {/* ── Left column: Inputs, then Recommendation/Results, then the
+            gauge comparison table — all stacked. ── */}
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="System Type">
             <div className="mb-4 flex gap-2">
@@ -99,45 +100,47 @@ export default function SpeakerWirePage() {
           </CalcSection>
 
           <CalcSection title="Speaker Run">
-            {systemType === 'direct' ? (
-              <>
+            <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-3">
+              {systemType === 'direct' ? (
+                <>
+                  <InputField
+                    label="Amplifier Power"
+                    value={power}
+                    onChange={setPower}
+                    unit="W"
+                    min={1}
+                    max={5000}
+                  />
+                  <SelectField
+                    label="Speaker Impedance"
+                    value={String(impedance)}
+                    onChange={v => setImpedance(parseFloat(v))}
+                    options={[
+                      { value: '4',  label: '4Ω' },
+                      { value: '8',  label: '8Ω' },
+                      { value: '16', label: '16Ω' },
+                    ]}
+                  />
+                </>
+              ) : (
                 <InputField
-                  label="Amplifier Power"
+                  label="Tap Power (per speaker)"
                   value={power}
                   onChange={setPower}
                   unit="W"
                   min={1}
-                  max={5000}
+                  max={1000}
                 />
-                <SelectField
-                  label="Speaker Impedance"
-                  value={String(impedance)}
-                  onChange={v => setImpedance(parseFloat(v))}
-                  options={[
-                    { value: '4',  label: '4Ω' },
-                    { value: '8',  label: '8Ω' },
-                    { value: '16', label: '16Ω' },
-                  ]}
-                />
-              </>
-            ) : (
+              )}
               <InputField
-                label="Tap Power (per speaker)"
-                value={power}
-                onChange={setPower}
-                unit="W"
+                label="Run Length"
+                value={runLength}
+                onChange={setRunLength}
+                unit="ft"
                 min={1}
-                max={1000}
+                max={2000}
               />
-            )}
-            <InputField
-              label="Run Length"
-              value={runLength}
-              onChange={setRunLength}
-              unit="ft"
-              min={1}
-              max={2000}
-            />
+            </div>
           </CalcSection>
 
           <CalcSection title="Loss Budget">
@@ -149,13 +152,7 @@ export default function SpeakerWirePage() {
             />
           </CalcSection>
           </div>
-        </div>
 
-        {/* ── Divider ── */}
-        <div className="h-px w-full shrink-0 self-stretch bg-border lg:h-auto lg:w-px" />
-
-        {/* ── Results ── */}
-        <div className="min-w-0 flex-1">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
           <CalcSection title="Recommendation">
             {results.recommended ? (
@@ -181,7 +178,7 @@ export default function SpeakerWirePage() {
           </CalcSection>
 
           <CalcSection title="Design Values">
-            <div className="mb-2.5 grid grid-cols-2 gap-2.5">
+            <div className="mb-2.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               <ResultCard label="Z Load" value={fmt(results.Z)} unit="Ω" />
               <ResultCard label="R_max Allowed" value={fmt(results.rMax)} unit="Ω" accent />
               <ResultCard label="Ω/kft Needed" value={fmt(results.ohmsKftNeeded)} unit="Ω/kft" />
@@ -191,7 +188,7 @@ export default function SpeakerWirePage() {
 
           {results.recommended && (
             <CalcSection title="Selected Gauge Analysis">
-              <div className="mb-2.5 grid grid-cols-2 gap-2.5">
+              <div className="mb-2.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                 <ResultCard label="Loop Resistance" value={fmt(results.recommended.rLoop)} unit="Ω" />
                 <ResultCard label="Power Loss" value={fmt(results.recommended.pLoss, 1)} unit="W" />
                 <ResultCard label="Acoustic Loss" value={fmt(Math.abs(results.recommended.dbLoss), 2)} unit="dB" />
@@ -205,142 +202,145 @@ export default function SpeakerWirePage() {
             </CalcSection>
           )}
           </div>
-        </div>
-      </div>
 
-      {/* ── AWG Comparison Table ── */}
-      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
-        <h3 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
-          All Gauge Comparison
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border text-left">
-                <th className="pb-2 pr-4 font-semibold text-muted">Gauge</th>
-                <th className="pb-2 pr-4 text-right font-semibold text-muted">Ω/kft</th>
-                <th className="pb-2 pr-4 text-right font-semibold text-muted">R_loop (Ω)</th>
-                <th className="pb-2 pr-4 text-right font-semibold text-muted">Loss (dB)</th>
-                <th className="pb-2 pr-4 text-right font-semibold text-muted">P_loss (W)</th>
-                <th className="pb-2 pr-4 text-right font-semibold text-muted">NEC Max A</th>
-                <th className="pb-2 text-left font-semibold text-muted">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.gaugeResults.map(g => {
-                const isRecommended = g === results.recommended;
-                const absDb = Math.abs(g.dbLoss);
-                const dbColor = absDb > 1 ? 'text-red-400' : absDb > 0.5 ? 'text-yellow-400' : 'text-green-400';
-                return (
-                  <tr
-                    key={g.gauge}
-                    className={`border-b border-border/40 ${isRecommended ? 'bg-blue-500/[0.06]' : ''}`}
-                  >
-                    <td className={`py-2 pr-4 font-mono font-semibold ${g.passes ? 'text-body' : 'text-subtle'}`}>
-                      {g.gauge}
-                      {isRecommended && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wide text-blue-400">
-                          recommended
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-subtle">{g.ohmsPerKft}</td>
-                    <td className="py-2 pr-4 text-right font-mono text-subtle">{fmt(g.rLoop)}</td>
-                    <td className={`py-2 pr-4 text-right font-mono ${dbColor}`}>
-                      {fmt(g.dbLoss, 2)}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-subtle">{fmt(g.pLoss, 1)}</td>
-                    <td className={`py-2 pr-4 text-right font-mono ${g.currentOk ? 'text-subtle' : 'text-red-400'}`}>
-                      {g.necMaxA}
-                    </td>
-                    <td className="py-2">
-                      {g.passes ? (
-                        <span className="text-green-400">✓ Pass</span>
-                      ) : (
-                        <span className="text-red-400/70 text-[12px]">
-                          {!g.resistanceOk && !g.currentOk
-                            ? '✗ R + NEC fail'
-                            : !g.resistanceOk
-                            ? '✗ R too high'
-                            : '✗ NEC exceeded'}
-                        </span>
-                      )}
-                    </td>
+          {/* ── AWG Comparison Table ── */}
+          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
+            <h3 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
+              All Gauge Comparison
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-border text-left">
+                    <th className="pb-2 pr-4 font-semibold text-muted">Gauge</th>
+                    <th className="pb-2 pr-4 text-right font-semibold text-muted">Ω/kft</th>
+                    <th className="pb-2 pr-4 text-right font-semibold text-muted">R_loop (Ω)</th>
+                    <th className="pb-2 pr-4 text-right font-semibold text-muted">Loss (dB)</th>
+                    <th className="pb-2 pr-4 text-right font-semibold text-muted">P_loss (W)</th>
+                    <th className="pb-2 pr-4 text-right font-semibold text-muted">NEC Max A</th>
+                    <th className="pb-2 text-left font-semibold text-muted">Status</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {results.gaugeResults.map(g => {
+                    const isRecommended = g === results.recommended;
+                    const absDb = Math.abs(g.dbLoss);
+                    const dbColor = absDb > 1 ? 'text-red-400' : absDb > 0.5 ? 'text-yellow-400' : 'text-green-400';
+                    return (
+                      <tr
+                        key={g.gauge}
+                        className={`border-b border-border/40 ${isRecommended ? 'bg-blue-500/[0.06]' : ''}`}
+                      >
+                        <td className={`py-2 pr-4 font-mono font-semibold ${g.passes ? 'text-body' : 'text-subtle'}`}>
+                          {g.gauge}
+                          {isRecommended && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wide text-blue-400">
+                              recommended
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-subtle">{g.ohmsPerKft}</td>
+                        <td className="py-2 pr-4 text-right font-mono text-subtle">{fmt(g.rLoop)}</td>
+                        <td className={`py-2 pr-4 text-right font-mono ${dbColor}`}>
+                          {fmt(g.dbLoss, 2)}
+                        </td>
+                        <td className="py-2 pr-4 text-right font-mono text-subtle">{fmt(g.pLoss, 1)}</td>
+                        <td className={`py-2 pr-4 text-right font-mono ${g.currentOk ? 'text-subtle' : 'text-red-400'}`}>
+                          {g.necMaxA}
+                        </td>
+                        <td className="py-2">
+                          {g.passes ? (
+                            <span className="text-green-400">✓ Pass</span>
+                          ) : (
+                            <span className="text-red-400/70 text-[12px]">
+                              {!g.resistanceOk && !g.currentOk
+                                ? '✗ R + NEC fail'
+                                : !g.resistanceOk
+                                ? '✗ R too high'
+                                : '✗ NEC exceeded'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-[11px] text-faint">
+              Reference: NEC Article 640 · AVIXA CTS-D Standard · Loss &gt; 0.5 dB audible, &gt; 1.0 dB unacceptable
+            </p>
+          </div>
         </div>
-        <p className="mt-3 text-[11px] text-faint">
-          Reference: NEC Article 640 · AVIXA CTS-D Standard · Loss &gt; 0.5 dB audible, &gt; 1.0 dB unacceptable
-        </p>
-      </div>
 
-      {/* ── Formulas ── */}
-      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
-        <h3 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
-          Formulas Used
-        </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* ── Right column: References — stretched (h-full) to match the
+            combined height of the stacked cards on the left. ── */}
+        <div className="w-full shrink-0 lg:w-[800px]">
+          <div className="h-full rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-5">
+            <h3 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
+              References
+            </h3>
+            <div className="grid grid-cols-1 gap-3">
 
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Load Impedance (Z)</div>
-            <div className="font-mono text-[13px] text-body">
-              <div>8Ω Direct: <span className="text-blue-400">Z = speaker impedance</span></div>
-              <div className="mt-0.5">70V / 100V: <span className="text-blue-400">Z = V² ÷ P</span></div>
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Load Impedance (Z)</div>
+                <div className="font-mono text-[13px] text-body">
+                  <div>8Ω Direct: <span className="text-blue-400">Z = speaker impedance</span></div>
+                  <div className="mt-0.5">70V / 100V: <span className="text-blue-400">Z = V² ÷ P</span></div>
+                </div>
+                <div className="mt-1.5 text-[11px] text-subtle">V = line voltage (70 or 100), P = tap power per speaker</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Load Current (I)</div>
+                <div className="font-mono text-[13px] text-body">
+                  <div>8Ω Direct: <span className="text-blue-400">I = √(P ÷ Z)</span></div>
+                  <div className="mt-0.5">70V / 100V: <span className="text-blue-400">I = P ÷ V</span></div>
+                </div>
+                <div className="mt-1.5 text-[11px] text-subtle">Used to check NEC ampacity of each gauge</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Max Allowable Loop Resistance (R_max)</div>
+                <div className="font-mono text-[13px] text-blue-400">R_max = (loss% ÷ 100) × Z</div>
+                <div className="mt-1.5 text-[11px] text-subtle">Sets the worst-case resistance the wire can add before loss exceeds the budget</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Required Wire Resistance (Ω/kft needed)</div>
+                <div className="font-mono text-[13px] text-blue-400">Ω/kft = (R_max ÷ (2 × run ft)) × 1000</div>
+                <div className="mt-1.5 text-[11px] text-subtle">Factor of 2 accounts for the full loop (hot + return conductors)</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Actual Loop Resistance per Gauge</div>
+                <div className="font-mono text-[13px] text-blue-400">R_loop = (Ω/kft ÷ 1000) × (2 × run ft)</div>
+                <div className="mt-1.5 text-[11px] text-subtle">Calculated for each AWG gauge from its published resistance table value</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Acoustic Loss (dB)</div>
+                <div className="font-mono text-[13px] text-blue-400">dB = 20 × log₁₀(Z ÷ (Z + R_loop))</div>
+                <div className="mt-1.5 text-[11px] text-subtle">Voltage-divider model; negative result = loss. &gt; 0.5 dB audible, &gt; 1.0 dB unacceptable</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Power Dissipated in Wire (P_loss)</div>
+                <div className="font-mono text-[13px] text-blue-400">P_loss = I² × R_loop</div>
+                <div className="mt-1.5 text-[11px] text-subtle">Heat generated in the conductor; informational only</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Pass Criteria</div>
+                <div className="font-mono text-[13px] text-body">
+                  <div><span className="text-green-400">✓</span> R_loop ≤ R_max</div>
+                  <div className="mt-0.5"><span className="text-green-400">✓</span> NEC ampacity &gt; I</div>
+                </div>
+                <div className="mt-1.5 text-[11px] text-subtle">Both conditions must hold. Recommended = thinnest gauge that passes both</div>
+              </div>
+
             </div>
-            <div className="mt-1.5 text-[11px] text-subtle">V = line voltage (70 or 100), P = tap power per speaker</div>
           </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Load Current (I)</div>
-            <div className="font-mono text-[13px] text-body">
-              <div>8Ω Direct: <span className="text-blue-400">I = √(P ÷ Z)</span></div>
-              <div className="mt-0.5">70V / 100V: <span className="text-blue-400">I = P ÷ V</span></div>
-            </div>
-            <div className="mt-1.5 text-[11px] text-subtle">Used to check NEC ampacity of each gauge</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Max Allowable Loop Resistance (R_max)</div>
-            <div className="font-mono text-[13px] text-blue-400">R_max = (loss% ÷ 100) × Z</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Sets the worst-case resistance the wire can add before loss exceeds the budget</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Required Wire Resistance (Ω/kft needed)</div>
-            <div className="font-mono text-[13px] text-blue-400">Ω/kft = (R_max ÷ (2 × run ft)) × 1000</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Factor of 2 accounts for the full loop (hot + return conductors)</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Actual Loop Resistance per Gauge</div>
-            <div className="font-mono text-[13px] text-blue-400">R_loop = (Ω/kft ÷ 1000) × (2 × run ft)</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Calculated for each AWG gauge from its published resistance table value</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Acoustic Loss (dB)</div>
-            <div className="font-mono text-[13px] text-blue-400">dB = 20 × log₁₀(Z ÷ (Z + R_loop))</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Voltage-divider model; negative result = loss. &gt; 0.5 dB audible, &gt; 1.0 dB unacceptable</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Power Dissipated in Wire (P_loss)</div>
-            <div className="font-mono text-[13px] text-blue-400">P_loss = I² × R_loop</div>
-            <div className="mt-1.5 text-[11px] text-subtle">Heat generated in the conductor; informational only</div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Pass Criteria</div>
-            <div className="font-mono text-[13px] text-body">
-              <div><span className="text-green-400">✓</span> R_loop ≤ R_max</div>
-              <div className="mt-0.5"><span className="text-green-400">✓</span> NEC ampacity &gt; I</div>
-            </div>
-            <div className="mt-1.5 text-[11px] text-subtle">Both conditions must hold. Recommended = thinnest gauge that passes both</div>
-          </div>
-
         </div>
       </div>
     </CalcPageWrapper>

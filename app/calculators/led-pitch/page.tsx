@@ -83,8 +83,8 @@ export default function LEDPitchPage() {
     <CalcPageWrapper title="LED Pixel Pitch" desc="Optimal pitch and resolution for LED walls">
       <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
-        {/* ── Left half: Inputs ── */}
-        <div className="min-w-0 flex-1">
+        {/* ── Left column: Inputs, then Results stacked below ── */}
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <CalcSection title="Inputs">
               <TriUnitInput label="Viewing Distance" valueM={viewDistM} onChangeM={setViewDistM} />
@@ -92,13 +92,7 @@ export default function LEDPitchPage() {
               <TriUnitInput label="Wall Height" valueM={wallHM} onChangeM={setWallHM} />
             </CalcSection>
           </div>
-        </div>
 
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
-
-        {/* ── Right half: Results + Formulas ── */}
-        <div className="flex min-w-0 flex-1 flex-col gap-6">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <CalcSection title="Results">
               <div className="grid grid-cols-2 gap-2.5">
@@ -111,9 +105,13 @@ export default function LEDPitchPage() {
               </div>
             </CalcSection>
           </div>
+        </div>
 
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
-            <CalcSection title="Formulas Used">
+        {/* ── Right column: References — stretched (h-full) to match the
+            combined height of the Inputs + Results cards on the left. ── */}
+        <div className="w-full shrink-0 lg:w-[800px]">
+          <div className="h-full rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-5">
+            <CalcSection title="References">
               <div className="mb-2 font-mono text-[13px] text-muted">
                 <span className="font-semibold text-blue-400">Ideal Pitch</span> = Viewing Distance (m) ÷ 2.75 = <span className="text-body">{viewDistM.toFixed(2)} ÷ 2.75 = {recPP.toFixed(2)} mm</span>
               </div>

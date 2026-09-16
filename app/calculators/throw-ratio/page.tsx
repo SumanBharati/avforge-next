@@ -150,9 +150,6 @@ export default function ThrowRatioPage() {
           </div>
         </div>
 
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
-
         {/* ── Right: Results ── */}
         <div className="min-w-0 flex-1">
           <div className="h-full rounded-xl border border-border bg-forge-surface/50 p-5">
@@ -182,10 +179,10 @@ export default function ThrowRatioPage() {
               </div>
             </div>
 
-            {/* Formulas Used */}
-            <div className="rounded-xl border border-border bg-forge-surface/30 p-4">
+            {/* References */}
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4">
               <div className="mb-3 text-[13px] font-semibold text-muted">
-                Formulas Used
+                References
               </div>
               <div className="space-y-2 font-mono text-[12px]">
                 <div>

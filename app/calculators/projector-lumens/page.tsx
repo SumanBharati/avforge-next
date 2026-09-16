@@ -98,9 +98,6 @@ export default function ProjectorLumensPage() {
           </div>
         </div>
 
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
-
         {/* ── Right: Results ── */}
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
@@ -144,9 +141,9 @@ export default function ProjectorLumensPage() {
             </div>
           </div>
 
-          {/* Formulas */}
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
-            <SectionHeader title="Formulas Used" />
+          {/* References */}
+          <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-5">
+            <SectionHeader title="References" />
             <div className="space-y-2 font-mono text-[12px]">
               <div>
                 <span className="font-semibold text-blue-400">Image Height</span>

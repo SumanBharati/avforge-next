@@ -168,7 +168,7 @@ export default function CameraFOVPage() {
     accent: 'blue' | 'violet';
     footerText: string;
   }) => (
-    <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/50">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-forge-surface/50">
       {/* Header */}
       <div className="border-b border-border px-4 py-3">
         <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{camName}</div>
@@ -194,8 +194,9 @@ export default function CameraFOVPage() {
         </div>
       </div>
 
-      {/* Plan view */}
-      <div className="px-4 pb-2 pt-3">
+      {/* Plan view — flex-1 + centered so the diagram fills whatever extra
+          height this card picks up matching the left column's stacked cards. */}
+      <div className="flex flex-1 flex-col justify-center px-4 pb-2 pt-3">
         <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-subtle">Plan View (Top-Down)</div>
         <FovPlanDiagram
           hfovWide={hfovWide} hfovZoom={zoomHfovArg}
@@ -213,13 +214,16 @@ export default function CameraFOVPage() {
 
   return (
     <CalcPageWrapper title="Camera FOV Calculator" desc="Field of view calculation at a distance">
-      <div className="flex flex-col gap-6 lg:flex-row">
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
-        {/* ── Left: inputs ── */}
-        <div className="min-w-0 flex-1 space-y-4">
+        {/* ── Left: inputs — flex-1 on each card distributes any extra
+            height evenly, so the 3 stacked cards grow to match the height
+            of the (taller) result card on the right, instead of leaving
+            blank space below them. ── */}
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
 
           {/* Camera Selection */}
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
+          <div className="flex flex-1 flex-col justify-center rounded-xl border border-border bg-forge-surface/50 p-4">
             <SectionIcon icon={<Camera size={13} />} title="Camera Selection" />
             <select
               value={selectedCam}
@@ -236,7 +240,7 @@ export default function CameraFOVPage() {
           </div>
 
           {/* Camera Parameters */}
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
+          <div className="flex flex-1 flex-col justify-center rounded-xl border border-border bg-forge-surface/50 p-4">
             <SectionIcon icon={<Settings size={13} />} title={customActive ? 'Custom Camera Parameters' : 'Camera Parameters'} />
             <div className="grid grid-cols-3 gap-4">
               {/* HFOV */}
@@ -301,7 +305,7 @@ export default function CameraFOVPage() {
           </div>
 
           {/* Distance */}
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
+          <div className="flex flex-1 flex-col justify-center rounded-xl border border-border bg-forge-surface/50 p-4">
             <SectionIcon icon={<Ruler size={13} />} title="Distance from Camera to Subject" />
             <div className="flex items-center gap-3">
               <input
@@ -318,9 +322,6 @@ export default function CameraFOVPage() {
             </div>
           </div>
         </div>
-
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
 
         {/* ── Right: results ── */}
         <div className="min-w-0 flex-1">
@@ -348,7 +349,7 @@ export default function CameraFOVPage() {
             const zoom = presetZoomHfovDeg ? calcFOV(presetZoomHfovDeg, distance) : null;
             return (
               <ResultCard
-                camName={cam.name}
+                camName="Results"
                 wide={wide}
                 zoom={zoom}
                 zoomLabel={`${presetZoom}× zoom`}

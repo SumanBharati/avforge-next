@@ -21,8 +21,8 @@ export default function SpeakerCoveragePage() {
     <CalcPageWrapper title="Speaker Coverage" desc="EPR-based ceiling speaker aiming and count calculator">
       <div className="flex flex-col items-stretch gap-6 lg:flex-row">
 
-        {/* ── Left half: Inputs ── */}
-        <div className="min-w-0 flex-1">
+        {/* ── Left column: Inputs, then Results stacked below ── */}
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <CalcSection title="Inputs">
               <div className="grid grid-cols-2 gap-3">
@@ -39,13 +39,7 @@ export default function SpeakerCoveragePage() {
               </div>
             </CalcSection>
           </div>
-        </div>
 
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border lg:h-auto lg:w-px" />
-
-        {/* ── Right half: Results ── */}
-        <div className="min-w-0 flex-1">
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
             <CalcSection title="Results">
               <div className="grid grid-cols-2 gap-2.5">
@@ -60,43 +54,46 @@ export default function SpeakerCoveragePage() {
           </div>
         </div>
 
-      </div>
+        {/* ── Right column: References — stretched (h-full) to match the
+            combined height of the Inputs + Results cards on the left. ── */}
+        <div className="w-full shrink-0 lg:w-[800px]">
+          <div className="h-full rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-5">
+            <CalcSection title="References">
+              <div className="grid grid-cols-1 gap-3">
 
-      {/* ── Formulas ── */}
-      <div className="mt-6 rounded-xl border border-border bg-forge-surface/50 p-5">
-        <CalcSection title="Formulas Used">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                  <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Height Above Ear (h)</div>
+                  <div className="font-mono text-[13px] text-blue-400">h = ceiling height − ear height</div>
+                  <div className="mt-1.5 text-[11px] text-subtle">The vertical drop from speaker to listening plane — drives the entire coverage geometry</div>
+                </div>
 
-            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Height Above Ear (h)</div>
-              <div className="font-mono text-[13px] text-blue-400">h = ceiling height − ear height</div>
-              <div className="mt-1.5 text-[11px] text-subtle">The vertical drop from speaker to listening plane — drives the entire coverage geometry</div>
-            </div>
+                <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                  <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Coverage Diameter (EPR)</div>
+                  <div className="font-mono text-[13px] text-blue-400">D = 2 × h × tan(θ ÷ 2)</div>
+                  <div className="mt-1.5 text-[11px] text-subtle">θ = speaker dispersion angle. Derived from the Effective Pattern Radius (EPR) formula per AVIXA CTS-D</div>
+                </div>
 
-            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Coverage Diameter (EPR)</div>
-              <div className="font-mono text-[13px] text-blue-400">D = 2 × h × tan(θ ÷ 2)</div>
-              <div className="mt-1.5 text-[11px] text-subtle">θ = speaker dispersion angle. Derived from the Effective Pattern Radius (EPR) formula per AVIXA CTS-D</div>
-            </div>
+                <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                  <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Effective Spacing</div>
+                  <div className="font-mono text-[13px] text-blue-400">S = D × (1 − overlap% ÷ 100)</div>
+                  <div className="mt-1.5 text-[11px] text-subtle">Overlap pulls speakers closer together to eliminate gaps and improve uniformity at the listening plane</div>
+                </div>
 
-            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Effective Spacing</div>
-              <div className="font-mono text-[13px] text-blue-400">S = D × (1 − overlap% ÷ 100)</div>
-              <div className="mt-1.5 text-[11px] text-subtle">Overlap pulls speakers closer together to eliminate gaps and improve uniformity at the listening plane</div>
-            </div>
+                <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
+                  <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Speaker Count</div>
+                  <div className="font-mono text-[13px] text-body">
+                    <div>Wide: <span className="text-blue-400">⌈ room width ÷ S ⌉</span></div>
+                    <div className="mt-0.5">Long: <span className="text-blue-400">⌈ room length ÷ S ⌉</span></div>
+                    <div className="mt-0.5">Total: <span className="text-blue-400">wide × long</span></div>
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-subtle">Ceiling (⌈⌉) rounds up so no area is left uncovered</div>
+                </div>
 
-            <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">
-              <div className="mb-1.5 text-[11px] uppercase tracking-[0.06em] text-muted">Speaker Count</div>
-              <div className="font-mono text-[13px] text-body">
-                <div>Wide: <span className="text-blue-400">⌈ room width ÷ S ⌉</span></div>
-                <div className="mt-0.5">Long: <span className="text-blue-400">⌈ room length ÷ S ⌉</span></div>
-                <div className="mt-0.5">Total: <span className="text-blue-400">wide × long</span></div>
               </div>
-              <div className="mt-1.5 text-[11px] text-subtle">Ceiling (⌈⌉) rounds up so no area is left uncovered</div>
-            </div>
-
+            </CalcSection>
           </div>
-        </CalcSection>
+        </div>
+
       </div>
     </CalcPageWrapper>
   );

@@ -124,7 +124,7 @@ export default function DisplaySizingPage() {
       <div className="flex flex-col items-stretch gap-6 xl:flex-row xl:gap-0">
 
         {/* ── Left column ── */}
-        <div className="min-w-0 flex-1 xl:pr-8">
+        <div className="min-w-0 flex-1 xl:pr-3">
 
           {/* BASE PARAMETERS */}
           <div className="mb-5 rounded-xl border border-border bg-forge-surface/50 p-4">
@@ -171,7 +171,7 @@ export default function DisplaySizingPage() {
 
           {/* ADDITIONAL PARAMETERS & CALCULATIONS */}
           <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
-            <SectionHeader icon={<Calculator size={13} className="text-blue-400" />} title="Additional Parameters & Calculations" />
+            <SectionHeader icon={<Calculator size={13} className="text-blue-400" />} title="Additional Parameters & Results" />
             <p className="mb-3 text-[11px] text-subtle">
               Choose a card based on what value you need to solve. All outputs use the same units as your inputs.
             </p>
@@ -325,13 +325,10 @@ export default function DisplaySizingPage() {
 
         </div>
 
-        {/* ── Vertical divider ── */}
-        <div className="h-px w-full shrink-0 bg-border xl:h-auto xl:w-px" />
-
         {/* ── Right column: AVIXA Reference ── */}
-        <div className="w-full shrink-0 xl:w-[675px] xl:pl-8">
-          <div className="rounded-xl border border-border bg-forge-surface/50 p-4">
-          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="Formulas Used" />
+        <div className="w-full shrink-0 xl:w-[675px] xl:pl-3">
+          <div className="h-full rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4">
+          <SectionHeader icon={<BookOpen size={13} className="text-blue-400" />} title="References" />
 
           <div className="mb-4 space-y-2 text-[12px] leading-relaxed text-subtle">
             <div>
