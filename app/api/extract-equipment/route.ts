@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { normalizePortSides } from "@/lib/ai-equipment-extract";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -43,7 +44,7 @@ Return ONLY valid JSON (no markdown, no explanation) with this exact shape:
   "category": "",
   "notes": "",
   "partNumber": null,
-  "ports": [{ "side": "left|right|top|bottom", "dir": "in|out", "signal": "", "label": "", "connector": "" }],
+  "ports": [{ "side": "left|right", "dir": "in|out", "signal": "", "label": "", "connector": "" }],
   "ampDraw": null,
   "voltage": null,
   "powerWatts": null,
@@ -63,7 +64,7 @@ Rules:
 - partNumber: the manufacturer's ordering/SKU part number if visibly printed (often near a barcode). Leave null if not shown or if only a serial number is visible.
 - category: a short, general product category (e.g. "Display", "Video Switcher", "Amplifier", "Speaker", "Microphone", "Camera", "Control Processor", "Network Switch", "Power Amplifier", "Rack Accessory").${Array.isArray(knownCategories) && knownCategories.length ? ` Prefer reusing one of these existing categories when it fits: ${knownCategories.join(", ")}.` : ""}
 - notes: a one-sentence plain description of what the device is/does.
-- ports: one entry per physical connector visible on a rear/connector-panel photo. "side" is which side of a signal-flow block diagram this port should be drawn on — use "left" for inputs and "right" for outputs unless the physical layout clearly suggests otherwise. "signal" is the signal type (hdmi, usb, xlr, rj45, speaker, etc). "connector" is the physical connector type (HDMI, USB-C, RJ45, XLR-3, Phoenix, etc). "label" is the printed label next to the port if visible (e.g. "HDMI IN 1"), else a short generic label.
+- ports: one entry per physical connector visible on a rear/connector-panel photo. "side" is which side of a signal-flow block diagram this port is drawn on, and only "left" or "right" are valid — never anything else. It must always agree with "dir": "in" ports are ALWAYS "side": "left" and "out" ports are ALWAYS "side": "right" — this is a block-diagram convention (signal flows left to right through the device), not the port's physical position on the real rear panel, so ignore where the connector actually sits on the unit. This applies to every port including power (an AC inlet is "dir": "in", "side": "left"). "signal" is the signal type (hdmi, usb, xlr, rj45, speaker, etc). "connector" is the physical connector type (HDMI, USB-C, RJ45, XLR-3, Phoenix, etc). "label" is the printed label next to the port if visible (e.g. "HDMI IN 1"), else a short generic label.
 - Voltage/amp draw/power watts/BTU: read from a power/electrical label if one is visible in the photos.
 - rackMounted/rackUnits: only set true/a number if rack ears or a rack-unit height are visible or the form factor is clearly a rack-mount chassis.
 - Dimensions and weight: only fill in if printed on a label; do not estimate from the photo.
@@ -89,6 +90,12 @@ Rules:
     } catch {
       return NextResponse.json({ error: "Failed to parse AI response", raw: text }, { status: 500 });
     }
+
+    // The model doesn't reliably keep "side" consistent with "dir" (e.g. an
+    // "out" port coming back "side": "left", which then draws its signal-flow
+    // arrow entering from the wrong side) even when told to — so enforce the
+    // block-diagram convention here instead of trusting the prompt alone.
+    if (Array.isArray(data?.ports)) data.ports = normalizePortSides(data.ports);
 
     return NextResponse.json({ data });
   } catch (error: any) {

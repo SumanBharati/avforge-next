@@ -25,6 +25,19 @@ export function compressPhotoFile(file: File, maxDim = 1400, quality = 0.82): Pr
   });
 }
 
+// Enforces the signal-flow block-diagram convention (inputs drawn on the
+// left, outputs on the right) regardless of what a port-extraction source
+// (AI vision, a datasheet parser, etc.) guessed — an "out" port sitting on
+// "left" would draw its arrow entering from the wrong side of the block.
+// Only "left"/"right" are valid sides — Signal Flow Builder's rendering only
+// ever looks for those two (device.ports.filter(p => p.side === "left"/
+// "right")), so a stray "top"/"bottom" wouldn't just be misplaced, it would
+// silently vanish from the diagram entirely. Every port, power included,
+// gets forced onto left or right by its direction.
+export function normalizePortSides<T extends { side: string; dir: string }>(ports: T[]): T[] {
+  return ports.map((p) => ({ ...p, side: p.dir === "out" ? "right" : "left" }));
+}
+
 export interface ExtractedEquipment {
   manufacturer: string;
   model: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, useEffect } from "react";
 import { compressPhotoFile, extractEquipmentFromPhotos } from "@/lib/ai-equipment-extract";
 import { priceFromMargin, priceFromMarkup, marginFromPrice, markupFromPrice } from "@/lib/pricing";
 
@@ -48,10 +48,12 @@ export default function EquipmentFormModal({
   onSave,
   saving,
   saveDisabled,
+  saveError,
   categories,
   notesLabel = "Description",
   saveLabel = "Save Item",
   showAIImport = false,
+  aiMode = "create",
 }: {
   title: string;
   value: EquipmentFormValue;
@@ -60,21 +62,33 @@ export default function EquipmentFormModal({
   onSave: () => void;
   saving: boolean;
   saveDisabled?: boolean;
+  // Surfaced from the host's own insert/update call — without this, a failed
+  // save (RLS, a unique-constraint conflict, a bad value) used to fail
+  // completely silently: the modal either closed or just sat there with no
+  // indication anything went wrong.
+  saveError?: string | null;
   categories: string[];
   notesLabel?: string;
   saveLabel?: string;
   showAIImport?: boolean;
+  // "create": a field the user already typed wins over what AI reads (so
+  // typing ahead of uploading photos doesn't get clobbered). "update": AI
+  // wins whenever it reads a value, since the whole point of re-running it
+  // on an existing library item is to refresh stale specs from new photos.
+  aiMode?: "create" | "update";
 }) {
   const categoryListId = useId();
   const rackMountedId = useId();
   const rackEarsId = useId();
+  const [dragPortIndex, setDragPortIndex] = useState<number | null>(null);
+  const [dragOverPortIndex, setDragOverPortIndex] = useState<number | null>(null);
   const [aiPhotos, setAiPhotos] = useState<string[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const aiFileRef = useRef<HTMLInputElement>(null);
 
-  async function handleAiFiles(files: FileList | null) {
+  async function handleAiFiles(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setAiError(null);
     const room = Math.max(0, 6 - aiPhotos.length);
@@ -86,6 +100,36 @@ export default function EquipmentFormModal({
       setAiError("Couldn't read one of those photos.");
     }
   }
+
+  // Lets a Snipping Tool / screenshot capture go straight from clipboard to
+  // the AI photo list with a plain Ctrl+V — no save-to-file-then-upload
+  // round trip. Attached at the document level (rather than on a specific
+  // element) because a plain, non-editable drop zone never receives focus,
+  // so it would never see a paste event otherwise; scoped to whichever
+  // modal is actually mounted with AI import enabled, harmless to any other
+  // paste (into a text field, etc.) since it only acts when the clipboard
+  // actually contains an image and otherwise leaves the event alone.
+  useEffect(() => {
+    if (!showAIImport) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const images: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) images.push(file);
+        }
+      }
+      if (images.length > 0) {
+        e.preventDefault();
+        handleAiFiles(images);
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [showAIImport, aiPhotos.length]);
 
   async function handleAnalyzePhotos() {
     if (aiPhotos.length === 0) return;
@@ -99,24 +143,32 @@ export default function EquipmentFormModal({
       return;
     }
     const d = result.data;
+    // create: keep whatever the user already typed, only fill gaps.
+    // update: AI's fresh reading wins whenever it found something.
+    const str = (current: string, ai: string | null | undefined) =>
+      aiMode === "update" ? (ai || current) : (current.trim() ? current : (ai || current));
+    const strOrNull = (current: string | null, ai: string | null | undefined) =>
+      aiMode === "update" ? (ai ?? current) : (current ? current : (ai ?? current));
+    const num = (current: number | null, ai: number | null | undefined) =>
+      aiMode === "update" ? (ai ?? current) : (current ?? ai ?? current);
     onChange({
       ...value,
-      manufacturer: value.manufacturer.trim() ? value.manufacturer : (d.manufacturer || value.manufacturer),
-      model: value.model.trim() ? value.model : (d.model || value.model),
-      category: value.category.trim() ? value.category : (d.category || value.category),
-      notes: value.notes.trim() ? value.notes : (d.notes || value.notes),
-      partNumber: value.partNumber ? value.partNumber : (d.partNumber ?? value.partNumber),
-      ports: value.ports.length > 0 ? value.ports : (d.ports?.length ? d.ports : value.ports),
-      ampDraw: value.ampDraw ?? d.ampDraw ?? value.ampDraw,
-      voltage: value.voltage ?? d.voltage ?? value.voltage,
-      powerWatts: value.powerWatts ?? d.powerWatts ?? value.powerWatts,
-      btuHr: value.btuHr ?? d.btuHr ?? value.btuHr,
-      rackMounted: value.rackMounted || d.rackMounted,
-      rackUnits: value.rackUnits ?? d.rackUnits ?? value.rackUnits,
-      widthIn: value.widthIn ?? d.widthIn ?? value.widthIn,
-      heightIn: value.heightIn ?? d.heightIn ?? value.heightIn,
-      depthIn: value.depthIn ?? d.depthIn ?? value.depthIn,
-      weightLb: value.weightLb ?? d.weightLb ?? value.weightLb,
+      manufacturer: str(value.manufacturer, d.manufacturer),
+      model: str(value.model, d.model),
+      category: str(value.category, d.category),
+      notes: str(value.notes, d.notes),
+      partNumber: strOrNull(value.partNumber, d.partNumber),
+      ports: aiMode === "update" ? (d.ports?.length ? d.ports : value.ports) : (value.ports.length > 0 ? value.ports : (d.ports?.length ? d.ports : value.ports)),
+      ampDraw: num(value.ampDraw, d.ampDraw),
+      voltage: num(value.voltage, d.voltage),
+      powerWatts: num(value.powerWatts, d.powerWatts),
+      btuHr: num(value.btuHr, d.btuHr),
+      rackMounted: aiMode === "update" ? (d.rackMounted || value.rackMounted) : (value.rackMounted || d.rackMounted),
+      rackUnits: num(value.rackUnits, d.rackUnits),
+      widthIn: num(value.widthIn, d.widthIn),
+      heightIn: num(value.heightIn, d.heightIn),
+      depthIn: num(value.depthIn, d.depthIn),
+      weightLb: num(value.weightLb, d.weightLb),
     });
     if (d.aiNotes) setAiNote(d.aiNotes);
   }
@@ -139,10 +191,15 @@ export default function EquipmentFormModal({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-violet-400">
                   <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z" />
                 </svg>
-                <span className="text-[12px] font-semibold text-heading">Fill in with AI</span>
+                <span className="text-[12px] font-semibold text-heading">{aiMode === "update" ? "Update with AI" : "Fill in with AI"}</span>
                 <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">Beta</span>
               </div>
-              <p className="mb-3 text-[11px] text-subtle">Upload a few photos — front panel, rear/connector panel, and any power or spec label — and AI will fill in fields it can read. Review everything before saving.</p>
+              <p className="mb-3 text-[11px] text-subtle">
+                {aiMode === "update"
+                  ? "Upload new photos — front panel, rear/connector panel, and any power or spec label — and AI will refresh any fields it can read, overwriting the current values. Review everything before saving."
+                  : "Upload a few photos — front panel, rear/connector panel, and any power or spec label — and AI will fill in fields it can read. Review everything before saving."}
+                {" "}Took a screenshot or snip? Just <span className="font-medium text-violet-300">paste it (Ctrl+V)</span> anywhere in this window.
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 {aiPhotos.map((src, i) => (
                   <div key={i} className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border">
@@ -362,12 +419,12 @@ export default function EquipmentFormModal({
             {value.ports.length === 0 ? (
               <p className="text-[12px] text-faint">No ports defined.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {/* Column headings — mirrors each row's layout below exactly
-                    (same fixed widths for the reorder/side/dir/delete
+                    (same fixed widths for the drag-handle/side/dir/actions
                     columns, same flex sharing for the three text columns) so
                     it's clear at a glance which field is which. */}
-                <div className="grid grid-cols-[18px_6rem_5rem_1fr_1fr_1fr_28px] items-center gap-2 px-0.5 text-[10px] font-medium uppercase tracking-wide text-faint">
+                <div className="grid grid-cols-[16px_6rem_5rem_1fr_1fr_1fr_52px] items-center gap-2 px-0.5 text-[10px] font-medium uppercase tracking-wide text-faint">
                   <div />
                   <div>Side</div>
                   <div>Dir</div>
@@ -377,35 +434,30 @@ export default function EquipmentFormModal({
                   <div />
                 </div>
                 {value.ports.map((port, i) => (
-                  <div key={i} className="grid grid-cols-[18px_6rem_5rem_1fr_1fr_1fr_28px] items-center gap-2">
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        disabled={i === 0}
-                        onClick={() => {
-                          const next = [...value.ports];
-                          [next[i - 1], next[i]] = [next[i], next[i - 1]];
-                          onChange({ ...value, ports: next });
-                        }}
-                        title="Move port up"
-                        className="rounded p-0.5 text-muted transition-colors hover:text-heading disabled:cursor-not-allowed disabled:opacity-25"
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={i === value.ports.length - 1}
-                        onClick={() => {
-                          const next = [...value.ports];
-                          [next[i], next[i + 1]] = [next[i + 1], next[i]];
-                          onChange({ ...value, ports: next });
-                        }}
-                        title="Move port down"
-                        className="rounded p-0.5 text-muted transition-colors hover:text-heading disabled:cursor-not-allowed disabled:opacity-25"
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
-                      </button>
-                    </div>
+                  <div
+                    key={i}
+                    onDragOver={(e) => { e.preventDefault(); if (dragOverPortIndex !== i) setDragOverPortIndex(i); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOverPortIndex(null);
+                      if (dragPortIndex === null || dragPortIndex === i) return;
+                      const next = [...value.ports];
+                      const [moved] = next.splice(dragPortIndex, 1);
+                      next.splice(i, 0, moved);
+                      onChange({ ...value, ports: next });
+                      setDragPortIndex(null);
+                    }}
+                    className={`grid grid-cols-[16px_6rem_5rem_1fr_1fr_1fr_52px] items-center gap-2 rounded-md py-0.5 transition-colors ${dragOverPortIndex === i && dragPortIndex !== null && dragPortIndex !== i ? "bg-blue-500/10 ring-1 ring-blue-500/30" : ""} ${dragPortIndex === i ? "opacity-40" : ""}`}
+                  >
+                    <span
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(i)); e.dataTransfer.effectAllowed = "move"; setDragPortIndex(i); }}
+                      onDragEnd={() => { setDragPortIndex(null); setDragOverPortIndex(null); }}
+                      title="Drag to reorder"
+                      className="flex cursor-grab items-center justify-center text-faint transition-colors hover:text-muted active:cursor-grabbing"
+                    >
+                      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="2.5" r="1.4" /><circle cx="7.5" cy="2.5" r="1.4" /><circle cx="2.5" cy="8" r="1.4" /><circle cx="7.5" cy="8" r="1.4" /><circle cx="2.5" cy="13.5" r="1.4" /><circle cx="7.5" cy="13.5" r="1.4" /></svg>
+                    </span>
                     <select
                       value={port.side}
                       onChange={(e) => onChange({ ...value, ports: value.ports.map((p, j) => j === i ? { ...p, side: e.target.value } : p) })}
@@ -413,8 +465,6 @@ export default function EquipmentFormModal({
                     >
                       <option value="left">Left</option>
                       <option value="right">Right</option>
-                      <option value="top">Top</option>
-                      <option value="bottom">Bottom</option>
                     </select>
                     <select
                       value={port.dir}
@@ -439,13 +489,28 @@ export default function EquipmentFormModal({
                       onChange={(e) => onChange({ ...value, ports: value.ports.map((p, j) => j === i ? { ...p, connector: e.target.value } : p) })}
                       className={inputCls + " min-w-0"} placeholder="connector (RJ45, XLR-3…)"
                     />
-                    <button
-                      type="button"
-                      onClick={() => onChange({ ...value, ports: value.ports.filter((_, j) => j !== i) })}
-                      className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...value.ports];
+                          next.splice(i + 1, 0, { ...port });
+                          onChange({ ...value, ports: next });
+                        }}
+                        title="Duplicate port"
+                        className="rounded-md p-1.5 text-muted transition-colors hover:bg-blue-500/10 hover:text-blue-400"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onChange({ ...value, ports: value.ports.filter((_, j) => j !== i) })}
+                        title="Delete port"
+                        className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -503,13 +568,16 @@ export default function EquipmentFormModal({
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-6 py-4">
-          <button onClick={onCancel} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
-            Cancel
-          </button>
-          <button onClick={onSave} disabled={saving || saveDisabled} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
-            {saving ? "Saving…" : saveLabel}
-          </button>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-6 py-4">
+          <p className="text-[12px] text-red-400">{saveError || ""}</p>
+          <div className="flex shrink-0 items-center gap-3">
+            <button onClick={onCancel} className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body">
+              Cancel
+            </button>
+            <button onClick={onSave} disabled={saving || saveDisabled} className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
+              {saving ? "Saving…" : saveLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>

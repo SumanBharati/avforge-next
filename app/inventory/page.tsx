@@ -831,8 +831,10 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const [selected, setSelected] = useState<AVProduct | null>(null);
   const [editingProduct, setEditingProduct] = useState<AVProduct | null>(null);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [productSaveError, setProductSaveError] = useState<string | null>(null);
   const [newProduct, setNewProduct] = useState<AVProduct | null>(null);
   const [savingNewProduct, setSavingNewProduct] = useState(false);
+  const [newProductSaveError, setNewProductSaveError] = useState<string | null>(null);
   const [pendingDeleteProduct, setPendingDeleteProduct] = useState<AVProduct | null>(null);
   const [deletingProduct, setDeletingProduct] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -841,6 +843,41 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const [bulkAdding, setBulkAdding] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ added: number; skipped: number } | null>(null);
+  // Duplicates found during a bulk "Add to My Organization's Equipment
+  // Library" — held here instead of silently skipping them, so the user
+  // gets the same override choice the single-item Add flow already gives.
+  const [bulkOverrideConfirm, setBulkOverrideConfirm] = useState<{ items: { product: AVProduct; existingId: string }[]; addedSoFar: number } | null>(null);
+
+  async function overrideOrgItem(product: AVProduct, existingId: string) {
+    return supabase
+      .from("equipment_library")
+      .update({
+        category: product.category,
+        manufacturer: product.manufacturer,
+        model: product.model_name,
+        description: product.type || "",
+        unit_cost: product.price ?? 0,
+        part_number: product.part_number,
+        msrp: product.msrp,
+        cost: product.cost,
+        margin: product.margin,
+        markup: product.markup,
+        color: product.color,
+        ports: product.ports ?? [],
+        amp_draw: product.amp_draw,
+        voltage: product.voltage,
+        power_watts: product.power_watts,
+        btu_hr: product.btu_hr,
+        rack_mounted: product.rack_mounted ?? false,
+        rack_units: product.rack_units,
+        rack_ear_included: product.rack_ear_included,
+        width_in: product.width_in,
+        height_in: product.height_in,
+        depth_in: product.depth_in,
+        weight_lb: product.weight_lb,
+      })
+      .eq("id", existingId);
+  }
 
   async function addSelectedToOrgLibrary() {
     if (!activeOrg || selectedIds.size === 0) return;
@@ -850,7 +887,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
     if (user) {
       const toAdd = products.filter((p) => selectedIds.has(p.id));
       let added = 0;
-      let skipped = 0;
+      const duplicates: { product: AVProduct; existingId: string }[] = [];
       for (const product of toAdd) {
         const { data: existing } = await supabase
           .from("equipment_library")
@@ -860,7 +897,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           .eq("model", product.model_name)
           .maybeSingle();
         if (existing) {
-          skipped++;
+          duplicates.push({ product, existingId: existing.id });
         } else {
           const { error } = await supabase.from("equipment_library").insert({
             user_id: user.id,
@@ -889,17 +926,40 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             depth_in: product.depth_in,
             weight_lb: product.weight_lb,
           });
-          if (!error) added++;
-          else skipped++;
+          if (!error) { added++; setAddedIds((prev) => new Set(prev).add(product.id)); }
         }
-        setAddedIds((prev) => new Set(prev).add(product.id));
       }
-      setBulkResult({ added, skipped });
-      setTimeout(() => setBulkResult(null), 4000);
       setSelectedIds(new Set());
       setAnchorIndex(null);
+      if (duplicates.length > 0) {
+        setBulkOverrideConfirm({ items: duplicates, addedSoFar: added });
+      } else {
+        setBulkResult({ added, skipped: 0 });
+        setTimeout(() => setBulkResult(null), 4000);
+      }
     }
     setBulkAdding(false);
+  }
+
+  async function confirmBulkOverride() {
+    if (!bulkOverrideConfirm) return;
+    setBulkAdding(true);
+    let overridden = 0;
+    for (const { product, existingId } of bulkOverrideConfirm.items) {
+      const { error } = await overrideOrgItem(product, existingId);
+      if (!error) { overridden++; setAddedIds((prev) => new Set(prev).add(product.id)); }
+    }
+    setBulkResult({ added: bulkOverrideConfirm.addedSoFar + overridden, skipped: bulkOverrideConfirm.items.length - overridden });
+    setTimeout(() => setBulkResult(null), 4000);
+    setBulkOverrideConfirm(null);
+    setBulkAdding(false);
+  }
+
+  function cancelBulkOverride() {
+    if (!bulkOverrideConfirm) return;
+    setBulkResult({ added: bulkOverrideConfirm.addedSoFar, skipped: bulkOverrideConfirm.items.length });
+    setTimeout(() => setBulkResult(null), 4000);
+    setBulkOverrideConfirm(null);
   }
 
   function handleRowClick(e: React.MouseEvent, index: number) {
@@ -987,34 +1047,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
     if (!overrideConfirm) return;
     const { product, existingId } = overrideConfirm;
     setAddingToOrg(true);
-    const { error } = await supabase
-      .from("equipment_library")
-      .update({
-        category: product.category,
-        manufacturer: product.manufacturer,
-        model: product.model_name,
-        description: product.type || "",
-        unit_cost: product.price ?? 0,
-        part_number: product.part_number,
-        msrp: product.msrp,
-        cost: product.cost,
-        margin: product.margin,
-        markup: product.markup,
-        color: product.color,
-        ports: product.ports ?? [],
-        amp_draw: product.amp_draw,
-        voltage: product.voltage,
-        power_watts: product.power_watts,
-        btu_hr: product.btu_hr,
-        rack_mounted: product.rack_mounted ?? false,
-        rack_units: product.rack_units,
-        rack_ear_included: product.rack_ear_included,
-        width_in: product.width_in,
-        height_in: product.height_in,
-        depth_in: product.depth_in,
-        weight_lb: product.weight_lb,
-      })
-      .eq("id", existingId);
+    const { error } = await overrideOrgItem(product, existingId);
     if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
     setAddingToOrg(false);
     setOverrideConfirm(null);
@@ -1057,14 +1090,23 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
       .finally(() => setLoadingMore(false));
   }
 
+  function friendlyProductSaveError(message: string): string {
+    if (/duplicate key value/i.test(message)) return "A product with this manufacturer and model already exists in the AV Forge Library.";
+    return message;
+  }
+
   async function handleSaveProduct() {
     if (!editingProduct || !editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()) return;
     setSavingProduct(true);
+    setProductSaveError(null);
     const { id, ...patch } = editingProduct;
     const { error } = await updateProduct(id, patch);
-    if (!error) {
-      setProducts((prev) => prev.map((p) => (p.id === id ? editingProduct : p)));
+    if (error) {
+      setProductSaveError(friendlyProductSaveError(error));
+      setSavingProduct(false);
+      return;
     }
+    setProducts((prev) => prev.map((p) => (p.id === id ? editingProduct : p)));
     setSavingProduct(false);
     setEditingProduct(null);
   }
@@ -1072,13 +1114,17 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   async function handleSaveNewProduct() {
     if (!newProduct || !newProduct.manufacturer.trim() || !newProduct.model_name.trim()) return;
     setSavingNewProduct(true);
+    setNewProductSaveError(null);
     const { id, ...rest } = newProduct;
     const { id: insertedId, error } = await createProduct(rest);
-    if (!error && insertedId) {
-      setProducts((prev) => [{ ...newProduct, id: insertedId }, ...prev]);
-      setTotal((prev) => prev + 1);
-      setNewProduct(null);
+    if (error || !insertedId) {
+      setNewProductSaveError(friendlyProductSaveError(error || "Save failed."));
+      setSavingNewProduct(false);
+      return;
     }
+    setProducts((prev) => [{ ...newProduct, id: insertedId }, ...prev]);
+    setTotal((prev) => prev + 1);
+    setNewProduct(null);
     setSavingNewProduct(false);
   }
 
@@ -1107,7 +1153,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-subtle">{total} products</span>
           <button
-            onClick={() => setNewProduct(emptyAVProduct())}
+            onClick={() => { setNewProductSaveError(null); setNewProduct(emptyAVProduct()); }}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1222,7 +1268,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
                     <td className="px-4 py-3 font-mono text-[11px] text-subtle">{p.part_number || <span className="text-faint">—</span>}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={(e) => { e.stopPropagation(); setEditingProduct({ ...p }); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
+                        <button onClick={(e) => { e.stopPropagation(); setProductSaveError(null); setEditingProduct({ ...p }); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                             <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                             <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -1393,6 +1439,48 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
+      {/* Bulk override confirmation — same choice as the single-item Add
+          flow above, for right-click "Add to My Organization's Equipment
+          Library" on one or more rows that already exist in the org library
+          (previously this silently skipped them with no way to update). */}
+      {bulkOverrideConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
+            <h3 className="text-[15px] font-bold text-heading">
+              Already in your library
+            </h3>
+            <p className="mt-2 text-[13px] text-muted">
+              {bulkOverrideConfirm.items.length === 1
+                ? <>{bulkOverrideConfirm.items[0].product.manufacturer} {bulkOverrideConfirm.items[0].product.model_name} is already in your Organization&apos;s Equipment Library.</>
+                : <>{bulkOverrideConfirm.items.length} of the selected items are already in your Organization&apos;s Equipment Library.</>}
+              {" "}Do you want to override {bulkOverrideConfirm.items.length === 1 ? "it" : "them"} with the current AV Forge Equipment Library details?
+            </p>
+            {bulkOverrideConfirm.items.length > 1 && (
+              <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border bg-forge-surface/40 p-2 text-[12px] text-body">
+                {bulkOverrideConfirm.items.map(({ product }) => (
+                  <li key={product.id}>{product.manufacturer} {product.model_name}</li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                onClick={cancelBulkOverride}
+                className="rounded-lg border border-border px-4 py-2 text-[13px] font-medium text-muted transition-colors hover:text-body"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkOverride}
+                disabled={bulkAdding}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+              >
+                {bulkAdding ? "Updating…" : bulkOverrideConfirm.items.length === 1 ? "Yes, Override" : "Yes, Override All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Right-click context menu */}
       {contextMenu && (
         <>
@@ -1431,9 +1519,12 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           onCancel={() => setEditingProduct(null)}
           onSave={handleSaveProduct}
           saving={savingProduct}
+          saveError={productSaveError}
           saveDisabled={!editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()}
           categories={categories}
           notesLabel="Type"
+          showAIImport
+          aiMode="update"
         />
       )}
 
@@ -1446,6 +1537,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           onCancel={() => setNewProduct(null)}
           onSave={handleSaveNewProduct}
           saving={savingNewProduct}
+          saveError={newProductSaveError}
           saveDisabled={!newProduct.manufacturer.trim() || !newProduct.model_name.trim()}
           categories={categories}
           notesLabel="Type"
@@ -1590,6 +1682,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<OrgEquipmentItem | Omit<OrgEquipmentItem, "id" | "user_id"> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<OrgEquipmentItem | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1683,17 +1776,25 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
   function openNew() {
     if (!activeOrg) return;
     setEditing(emptyOrgItem(activeOrg.id));
+    setSaveError(null);
     setShowModal(true);
   }
 
   function openEdit(item: OrgEquipmentItem) {
     setEditing({ ...item });
+    setSaveError(null);
     setShowModal(true);
+  }
+
+  function friendlySaveError(message: string): string {
+    if (/duplicate key value/i.test(message)) return "An item with this manufacturer and model already exists in your library.";
+    return message;
   }
 
   async function handleSave() {
     if (!editing || !activeOrg || !editing.manufacturer.trim() || !editing.model.trim()) return;
     setSaving(true);
+    setSaveError(null);
     if ("id" in editing) {
       const { error } = await supabase
         .from("equipment_library")
@@ -1723,17 +1824,30 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           weight_lb: editing.weight_lb,
         })
         .eq("id", editing.id);
-      if (!error) setItems((prev) => prev.map((i) => (i.id === editing.id ? (editing as OrgEquipmentItem) : i)));
+      if (error) {
+        setSaveError(friendlySaveError(error.message));
+        setSaving(false);
+        return;
+      }
+      setItems((prev) => prev.map((i) => (i.id === editing.id ? (editing as OrgEquipmentItem) : i)));
     } else {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data, error } = await supabase
-          .from("equipment_library")
-          .insert({ ...editing, user_id: user.id })
-          .select("*")
-          .single();
-        if (!error && data) setItems((prev) => [...prev, data as OrgEquipmentItem]);
+      if (!user) {
+        setSaveError("Not signed in.");
+        setSaving(false);
+        return;
       }
+      const { data, error } = await supabase
+        .from("equipment_library")
+        .insert({ ...editing, user_id: user.id })
+        .select("*")
+        .single();
+      if (error) {
+        setSaveError(friendlySaveError(error.message));
+        setSaving(false);
+        return;
+      }
+      setItems((prev) => [...prev, data as OrgEquipmentItem]);
     }
     setSaving(false);
     setShowModal(false);
@@ -1915,9 +2029,11 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           onCancel={() => { setShowModal(false); setEditing(null); }}
           onSave={handleSave}
           saving={saving}
+          saveError={saveError}
           saveDisabled={!editing.manufacturer.trim() || !editing.model.trim()}
           categories={categories}
-          showAIImport={!("id" in editing)}
+          showAIImport
+          aiMode={"id" in editing ? "update" : "create"}
         />
       )}
 
