@@ -38,7 +38,7 @@ async function main() {
     await page.waitForTimeout(300);
 
     // 2. AV Forge Library (admin) — Edit Product.
-    await page.goto(`${APP_URL}/inventory?section=avforge`);
+    await page.goto(`${APP_URL}/inventory?section=avgenix`);
     await page.waitForTimeout(1500);
     await page.locator('tbody tr').first().locator('button[title="Edit"]').click();
     await page.waitForTimeout(400);

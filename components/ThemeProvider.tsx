@@ -18,7 +18,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("avforge-theme") as Theme | null;
+    const stored = localStorage.getItem("avgenix-theme") as Theme | null;
     const resolved = (stored === "light" || stored === "dark") ? stored : "light";
     setTheme(resolved);
     document.documentElement.setAttribute("data-theme", resolved);
@@ -28,7 +28,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    localStorage.setItem("avforge-theme", next);
+    localStorage.setItem("avgenix-theme", next);
     document.documentElement.setAttribute("data-theme", next);
   }
 

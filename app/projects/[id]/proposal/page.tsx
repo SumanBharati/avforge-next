@@ -176,7 +176,7 @@ interface Room {
 // Pulls together whatever's already been designed for a room — Signal Flow
 // devices (richest: manufacturer/model/category/price), Room Designer
 // placements (generic category + name only, no pricing yet), and Rack Builder
-// items (enriched from the AV Forge Library when added from there) — into a
+// items (enriched from the AVGenix Library when added from there) — into a
 // single grouped, editable line-item list. Identical items are combined so
 // e.g. ten ceiling speakers show as one row with qty 10, not ten rows.
 async function fetchRoomBomItems(projectId: string, roomId: string): Promise<LineItem[]> {

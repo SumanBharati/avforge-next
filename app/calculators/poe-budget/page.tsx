@@ -9,7 +9,7 @@ import { useOrg } from '@/components/OrgProvider';
 interface CustomDevice { name: string; volts: number; mah: number; qty: number; }
 interface PresetEntry  { name: string; qty: number; }
 interface SwitchEntry  { model: string; capacity: number; }
-interface PoeOption    { name: string; draw: number; standard: string; source: 'AV Forge' | 'Org'; }
+interface PoeOption    { name: string; draw: number; standard: string; source: 'AVGenix' | 'Org'; }
 
 const cellInput: React.CSSProperties = { padding: '5px 6px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 4, color: 'rgb(var(--text-body))', fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: 'none', textAlign: 'center', width: '100%', boxSizing: 'border-box' };
 const nameInput: React.CSSProperties = { ...cellInput, textAlign: 'left' };
@@ -54,7 +54,7 @@ export default function PoEBudgetPage() {
           name: `${p.manufacturer} ${p.model_name}`,
           draw: p.power_watts as number,
           standard: classifyPoeStandard(p.power_watts as number, p.power_supply_type),
-          source: 'AV Forge',
+          source: 'AVGenix',
         }));
       const orgOptions: PoeOption[] = orgItems
         .filter((p) => (p.power_watts ?? 0) > 0)
@@ -172,7 +172,7 @@ export default function PoEBudgetPage() {
           {/* Preset Library */}
           <CalcSection title="Devices (From Library)">
             <div className="mb-1.5 text-[10px] leading-relaxed text-faint">
-              Pulled from the AV Forge Equipment Library and your organization&apos;s library — any device with a known wattage and a PoE power supply. PoE standard (af/at/bt) is inferred from the power supply notes where available; a future update will store it as its own field.
+              Pulled from the AVGenix Equipment Library and your organization&apos;s library — any device with a known wattage and a PoE power supply. PoE standard (af/at/bt) is inferred from the power supply notes where available; a future update will store it as its own field.
             </div>
             {loadingLibrary ? (
               <div className="py-3 text-center text-[11px] text-subtle">Loading library devices…</div>

@@ -15,7 +15,7 @@ const supabase = createClient(
 );
 const voyage = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY! });
 
-const SYSTEM_PROMPT = `You are AVForge AI, an expert Audio/Visual systems design assistant built into the AVForge project management platform.
+const SYSTEM_PROMPT = `You are AVGenix AI, an expert Audio/Visual systems design assistant built into the AVGenix project management platform.
 
 Your capabilities:
 - Deep knowledge of AV system design, engineering, and installation

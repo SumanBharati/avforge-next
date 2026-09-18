@@ -27,7 +27,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AVForge — AV Engineer Toolkit",
+  title: "AVGenix — AV Engineer Toolkit",
   description:
     "The all-in-one engineering toolkit for AV professionals. Calculators, design tools, reference library, and AI-powered assistance.",
 };
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
 const themeScript = `
 (function(){
   try {
-    var t = localStorage.getItem('avforge-theme');
+    var t = localStorage.getItem('avgenix-theme');
     document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'light');
   } catch(e) {
     document.documentElement.setAttribute('data-theme', 'light');

@@ -1,4 +1,4 @@
-const KEY = "avforge_recent_tools";
+const KEY = "avgenix_recent_tools";
 const MAX = 10;
 
 export function addRecentTool(href: string) {

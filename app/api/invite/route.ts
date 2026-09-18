@@ -31,13 +31,13 @@ export async function POST(req: NextRequest) {
 
   try {
     await brevoClient.transactionalEmails.sendTransacEmail({
-      sender: { name: "AVForge", email: process.env.BREVO_SENDER_EMAIL! },
+      sender: { name: "AVGenix", email: process.env.BREVO_SENDER_EMAIL! },
       to: [{ email }],
-      subject: `You've been invited to join ${org_name} on AVForge`,
+      subject: `You've been invited to join ${org_name} on AVGenix`,
       htmlContent: `
         <div style="font-family:sans-serif;max-width:480px;margin:auto">
           <h2>You're invited to ${org_name}</h2>
-          <p>You have been invited to join <strong>${org_name}</strong> on AVForge as a <strong>${role}</strong>.</p>
+          <p>You have been invited to join <strong>${org_name}</strong> on AVGenix as a <strong>${role}</strong>.</p>
           <p>This invite expires in 7 days.</p>
           <a href="${inviteUrl}" style="display:inline-block;padding:12px 24px;background:#7c3aed;color:#fff;border-radius:6px;text-decoration:none;font-weight:600">
             Accept Invitation

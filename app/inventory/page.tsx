@@ -9,7 +9,7 @@ import { useOrg } from "@/components/OrgProvider";
 import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
-type Section = "org" | "avforge" | "inventory";
+type Section = "org" | "avgenix" | "inventory";
 
 type Category = "Display" | "Audio" | "Control" | "Networking" | "Cable" | "Mount" | "Other";
 
@@ -161,9 +161,9 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
     iconColor: "text-violet-400",
   },
   {
-    key: "avforge",
-    label: "AV Forge Equipment Library",
-    description: "Vetted AV products and full specifications maintained by AV Forge.",
+    key: "avgenix",
+    label: "AVGenix Equipment Library",
+    description: "Vetted AV products and full specifications maintained by AVGenix.",
     icon: <SparkleIcon size={28} />,
     iconBg: "bg-blue-500/10",
     iconColor: "text-blue-400",
@@ -180,13 +180,13 @@ const CARDS: { key: Section; label: string; description: string; icon: React.Rea
 
 function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
   const { activeOrg } = useOrg();
-  const [avForgeCount, setAvForgeCount] = useState<number | null>(null);
+  const [avGenixCount, setAvGenixCount] = useState<number | null>(null);
   const [orgCount, setOrgCount] = useState<number | null>(null);
   const [inventoryCount, setInventoryCount] = useState<number | null>(null);
   const [agingItems, setAgingItems] = useState<InventoryItem[] | null>(null);
 
   useEffect(() => {
-    getProductCount().then(setAvForgeCount).catch(() => {});
+    getProductCount().then(setAvGenixCount).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -213,7 +213,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
   }, [activeOrg?.id]);
 
   const cards = CARDS.map((c) => {
-    if (c.key === "avforge" && avForgeCount !== null) return { ...c, stat: `${avForgeCount} products` };
+    if (c.key === "avgenix" && avGenixCount !== null) return { ...c, stat: `${avGenixCount} products` };
     if (c.key === "org" && orgCount !== null) return { ...c, stat: `${orgCount} items` };
     if (c.key === "inventory" && inventoryCount !== null) return { ...c, stat: `${inventoryCount} SKUs` };
     return c;
@@ -252,10 +252,10 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
       {/* ── News + Old Inventory ─────────────────────────────────────────────── */}
       <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
 
-        {/* New Products on AVForge */}
+        {/* New Products on AVGenix */}
         <div className="overflow-hidden rounded-xl border border-border bg-forge-surface/20">
           <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-            <h3 className="text-[13px] font-bold text-heading">New Products on AVForge</h3>
+            <h3 className="text-[13px] font-bold text-heading">New Products on AVGenix</h3>
             <button className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300">View all</button>
           </div>
           {NEWS_ITEMS.length === 0 ? (
@@ -267,7 +267,7 @@ function LandingView({ onSelect }: { onSelect: (s: Section) => void }) {
                 <line x1="16" y1="17" x2="8" y2="17" />
               </svg>
               <p className="text-[13px] font-medium text-subtle">No products yet</p>
-              <p className="mt-1 text-[12px] text-faint">Equipment added to the AV Forge Equipment Library will appear here.</p>
+              <p className="mt-1 text-[12px] text-faint">Equipment added to the AVGenix Equipment Library will appear here.</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -695,7 +695,7 @@ function InventoryView({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ── AV Forge Equipment Library section ───────────────────────────────────────
+// ── AVGenix Equipment Library section ───────────────────────────────────────
 
 const LIBRARY_PAGE_SIZE = 40;
 
@@ -816,7 +816,7 @@ const emptyAVProduct = (): AVProduct => ({
   coverage_depth_ft: null,
 });
 
-function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
+function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
   const { activeOrg } = useOrg();
   const [products, setProducts] = useState<AVProduct[]>([]);
   const [total, setTotal] = useState(0);
@@ -1091,7 +1091,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
   }
 
   function friendlyProductSaveError(message: string): string {
-    if (/duplicate key value/i.test(message)) return "A product with this manufacturer and model already exists in the AV Forge Library.";
+    if (/duplicate key value/i.test(message)) return "A product with this manufacturer and model already exists in the AVGenix Library.";
     return message;
   }
 
@@ -1148,7 +1148,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
             Library
           </button>
           <span className="text-border">/</span>
-          <h2 className="text-xl font-bold text-heading">AV Forge Equipment Library</h2>
+          <h2 className="text-xl font-bold text-heading">AVGenix Equipment Library</h2>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-subtle">{total} products</span>
@@ -1418,7 +1418,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
           <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-bg p-6 shadow-2xl">
             <h3 className="text-[15px] font-bold text-heading">Already in your library</h3>
             <p className="mt-2 text-[13px] text-muted">
-              {overrideConfirm.product.manufacturer} {overrideConfirm.product.model_name} is already in your Organization&apos;s Equipment Library. Do you want to override it with the current AV Forge Equipment Library details?
+              {overrideConfirm.product.manufacturer} {overrideConfirm.product.model_name} is already in your Organization&apos;s Equipment Library. Do you want to override it with the current AVGenix Equipment Library details?
             </p>
             <div className="mt-5 flex items-center justify-end gap-3">
               <button
@@ -1453,7 +1453,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
               {bulkOverrideConfirm.items.length === 1
                 ? <>{bulkOverrideConfirm.items[0].product.manufacturer} {bulkOverrideConfirm.items[0].product.model_name} is already in your Organization&apos;s Equipment Library.</>
                 : <>{bulkOverrideConfirm.items.length} of the selected items are already in your Organization&apos;s Equipment Library.</>}
-              {" "}Do you want to override {bulkOverrideConfirm.items.length === 1 ? "it" : "them"} with the current AV Forge Equipment Library details?
+              {" "}Do you want to override {bulkOverrideConfirm.items.length === 1 ? "it" : "them"} with the current AVGenix Equipment Library details?
             </p>
             {bulkOverrideConfirm.items.length > 1 && (
               <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border bg-forge-surface/40 p-2 text-[12px] text-body">
@@ -1549,7 +1549,7 @@ function AVForgeLibraryView({ onBack }: { onBack: () => void }) {
       {pendingDeleteProduct && (
         <ConfirmDialog
           title="Delete product"
-          message={<>Delete <span className="font-semibold text-heading">{pendingDeleteProduct.manufacturer} {pendingDeleteProduct.model_name}</span> from the AV Forge Equipment Library? This removes it for every organization and cannot be undone.</>}
+          message={<>Delete <span className="font-semibold text-heading">{pendingDeleteProduct.manufacturer} {pendingDeleteProduct.model_name}</span> from the AVGenix Equipment Library? This removes it for every organization and cannot be undone.</>}
           busy={deletingProduct}
           onCancel={() => setPendingDeleteProduct(null)}
           onConfirm={handleDeleteProduct}
@@ -1963,7 +1963,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
                       <>
                         No equipment yet.{" "}
                         <button onClick={openNew} className="text-blue-400 hover:text-blue-300 transition-colors">Add your first equipment</button>
-                        {" "}or add equipment from the AV Forge Equipment Library.
+                        {" "}or add equipment from the AVGenix Equipment Library.
                       </>
                     ) : (
                       "No items found."
@@ -2229,8 +2229,8 @@ function LibraryPageInner() {
     return <OrgLibraryView onBack={() => goToSection(null)} />;
   }
 
-  if (activeSection === "avforge") {
-    return <AVForgeLibraryView onBack={() => goToSection(null)} />;
+  if (activeSection === "avgenix") {
+    return <AVGenixLibraryView onBack={() => goToSection(null)} />;
   }
 
   return <LandingView onSelect={goToSection} />;

@@ -65,7 +65,7 @@ function DesignEngineeringLayoutInner({ children }: { children: React.ReactNode 
 
   const handleSave = useCallback(() => {
     // Dispatch a custom event that child pages can listen to
-    window.dispatchEvent(new Event("avforge-save"));
+    window.dispatchEvent(new Event("avgenix-save"));
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }, []);

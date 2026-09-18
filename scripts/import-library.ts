@@ -1,5 +1,5 @@
 /**
- * AV Forge Library import — reads data/*.xlsx and upserts into av_products.
+ * AVGenix Library import — reads data/*.xlsx and upserts into av_products.
  *
  * Usage:
  *   npx tsx scripts/import-library.ts           # dry run: validate + preview, no DB writes

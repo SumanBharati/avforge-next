@@ -1,4 +1,4 @@
-# AVForge — AV Engineer Toolkit
+# AVGenix — AV Engineer Toolkit
 
 All-in-one engineering toolkit for AV professionals. Built with Next.js 14 and Tailwind CSS.
 
@@ -36,7 +36,7 @@ avforge-next/
 ├── public/
 │   ├── hero-room.png       # Room Designer screenshot
 │   └── hero-signal.png     # Signal Flow screenshot
-├── tailwind.config.ts      # Custom AVForge color palette
+├── tailwind.config.ts      # Custom AVGenix color palette
 ├── package.json
 └── tsconfig.json
 ```
@@ -45,7 +45,7 @@ avforge-next/
 
 ### Phase 1 — Scaffold & Layout ✅
 - [x] Next.js 14 App Router setup
-- [x] Tailwind config with exact AVForge color palette
+- [x] Tailwind config with exact AVGenix color palette
 - [x] Header component (logo left, nav right)
 - [x] Floating AI chat widget (icon + panel, coming soon placeholder)
 - [x] Home page with hero, stats, section cards, signal flow preview, quick start

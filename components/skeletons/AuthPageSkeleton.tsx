@@ -12,7 +12,7 @@ export default function AuthPageSkeleton({ fields = 2 }: { fields?: number }) {
             <span className="text-lg font-extrabold text-white">▲</span>
           </div>
           <span className="text-xl font-bold tracking-tight text-slate-900">
-            AV<span className="text-blue-500">Forge</span>
+            AV<span className="text-blue-500">Genix</span>
           </span>
         </div>
       </header>

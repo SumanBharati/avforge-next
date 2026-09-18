@@ -30,7 +30,7 @@ async function main() {
     await page.locator('button[type="submit"]').click();
     await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 15000 });
 
-    await page.goto(`${APP_URL}/inventory?section=avforge`);
+    await page.goto(`${APP_URL}/inventory?section=avgenix`);
     await page.waitForTimeout(1500);
 
     await page.locator('input[placeholder*="Search"]').fill("Generic Media Player");

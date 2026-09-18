@@ -243,7 +243,7 @@ export default function AIAssistant({ onAlertCount }: { onAlertCount?: (count: n
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10">
               <span className="text-2xl">🤖</span>
             </div>
-            <h3 className="mb-1.5 text-sm font-semibold text-body">AVForge AI</h3>
+            <h3 className="mb-1.5 text-sm font-semibold text-body">AVGenix AI</h3>
             <p className="max-w-[260px] text-xs leading-relaxed text-subtle">
               AV design help, troubleshooting, equipment selection, standards, and calculations.
             </p>

@@ -162,7 +162,7 @@ export default function Header() {
             <span className="text-lg font-extrabold text-white">▲</span>
           </div>
           <span className="text-xl font-bold tracking-tight text-heading">
-            AV<span className="text-blue-500">Forge</span>
+            AV<span className="text-blue-500">Genix</span>
           </span>
         </Link>
         <div className="hidden h-8 w-px bg-border sm:block" />

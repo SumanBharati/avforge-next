@@ -821,7 +821,7 @@ export default function RoomDesignerPage() {
   }, [avDeviceCount, rdLoaded]);
 
   // Modal: search the org's own Equipment Library first (same convention as
-  // Signal Flow Builder), with the global AV Forge Library as an explicit
+  // Signal Flow Builder), with the global AVGenix Library as an explicit
   // fallback — org library items never carry Room Designer's rd_type/rd_wall/
   // rd_icon placement metadata (only av_products has been enriched with
   // those), so addFromModal's category/name-based inference below is what
@@ -1115,8 +1115,8 @@ export default function RoomDesignerPage() {
         elevationMarkers,
       });
     };
-    window.addEventListener("avforge-save", handler);
-    return () => window.removeEventListener("avforge-save", handler);
+    window.addEventListener("avgenix-save", handler);
+    return () => window.removeEventListener("avgenix-save", handler);
   }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
@@ -6122,7 +6122,7 @@ export default function RoomDesignerPage() {
           {modalSearch.trim() && (
             <div style={{margin:"0 20px",marginBottom:8}}>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"rgb(var(--text-subtle))",marginBottom:6}}>
-                {modalGlobalSearch ? "AV Forge Equipment Library" : "My Organization's Equipment Library"}
+                {modalGlobalSearch ? "AVGenix Equipment Library" : "My Organization's Equipment Library"}
               </div>
               <div style={{maxHeight:220,overflowY:"auto",border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
                 {modalLoading ? (

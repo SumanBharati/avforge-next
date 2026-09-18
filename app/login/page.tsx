@@ -176,7 +176,7 @@ function LoginPageInner() {
             <span className="text-lg font-extrabold text-white">▲</span>
           </div>
           <span className="text-xl font-bold tracking-tight text-heading">
-            AV<span className="text-blue-500">Forge</span>
+            AV<span className="text-blue-500">Genix</span>
           </span>
         </Link>
       </header>
@@ -424,7 +424,7 @@ function LoginPageInner() {
             <div className="w-[90%] overflow-hidden rounded-2xl border border-border/60 shadow-2xl">
               <img
                 src="/dashboard-preview.png"
-                alt="AVForge dashboard preview"
+                alt="AVGenix dashboard preview"
                 className="w-full h-auto"
               />
             </div>

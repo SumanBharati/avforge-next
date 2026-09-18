@@ -118,11 +118,11 @@ export default function RFIManagementPage() {
   useEffect(() => {
     const handleExportPDF = () => exportPDF();
     const handleExportWord = () => exportWord();
-    window.addEventListener("avforge-export-pdf", handleExportPDF);
-    window.addEventListener("avforge-export-word", handleExportWord);
+    window.addEventListener("avgenix-export-pdf", handleExportPDF);
+    window.addEventListener("avgenix-export-word", handleExportWord);
     return () => {
-      window.removeEventListener("avforge-export-pdf", handleExportPDF);
-      window.removeEventListener("avforge-export-word", handleExportWord);
+      window.removeEventListener("avgenix-export-pdf", handleExportPDF);
+      window.removeEventListener("avgenix-export-word", handleExportWord);
     };
   }, [exportPDF, exportWord]);
 

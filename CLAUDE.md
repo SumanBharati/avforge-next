@@ -1,4 +1,4 @@
-# AVForge — Project Notes for Claude
+# AVGenix — Project Notes for Claude
 
 ## Competitive Reference
 - AV Buddy teardown: docs/competitive/av-buddy/video-teardown.md

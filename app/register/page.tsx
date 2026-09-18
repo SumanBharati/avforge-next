@@ -126,7 +126,7 @@ export default function RegisterPage() {
             <span className="text-lg font-extrabold text-white">▲</span>
           </div>
           <span className="text-xl font-bold tracking-tight text-heading">
-            AV<span className="text-blue-500">Forge</span>
+            AV<span className="text-blue-500">Genix</span>
           </span>
         </Link>
         {/* <div className="flex items-center gap-3">
@@ -321,7 +321,7 @@ export default function RegisterPage() {
             <div className="w-[90%] overflow-hidden rounded-2xl border border-border/60 shadow-2xl">
               <img
                 src="/dashboard-preview.png"
-                alt="AVForge dashboard preview"
+                alt="AVGenix dashboard preview"
                 className="w-full h-auto"
               />
             </div>

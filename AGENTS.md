@@ -1,4 +1,4 @@
-# AVForge — Project Notes for Codex
+# AVGenix — Project Notes for Codex
 
 ## Competitive Reference
 - AV Buddy teardown: docs/competitive/av-buddy/video-teardown.md

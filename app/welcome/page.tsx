@@ -28,7 +28,7 @@ export default function WelcomePage() {
         </div>
 
         <h1 className="mb-2 font-display text-3xl font-bold text-heading">
-          Welcome to AV<span className="text-blue-500">Forge</span>
+          Welcome to AV<span className="text-blue-500">Genix</span>
         </h1>
         <p className="mb-10 text-muted">
           Are you a part of an Organization?
