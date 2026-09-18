@@ -26,10 +26,28 @@ const jetbrainsMono = JetBrains_Mono({
   preload: false,
 });
 
+const description =
+  "The all-in-one engineering toolkit for AV professionals. Calculators, design tools, reference library, and AI-powered assistance.";
+
 export const metadata: Metadata = {
-  title: "AVGenix — AV Engineer Toolkit",
-  description:
-    "The all-in-one engineering toolkit for AV professionals. Calculators, design tools, reference library, and AI-powered assistance.",
+  metadataBase: new URL("https://avgenix.com"),
+  title: {
+    default: "AVGenix — AV Engineer Toolkit",
+    template: "%s — AVGenix",
+  },
+  description,
+  openGraph: {
+    title: "AVGenix — AV Engineer Toolkit",
+    description,
+    url: "https://avgenix.com",
+    siteName: "AVGenix",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AVGenix — AV Engineer Toolkit",
+    description,
+  },
 };
 
 const themeScript = `
