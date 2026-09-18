@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef } f
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
+import UpgradeModal from "./UpgradeModal";
 
 const AUTH_ROUTES = ["/login", "/register", "/org/invite", "/welcome"];
 
@@ -14,6 +15,7 @@ export interface Org {
   logo_url: string | null;
   role: "owner" | "admin" | "member";
   member_roles: string[];
+  subscription_status: string | null;
 }
 
 interface OrgContextValue {
@@ -22,6 +24,10 @@ interface OrgContextValue {
   switchOrg: (orgId: string) => Promise<void>;
   refreshOrgs: () => Promise<void>;
   loading: boolean;
+  isPro: boolean;
+  upgradeModalOpen: boolean;
+  openUpgradeModal: () => void;
+  closeUpgradeModal: () => void;
 }
 
 const OrgContext = createContext<OrgContextValue>({
@@ -30,6 +36,10 @@ const OrgContext = createContext<OrgContextValue>({
   switchOrg: async () => {},
   refreshOrgs: async () => {},
   loading: true,
+  isPro: false,
+  upgradeModalOpen: false,
+  openUpgradeModal: () => {},
+  closeUpgradeModal: () => {},
 });
 
 export function useOrg() {
@@ -45,6 +55,9 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const openUpgradeModal = useCallback(() => setUpgradeModalOpen(true), []);
+  const closeUpgradeModal = useCallback(() => setUpgradeModalOpen(false), []);
 
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
@@ -72,7 +85,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
     const orgIds = memberships.map((m) => m.org_id);
     const { data: orgsData } = await supabase
       .from("organizations")
-      .select("id, name, slug, logo_url, member_roles")
+      .select("id, name, slug, logo_url, member_roles, subscription_status")
       .in("id", orgIds);
 
     if (!orgsData || orgsData.length === 0) {
@@ -91,6 +104,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
         logo_url: org?.logo_url || null,
         role: m.role,
         member_roles: Array.isArray(org?.member_roles) && org.member_roles.length > 0 ? org.member_roles : ROLE_OPTIONS,
+        subscription_status: org?.subscription_status ?? null,
       };
     });
 
@@ -157,10 +171,12 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   }
 
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null;
+  const isPro = activeOrg?.subscription_status === "active";
 
   return (
-    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading }}>
+    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading, isPro, upgradeModalOpen, openUpgradeModal, closeUpgradeModal }}>
       {children}
+      {upgradeModalOpen && <UpgradeModal onClose={closeUpgradeModal} />}
     </OrgContext.Provider>
   );
 }

@@ -84,7 +84,7 @@ function PhoneCodeSelect({ value, onChange }: { value: string; onChange: (code: 
 
 export default function OrgSettingsPage() {
   const router = useRouter();
-  const { activeOrg, refreshOrgs } = useOrg();
+  const { activeOrg, refreshOrgs, isPro, openUpgradeModal } = useOrg();
   const initialOrgDetails = {
     name: "", website: "", phone: "", phone_country_code: "+1", country: "United States", timezone: "(GMT-05:00) Eastern Time (US & Canada)",
     street_address: "", city: "", state: "", zip: "",
@@ -96,6 +96,22 @@ export default function OrgSettingsPage() {
   const isOrgDetailsDirty = JSON.stringify(orgDetails) !== JSON.stringify(savedOrgDetails);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
+
+  async function handleManageBilling() {
+    if (!activeOrg) return;
+    setBillingLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch("/api/stripe/portal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ orgId: activeOrg.id }),
+    });
+    const data = await res.json();
+    if (data.url) { window.location.href = data.url; return; }
+    setBillingLoading(false);
+    alert(data.error || "Something went wrong. Please try again.");
+  }
 
   const [roleItems, setRoleItems] = useState<RoleItem[]>(() => toRoleItems(ROLE_OPTIONS));
   const [savedRoleItems, setSavedRoleItems] = useState<RoleItem[]>(roleItems);
@@ -488,6 +504,34 @@ export default function OrgSettingsPage() {
 
         {/* ── Right column ── */}
         <div className="flex flex-col gap-4">
+
+          {/* Billing */}
+          {isOwnerOrAdmin && (
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-heading">Billing</h3>
+                    <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">
+                      AVGenix Pro
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-muted">
+                    {isPro ? "Your organization has an active Pro subscription — $20/month." : "Free plan — upgrade to unlock projects, design tools, and BOM generation."}
+                  </p>
+                </div>
+                <button
+                  onClick={isPro ? handleManageBilling : openUpgradeModal}
+                  disabled={billingLoading}
+                  className={isPro
+                    ? "shrink-0 rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-body transition-colors hover:bg-forge-surface/80 disabled:opacity-50"
+                    : "forge-btn-primary shrink-0 text-[13px]"}
+                >
+                  {isPro ? (billingLoading ? "Loading…" : "Manage Billing") : "Upgrade to Pro"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Labor Rates & Costs */}
           <form onSubmit={handleLaborSave}>

@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { BookIcon, CalculatorIcon, InventoryIcon, ToolsIcon } from "./Icons";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "./ThemeProvider";
+import { useOrg } from "./OrgProvider";
 import OrgSwitcher from "./OrgSwitcher";
 import type { User } from "@supabase/supabase-js";
 
@@ -53,15 +54,23 @@ function OrderManagementIcon() {
 }
 
 const navItems = [
-  { href: "/projects", label: "Projects", icon: ToolsIcon },
-  { href: "/procurement", label: "Order Management", icon: OrderManagementIcon },
-  { href: "/project-management", label: "Schedule", icon: ScheduleIcon },
-  { href: "/time-tracking", label: "Time Tracking", icon: TimeTrackingIcon },
-  { href: "/board", label: "Board", icon: BoardIcon },
-  { href: "/inventory", label: "Library", icon: InventoryIcon },
-  { href: "/calculators", label: "Calculators", icon: CalculatorIcon },
-  { href: "/references", label: "References", icon: BookIcon },
+  { href: "/projects", label: "Projects", icon: ToolsIcon, pro: true },
+  { href: "/procurement", label: "Order Management", icon: OrderManagementIcon, pro: true },
+  { href: "/project-management", label: "Schedule", icon: ScheduleIcon, pro: true },
+  { href: "/time-tracking", label: "Time Tracking", icon: TimeTrackingIcon, pro: true },
+  { href: "/board", label: "Board", icon: BoardIcon, pro: true },
+  { href: "/inventory", label: "Library", icon: InventoryIcon, pro: true },
+  { href: "/calculators", label: "Calculators", icon: CalculatorIcon, pro: false },
+  { href: "/references", label: "References", icon: BookIcon, pro: false },
 ];
+
+function ProBadge() {
+  return (
+    <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">
+      Pro
+    </span>
+  );
+}
 
 // Calculator routes that now live under the References tab in the nav —
 // their pages weren't moved, only relocated in navigation, so highlighting
@@ -105,6 +114,7 @@ export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggle } = useTheme();
+  const { isPro, openUpgradeModal } = useOrg();
   const [user, setUser] = useState<User | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -182,6 +192,12 @@ export default function Header() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={(e) => {
+                  if (item.pro && !isPro) {
+                    e.preventDefault();
+                    openUpgradeModal();
+                  }
+                }}
                 className={`flex items-center gap-2 rounded-lg px-[18px] py-2.5 text-[15px] transition-all ${
                   isActive
                     ? "bg-blue-500/[0.12] font-bold text-blue-400"
@@ -190,6 +206,7 @@ export default function Header() {
               >
                 <Icon />
                 <span>{item.label}</span>
+                {item.pro && !isPro && <ProBadge />}
               </Link>
             );
           })}
@@ -315,7 +332,14 @@ export default function Header() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={(e) => {
+                    if (item.pro && !isPro) {
+                      e.preventDefault();
+                      openUpgradeModal();
+                      return;
+                    }
+                    setMobileMenuOpen(false);
+                  }}
                   className={`flex items-center gap-3 rounded-lg px-4 py-3 text-[15px] transition-all ${
                     isActive
                       ? "bg-blue-500/[0.12] font-bold text-blue-400"
@@ -324,6 +348,7 @@ export default function Header() {
                 >
                   <Icon />
                   <span>{item.label}</span>
+                  {item.pro && !isPro && <ProBadge />}
                 </Link>
               );
             })}

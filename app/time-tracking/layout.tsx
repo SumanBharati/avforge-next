@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import PMStoreProvider, { usePMStore } from "@/components/PMStoreProvider";
+import ProGate from "@/components/ProGate";
 
 const TABS = [
   { href: "/time-tracking", label: "Time Tracking", exact: true },
@@ -46,11 +47,13 @@ function TabBar() {
 
 export default function TimeTrackingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <PMStoreProvider>
-      <div className="flex flex-col" style={{ height: "calc(100vh - 72px)" }}>
-        <TabBar />
-        <div className="flex-1 overflow-hidden">{children}</div>
-      </div>
-    </PMStoreProvider>
+    <ProGate>
+      <PMStoreProvider>
+        <div className="flex flex-col" style={{ height: "calc(100vh - 72px)" }}>
+          <TabBar />
+          <div className="flex-1 overflow-hidden">{children}</div>
+        </div>
+      </PMStoreProvider>
+    </ProGate>
   );
 }

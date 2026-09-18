@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { BOMProvider } from "@/lib/bom-context";
 import { createSurveyRoom, renameSurveyRoom, deleteSurveyRoom } from "@/lib/site-survey";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import ProGate from "@/components/ProGate";
 
 interface Room {
   id: string;
@@ -23,7 +24,9 @@ const toolsPerRoom = [
 export default function DesignEngineeringLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={null}>
-      <DesignEngineeringLayoutInner>{children}</DesignEngineeringLayoutInner>
+      <ProGate>
+        <DesignEngineeringLayoutInner>{children}</DesignEngineeringLayoutInner>
+      </ProGate>
     </Suspense>
   );
 }
