@@ -356,7 +356,7 @@ export default function OrgSettingsPage() {
 
     await supabase.from("organizations").delete().eq("id", activeOrg.id);
     await refreshOrgs();
-    router.push("/home");
+    router.push("/dashboard");
   }
 
   return (

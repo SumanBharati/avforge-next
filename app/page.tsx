@@ -1,33 +1,18 @@
-"use client";
+import HomeBannerCarousel from "@/components/home/HomeBannerCarousel";
+import DemoVideoSection from "@/components/home/DemoVideoSection";
+import PlanComparisonSection from "@/components/home/PlanComparisonSection";
+import HomeFooter from "@/components/home/HomeFooter";
+import { HOME_BANNERS } from "@/lib/home-banners";
+import { HOME_DEMO_VIDEOS } from "@/lib/home-demo-videos";
+import { PLAN_COMPARISON_FEATURES } from "@/lib/home-plan-comparison";
 
-import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-
-export default function RootPage() {
-  const router = useRouter();
-  const redirected = useRef(false);
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (redirected.current) return;
-      if (event === "PASSWORD_RECOVERY") {
-        redirected.current = true;
-        router.replace(`/login${window.location.hash}`);
-        return;
-      }
-      if (event === "INITIAL_SESSION" || event === "SIGNED_OUT") {
-        const hashParams = new URLSearchParams(window.location.hash.slice(1));
-        redirected.current = true;
-        if (hashParams.get("type") === "recovery") {
-          router.replace(`/login${window.location.hash}`);
-          return;
-        }
-        router.replace(session ? "/home" : "/login");
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [router]);
-
-  return null;
+export default function HomePage() {
+  return (
+    <>
+      <HomeBannerCarousel banners={HOME_BANNERS} />
+      <DemoVideoSection demos={HOME_DEMO_VIDEOS} />
+      <PlanComparisonSection features={PLAN_COMPARISON_FEATURES} />
+      <HomeFooter />
+    </>
+  );
 }

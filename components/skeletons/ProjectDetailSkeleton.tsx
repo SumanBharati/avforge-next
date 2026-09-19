@@ -2,7 +2,7 @@ import Shimmer from "@/components/Shimmer";
 
 export default function ProjectDetailSkeleton() {
   return (
-    <div className="animate-fade-in overflow-x-hidden px-10 py-4" style={{ height: "calc(100vh - 72px)", overflowY: "auto" }}>
+    <div className="animate-fade-in overflow-x-hidden px-10 py-4" style={{ height: "calc(100vh - 124px)", overflowY: "auto" }}>
       {/* Back link */}
       <div className="mb-3 flex items-center gap-2">
         <Shimmer className="h-3.5 w-3.5 rounded-sm" />

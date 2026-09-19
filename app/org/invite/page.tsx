@@ -100,7 +100,7 @@ function InviteAcceptPageInner() {
     await switchOrg(invite.org_id);
     setStatus("success");
 
-    setTimeout(() => router.push("/home"), 1500);
+    setTimeout(() => router.push("/dashboard"), 1500);
   }
 
   return (
@@ -124,7 +124,7 @@ function InviteAcceptPageInner() {
             <div className="mb-2 text-3xl">&#9203;</div>
             <div className="mb-2 text-lg font-semibold text-heading">Invite Expired</div>
             <p className="text-sm text-muted">This invite link has expired. Please ask the organization admin to send a new one.</p>
-            <Link href="/home" className="mt-4 inline-block text-sm font-medium text-blue-400 hover:text-blue-300">
+            <Link href="/dashboard" className="mt-4 inline-block text-sm font-medium text-blue-400 hover:text-blue-300">
               Go to Dashboard
             </Link>
           </>
@@ -133,7 +133,7 @@ function InviteAcceptPageInner() {
             <div className="mb-2 text-3xl">&#9888;</div>
             <div className="mb-2 text-lg font-semibold text-heading">Unable to Accept Invite</div>
             <p className="text-sm text-muted">{error}</p>
-            <Link href="/home" className="mt-4 inline-block text-sm font-medium text-blue-400 hover:text-blue-300">
+            <Link href="/dashboard" className="mt-4 inline-block text-sm font-medium text-blue-400 hover:text-blue-300">
               Go to Dashboard
             </Link>
           </>

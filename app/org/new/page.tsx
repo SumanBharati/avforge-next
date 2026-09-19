@@ -75,7 +75,7 @@ export default function NewOrgPage() {
 
     await refreshOrgs();
     await switchOrg(org.id);
-    router.push("/home");
+    router.push("/dashboard");
   }
 
   return (

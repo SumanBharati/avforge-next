@@ -20,7 +20,7 @@ Open [http://localhost:3000](http://localhost:3000).
 avforge-next/
 ├── app/
 │   ├── layout.tsx          # Root layout (fonts, header, AI widget)
-│   ├── page.tsx            # Home page
+│   ├── dashboard/page.tsx  # Dashboard page
 │   ├── globals.css         # Tailwind + custom styles
 │   ├── calculators/
 │   │   └── page.tsx        # Calculator listing
@@ -48,7 +48,7 @@ avforge-next/
 - [x] Tailwind config with exact AVGenix color palette
 - [x] Header component (logo left, nav right)
 - [x] Floating AI chat widget (icon + panel, coming soon placeholder)
-- [x] Home page with hero, stats, section cards, signal flow preview, quick start
+- [x] Dashboard page with hero, stats, section cards, signal flow preview, quick start
 - [x] Placeholder pages for Calculators, Design Tools, Reference
 
 ### Phase 2 — Calculators (TODO)

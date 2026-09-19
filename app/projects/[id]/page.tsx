@@ -422,7 +422,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
   const phaseIndex = phases.findIndex((p) => p.id === currentPhase);
 
   return (
-    <div className="animate-fade-in overflow-x-hidden px-4 py-4 sm:px-6 lg:px-10" style={{ height: "calc(100vh - 72px)", overflowY: "auto" }}>
+    <div className="animate-fade-in overflow-x-hidden px-4 py-4 sm:px-6 lg:px-10" style={{ height: "calc(100vh - 124px)", overflowY: "auto" }}>
       {/* Back link */}
       <Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-[13px] text-subtle transition-colors hover:text-secondary">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

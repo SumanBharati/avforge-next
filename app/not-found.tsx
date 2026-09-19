@@ -6,8 +6,8 @@ export default function NotFound() {
       <div className="text-center">
         <h2 className="mb-2 text-xl font-semibold text-heading">Page Not Found</h2>
         <p className="mb-6 text-sm text-subtle">The page you're looking for doesn't exist.</p>
-        <Link href="/home" className="forge-btn-primary mx-auto inline-flex">
-          Go Home
+        <Link href="/dashboard" className="forge-btn-primary mx-auto inline-flex">
+          Go Dashboard
         </Link>
       </div>
     </div>

@@ -29,6 +29,9 @@ export async function POST(req: NextRequest) {
     .eq("user_id", user.id)
     .single();
   if (!membership) return NextResponse.json({ error: "Not a member of this organization" }, { status: 403 });
+  if (!(["owner", "admin"] as string[]).includes(membership.role)) {
+    return NextResponse.json({ error: "Only organization owners and admins can manage billing" }, { status: 403 });
+  }
 
   const { data: org } = await userClient
     .from("organizations")
@@ -54,8 +57,8 @@ export async function POST(req: NextRequest) {
     mode: "subscription",
     customer: customerId,
     line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID!, quantity: 1 }],
-    success_url: `${process.env.NEXT_PUBLIC_APP_URL}/home?upgraded=1`,
-    cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/home`,
+    success_url: `${process.env.NEXT_PUBLIC_APP_URL}/projects?upgraded=1`,
+    cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/projects`,
     client_reference_id: org.id,
     subscription_data: { metadata: { org_id: org.id } },
   });

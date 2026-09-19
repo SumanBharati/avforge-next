@@ -9,7 +9,7 @@ const CARD_WIDTHS = [
 
 export default function BoardPageSkeleton() {
   return (
-    <div className="animate-fade-in flex h-full flex-col px-8 py-6" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="animate-fade-in flex h-full flex-col px-8 py-6" style={{ minHeight: "calc(100vh - 124px)" }}>
       {/* Header */}
       <div className="mb-5 flex items-center gap-3">
         <Shimmer className="h-[22px] w-[22px] rounded-sm" />

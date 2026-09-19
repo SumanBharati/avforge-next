@@ -51,6 +51,28 @@
   --canvas-zoom-text: #e2e8f0;
 }
 
+@keyframes bannerShineSweep {
+  0%, 58% { transform: translate(-180%, -25%) skewX(-18deg); opacity: 0; }
+  64% { opacity: 0.5; }
+  86% { transform: translate(520%, 25%) skewX(-18deg); opacity: 0; }
+  100% { transform: translate(520%, 25%) skewX(-18deg); opacity: 0; }
+}
+
+.banner-shine::after {
+  content: "";
+  position: absolute;
+  inset: -25% auto -25% -35%;
+  z-index: 20;
+  width: 28%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation: bannerShineSweep 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner-shine::after { animation: none; }
+}
+
 [data-theme="light"] {
   --forge-bg: 248 250 252;
   --forge-panel: 255 255 255;
@@ -197,4 +219,17 @@ g:hover > .dev-label { opacity: 1; }
   background: linear-gradient(90deg, #e8ecf2 25%, #f5f7fa 50%, #e8ecf2 75%);
   background-size: 200% 100%;
   animation: shimmer-sweep 1.5s ease-in-out infinite;
+}
+/* Theme-aware AVGenix brand artwork. The footer explicitly uses the dark
+   version because its surface is always dark, independent of app theme. */
+.brand-logo-dark {
+  display: none;
+}
+
+[data-theme="dark"] .brand-logo-light {
+  display: none;
+}
+
+[data-theme="dark"] .brand-logo-dark {
+  display: block;
 }

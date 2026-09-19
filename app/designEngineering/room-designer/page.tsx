@@ -3452,7 +3452,7 @@ export default function RoomDesignerPage() {
     };
 
     return (
-      <div style={{height:"calc(100vh - 72px)",overflowY:"auto",display:"flex",justifyContent:"center"}}>
+      <div style={{height:"calc(100vh - 124px)",overflowY:"auto",display:"flex",justifyContent:"center"}}>
         <div style={{maxWidth:700,width:"100%",padding:"24px",margin:"auto 0"}}>
           <div style={{textAlign:"center",marginBottom:32}}>
             <h2 style={{fontSize:22,fontWeight:700,color:"rgb(var(--text-heading))",marginBottom:6}}>Room Designer</h2>
@@ -3871,7 +3871,7 @@ export default function RoomDesignerPage() {
   };
 
   return (
-    <div className="animate-fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 72px - 85px)",overflow:"hidden"}}>
+    <div className="animate-fade-in" style={{display:"flex",flexDirection:"column",height:"calc(100vh - 124px - 85px)",overflow:"hidden"}}>
 
     <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
       {/* ── Left Sidebar ─────────────────────────────────── */}

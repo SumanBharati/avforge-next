@@ -9,7 +9,7 @@ import { useOrg } from "@/components/OrgProvider";
 import PMStoreProvider from "@/components/PMStoreProvider";
 import { Scheduler } from "@/components/Scheduler";
 import { getRecentTools } from "@/lib/recentTools";
-import HomePageSkeleton from "@/components/HomePageSkeleton";
+import DashboardPageSkeleton from "@/components/DashboardPageSkeleton";
 import AnimatedIcon from "@/components/AnimatedIcon";
 
 /* ── Pinned tools (calculators only) ───────────────────────── */
@@ -156,10 +156,10 @@ export default function DashboardPage() {
     }
   }
 
-  if (orgLoading || !loaded) return <HomePageSkeleton />;
+  if (orgLoading || !loaded) return <DashboardPageSkeleton />;
 
   return (
-    <div className="animate-fade-in flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="animate-fade-in flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 124px)" }}>
 
       {/* ── Info cards (full width) ────────────────── */}
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -224,13 +224,13 @@ export default function DashboardPage() {
               <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
             </svg>
 
-            {/* Folder illustration — animated via IconScout Lottie export once
-                public/animated-icons/folder.json exists; static SVG until then */}
-            <AnimatedIcon
-              src="/animated-icons/folder.json"
-              fallbackSrc="/3DFolder.svg"
+            {/* Animated Projects folder illustration */}
+            <img
+              src="/animated-icons/avgenix-purple-folder-subtle-shine-transparent.webp"
+              alt=""
               className="pointer-events-none absolute right-0 w-[112px]"
               style={{ bottom: "12px" }}
+              draggable={false}
             />
           </div>
 

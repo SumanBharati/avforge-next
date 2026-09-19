@@ -49,7 +49,7 @@ export default function ProjectManagementLayout({ children }: { children: React.
   return (
     <ProGate>
       <PMStoreProvider>
-        <div className="flex flex-col" style={{ height: "calc(100vh - 72px)" }}>
+        <div className="flex flex-col" style={{ height: "calc(100vh - 124px)" }}>
           <TabBar />
           <div className="flex-1 overflow-hidden">{children}</div>
         </div>
