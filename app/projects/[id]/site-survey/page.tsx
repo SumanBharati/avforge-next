@@ -551,7 +551,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
       </div>
 
       {/* ── Body: sidebar + form ──────────────────────── */}
-      <div className="flex" style={{ height: "calc(100vh - 72px - 85px)" }}>
+      <div className="flex" style={{ height: "calc(100vh - 124px - 85px)" }}>
         {/* Sidebar */}
         <nav className="no-scrollbar w-[300px] shrink-0 overflow-y-auto border-r border-border bg-forge-panel/30 px-4 pb-4 pt-5">
           {/* Site Info button */}

@@ -13,9 +13,9 @@ const INFO_ROW_WIDTHS  = [72, 85, 55, 78, 62];
 const ACTIVITY_WIDTHS  = [65, 80, 55, 70, 85, 60, 75, 50];
 const LEGEND_WIDTHS    = [90, 80, 95, 70, 85];
 
-export default function HomePageSkeleton() {
+export default function DashboardPageSkeleton() {
   return (
-    <div className="flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 72px)" }}>
+    <div className="flex flex-col px-4 pt-6 pb-16 sm:px-6 lg:px-8" style={{ minHeight: "calc(100vh - 124px)" }}>
 
       {/* ── Top 3 info cards ──────────────────────── */}
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">

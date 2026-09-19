@@ -1,4 +1,5 @@
 import Shimmer from "@/components/Shimmer";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function AuthPageSkeleton({ fields = 2 }: { fields?: number }) {
   return (
@@ -7,14 +8,7 @@ export default function AuthPageSkeleton({ fields = 2 }: { fields?: number }) {
     }}>
       {/* Header */}
       <header className="relative z-10 flex h-[72px] shrink-0 items-center px-8">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600">
-            <span className="text-lg font-extrabold text-white">▲</span>
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">
-            AV<span className="text-blue-500">Genix</span>
-          </span>
-        </div>
+        <BrandLogo />
       </header>
 
       {/* Content */}

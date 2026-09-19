@@ -12,13 +12,14 @@ const BENEFITS = [
   "Export professional project documents",
 ];
 
-export default function UpgradeModal({ onClose }: { onClose: () => void }) {
+export default function UpgradeModal({ onClose, required = false }: { onClose?: () => void; required?: boolean }) {
   const { activeOrg } = useOrg();
+  const canManageBilling = activeOrg?.role === "owner" || activeOrg?.role === "admin";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleUpgrade() {
-    if (!activeOrg) return;
+    if (!activeOrg || !canManageBilling) return;
     setLoading(true);
     setError(null);
     try {
@@ -38,13 +39,13 @@ export default function UpgradeModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-md" onClick={() => { if (!required) onClose?.(); }} role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
       <div className="w-full max-w-md rounded-2xl border border-violet-500/30 bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-7 pb-7 pt-7">
           <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">
             AVGenix Pro
           </span>
-          <h2 className="mt-3 text-xl font-bold text-heading">Unlock project tools</h2>
+          <h2 id="upgrade-title" className="mt-3 text-xl font-bold text-heading">Subscribe to continue using Projects</h2>
           <p className="mt-2 text-[13px] leading-relaxed text-body">
             Calculators, references, and AV news are free. Upgrade to AVGenix Pro to create and manage AV projects.
           </p>
@@ -70,14 +71,13 @@ export default function UpgradeModal({ onClose }: { onClose: () => void }) {
 
           <button
             onClick={handleUpgrade}
-            disabled={loading}
+            disabled={loading || !canManageBilling}
             className="mt-5 w-full rounded-lg bg-violet-600 px-4 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
           >
             {loading ? "Redirecting…" : "Upgrade to Pro — $20/month"}
           </button>
-          <button onClick={onClose} className="mt-2 w-full rounded-lg px-4 py-2.5 text-[13px] font-medium text-muted hover:text-body">
-            Continue with free tools
-          </button>
+          {!canManageBilling && <p className="mt-2 text-center text-xs text-muted">Ask an organization owner or administrator to activate Pro.</p>}
+          {!required && <button onClick={onClose} className="mt-2 w-full rounded-lg px-4 py-2.5 text-[13px] font-medium text-muted hover:text-body">Continue with free tools</button>}
           <p className="mt-3 text-center text-[11px] text-faint">Cancel anytime</p>
         </div>
       </div>

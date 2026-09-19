@@ -6,6 +6,7 @@ import { useState, useEffect, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import AuthPageSkeleton from "@/components/skeletons/AuthPageSkeleton";
+import BrandLogo from "@/components/BrandLogo";
 
 type FormView = "login" | "forgot" | "forgot-sent" | "reset";
 
@@ -21,6 +22,8 @@ function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite");
+  const requestedNext = searchParams.get("next");
+  const nextPath = requestedNext?.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/dashboard";
   const { theme } = useTheme();
 
   const [view, setView] = useState<FormView>("login");
@@ -103,7 +106,7 @@ function LoginPageInner() {
       }
     }
 
-    router.push("/home");
+    router.push(nextPath);
   }
 
   async function handleForgotSubmit(e: React.FormEvent) {
@@ -137,7 +140,7 @@ function LoginPageInner() {
       return;
     }
     setResetMsg({ type: "success", text: "Password updated! Signing you in…" });
-    setTimeout(() => router.push("/home"), 1500);
+    setTimeout(() => router.push("/dashboard"), 1500);
   }
 
   if (!mounted) return <AuthPageSkeleton fields={2} />;
@@ -171,14 +174,7 @@ function LoginPageInner() {
 
       {/* Auth header */}
       <header className="relative z-10 flex h-[72px] shrink-0 items-center justify-between px-8">
-        <Link href="/login" className="flex items-center gap-3 transition-opacity hover:opacity-80">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600">
-            <span className="text-lg font-extrabold text-white">▲</span>
-          </div>
-          <span className="text-xl font-bold tracking-tight text-heading">
-            AV<span className="text-blue-500">Genix</span>
-          </span>
-        </Link>
+        <Link href="/" className="flex items-center transition-opacity hover:opacity-80" aria-label="AVGenix home"><BrandLogo /></Link>
       </header>
 
       {/* Content */}

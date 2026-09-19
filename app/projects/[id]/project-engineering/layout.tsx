@@ -113,7 +113,7 @@ export default function ProjectEngineeringLayout({
       </div>
 
       {/* Body: sidebar + content */}
-      <div className="flex" style={{ minHeight: "calc(100vh - 72px - 85px)" }}>
+      <div className="flex" style={{ minHeight: "calc(100vh - 124px - 85px)" }}>
       {/* Left sidebar */}
       <aside className="flex w-[260px] shrink-0 flex-col overflow-y-auto border-r border-border bg-forge-panel/30 px-3 py-5">
         <div className="mb-4 px-3">

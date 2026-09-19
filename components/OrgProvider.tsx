@@ -1,12 +1,12 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
 import UpgradeModal from "./UpgradeModal";
 
-const AUTH_ROUTES = ["/login", "/register", "/org/invite", "/welcome"];
+export type ProAccessStatus = "loading" | "anonymous" | "no_org" | "org_error" | "trial" | "active" | "override" | "expired";
 
 export interface Org {
   id: string;
@@ -16,6 +16,8 @@ export interface Org {
   role: "owner" | "admin" | "member";
   member_roles: string[];
   subscription_status: string | null;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
 }
 
 interface OrgContextValue {
@@ -25,6 +27,10 @@ interface OrgContextValue {
   refreshOrgs: () => Promise<void>;
   loading: boolean;
   isPro: boolean;
+  user: User | null;
+  accessStatus: ProAccessStatus;
+  trialEndsAt: string | null;
+  orgLoadError: string | null;
   upgradeModalOpen: boolean;
   openUpgradeModal: () => void;
   closeUpgradeModal: () => void;
@@ -37,6 +43,10 @@ const OrgContext = createContext<OrgContextValue>({
   refreshOrgs: async () => {},
   loading: true,
   isPro: false,
+  user: null,
+  accessStatus: "loading",
+  trialEndsAt: null,
+  orgLoadError: null,
   upgradeModalOpen: false,
   openUpgradeModal: () => {},
   closeUpgradeModal: () => {},
@@ -47,66 +57,117 @@ export function useOrg() {
 }
 
 export default function OrgProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
-  pathnameRef.current = pathname;
-  const userLoadedRef = useRef(false);
+  const [user, setUser] = useState<User | null>(null);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessNow, setAccessNow] = useState(() => Date.now());
+  const [hasAccessOverride, setHasAccessOverride] = useState(false);
+  const [orgLoadError, setOrgLoadError] = useState<string | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const openUpgradeModal = useCallback(() => setUpgradeModalOpen(true), []);
   const closeUpgradeModal = useCallback(() => setUpgradeModalOpen(false), []);
 
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
+    setOrgLoadError(null);
     const { data: { user } } = await supabase.auth.getUser();
+    setUser(user);
     if (!user) {
+      setOrgs([]);
+      setActiveOrgId(null);
+      setHasAccessOverride(false);
       setLoading(false);
       return;
     }
-    userLoadedRef.current = true;
 
-    // Fetch memberships
-    const { data: memberships } = await supabase
+    // The database evaluates expiration using its own clock. During a staged
+    // deployment this RPC may not exist yet, in which case access remains false.
+    const { data: overrideActive } = await supabase.rpc("has_active_pro_override");
+    setHasAccessOverride(overrideActive === true);
+
+    const { data: rpcOrganizations, error: rpcOrganizationsError } = await supabase.rpc("get_my_organizations");
+    let orgList: Org[] = [];
+
+    if (!rpcOrganizationsError && Array.isArray(rpcOrganizations)) {
+      orgList = rpcOrganizations.map((org: any) => ({
+        id: org.id,
+        name: org.name || "Unknown",
+        slug: org.slug || "",
+        logo_url: org.logo_url || null,
+        role: org.role,
+        member_roles: Array.isArray(org.member_roles) && org.member_roles.length > 0 ? org.member_roles : ROLE_OPTIONS,
+        subscription_status: org.subscription_status ?? null,
+        trial_started_at: org.trial_started_at ?? null,
+        trial_ends_at: org.trial_ends_at ?? null,
+      }));
+    } else {
+      // Compatibility path for deployments where migration 024 is not live yet.
+      const { data: memberships, error: membershipsError } = await supabase
       .from("organization_members")
       .select("org_id, role")
       .eq("user_id", user.id);
 
-    if (!memberships || memberships.length === 0) {
-      setOrgs([]);
-      setActiveOrgId(null);
-      setLoading(false);
-      return;
-    }
+      if (membershipsError) {
+        console.error("Failed to load organization memberships:", membershipsError.message);
+        setOrgLoadError(membershipsError.message);
+        setOrgs([]);
+        setActiveOrgId(null);
+        setLoading(false);
+        return;
+      }
 
-    // Fetch org details separately to avoid RLS circular dependency
-    const orgIds = memberships.map((m) => m.org_id);
-    const { data: orgsData } = await supabase
+      if (!memberships || memberships.length === 0) {
+        setOrgs([]);
+        setActiveOrgId(null);
+        setLoading(false);
+        return;
+      }
+
+      const orgIds = memberships.map((m) => m.org_id);
+      let { data: orgsData, error: orgsError } = await supabase
       .from("organizations")
-      .select("id, name, slug, logo_url, member_roles, subscription_status")
+      .select("id, name, slug, logo_url, member_roles, subscription_status, trial_started_at, trial_ends_at")
       .in("id", orgIds);
 
-    if (!orgsData || orgsData.length === 0) {
-      setOrgs([]);
-      setActiveOrgId(null);
-      setLoading(false);
-      return;
+    // Keep organization pages usable during a staged deployment where the
+    // frontend reaches production before migration 022 has been applied.
+    if (orgsError && /trial_(started|ends)_at/i.test(orgsError.message)) {
+      const legacyResult = await supabase
+        .from("organizations")
+        .select("id, name, slug, logo_url, member_roles, subscription_status")
+        .in("id", orgIds);
+      orgsData = legacyResult.data as typeof orgsData;
+      orgsError = legacyResult.error;
     }
 
-    const orgList: Org[] = memberships.map((m: any) => {
-      const org = orgsData.find((o) => o.id === m.org_id);
-      return {
-        id: m.org_id,
-        name: org?.name || "Unknown",
-        slug: org?.slug || "",
-        logo_url: org?.logo_url || null,
-        role: m.role,
-        member_roles: Array.isArray(org?.member_roles) && org.member_roles.length > 0 ? org.member_roles : ROLE_OPTIONS,
-        subscription_status: org?.subscription_status ?? null,
-      };
-    });
+      if (orgsError) {
+        console.error("Failed to load organizations:", orgsError.message);
+        setOrgLoadError(orgsError.message);
+      }
+
+      if (!orgsData || orgsData.length === 0) {
+        setOrgs([]);
+        setActiveOrgId(null);
+        setLoading(false);
+        return;
+      }
+
+      orgList = memberships.map((m: any) => {
+        const org = orgsData.find((o) => o.id === m.org_id);
+        return {
+          id: m.org_id,
+          name: org?.name || "Unknown",
+          slug: org?.slug || "",
+          logo_url: org?.logo_url || null,
+          role: m.role,
+          member_roles: Array.isArray(org?.member_roles) && org.member_roles.length > 0 ? org.member_roles : ROLE_OPTIONS,
+          subscription_status: org?.subscription_status ?? null,
+          trial_started_at: org?.trial_started_at ?? null,
+          trial_ends_at: org?.trial_ends_at ?? null,
+        };
+      });
+    }
 
     setOrgs(orgList);
 
@@ -136,23 +197,12 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     fetchOrgs();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
-        setOrgs([]);
-        setActiveOrgId(null);
-        setLoading(false);
-        if (userLoadedRef.current && !AUTH_ROUTES.includes(pathnameRef.current)) {
-          userLoadedRef.current = false;
-          router.replace("/login");
-        }
-      } else {
-        fetchOrgs();
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchOrgs();
     });
 
     return () => {
       subscription.unsubscribe();
-      userLoadedRef.current = false;
     };
   }, [fetchOrgs]);
 
@@ -171,10 +221,36 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   }
 
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null;
-  const isPro = activeOrg?.subscription_status === "active";
+  const paidAccess = activeOrg?.subscription_status === "active" || activeOrg?.subscription_status === "trialing";
+  const trialAccess = Boolean(activeOrg?.trial_ends_at && new Date(activeOrg.trial_ends_at).getTime() > accessNow);
+  const accessStatus: ProAccessStatus = loading
+    ? "loading"
+    : !user
+    ? "anonymous"
+    : !activeOrg
+    ? orgLoadError ? "org_error" : "no_org"
+    : paidAccess
+    ? "active"
+    : hasAccessOverride
+    ? "override"
+    : trialAccess
+    ? "trial"
+    : "expired";
+  const isPro = accessStatus === "active" || accessStatus === "trial" || accessStatus === "override";
+
+  useEffect(() => {
+    if (!activeOrg?.trial_ends_at || paidAccess) return;
+    const remaining = new Date(activeOrg.trial_ends_at).getTime() - Date.now();
+    if (remaining <= 0) {
+      setAccessNow(Date.now());
+      return;
+    }
+    const timer = window.setTimeout(() => setAccessNow(Date.now()), Math.min(remaining + 250, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [activeOrg?.trial_ends_at, paidAccess]);
 
   return (
-    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading, isPro, upgradeModalOpen, openUpgradeModal, closeUpgradeModal }}>
+    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading, isPro, user, accessStatus, trialEndsAt: activeOrg?.trial_ends_at ?? null, orgLoadError, upgradeModalOpen, openUpgradeModal, closeUpgradeModal }}>
       {children}
       {upgradeModalOpen && <UpgradeModal onClose={closeUpgradeModal} />}
     </OrgContext.Provider>

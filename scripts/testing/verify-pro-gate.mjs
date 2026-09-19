@@ -2,7 +2,7 @@
 // still works after the 021_org_subscription.sql migration, PRO badges
 // render in the nav for a free org, clicking a Pro nav item shows the
 // upgrade modal without navigating, and hitting a Pro URL directly
-// redirects to /home with the modal open.
+// redirects to /dashboard with the modal open.
 //
 // Prereqs: node --env-file=.env.local scripts/testing/create-test-user.mjs
 // Usage:   node --env-file=.env.local scripts/testing/verify-pro-gate.mjs

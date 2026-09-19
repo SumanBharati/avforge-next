@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import AuthPageSkeleton from "@/components/skeletons/AuthPageSkeleton";
+import BrandLogo from "@/components/BrandLogo";
 
 function SunIcon() {
   return (
@@ -60,10 +61,15 @@ export default function RegisterPage() {
 
     setLoading(true);
 
+    const requestedNext = new URLSearchParams(window.location.search).get("next");
+    const nextPath = requestedNext?.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/welcome";
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: name } },
+      options: {
+        data: { full_name: name },
+        emailRedirectTo: `${window.location.origin}/login?next=${encodeURIComponent(nextPath)}`,
+      },
     });
 
     if (error) {
@@ -87,7 +93,7 @@ export default function RegisterPage() {
       return;
     }
 
-    router.push("/welcome");
+    router.push(nextPath);
   }
 
   if (!mounted) return <AuthPageSkeleton fields={3} />;
@@ -121,14 +127,7 @@ export default function RegisterPage() {
 
       {/* Header */}
       <header className="relative z-10 flex h-[72px] shrink-0 items-center justify-between px-8">
-        <Link href="/login" className="flex items-center gap-3 transition-opacity hover:opacity-80">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600">
-            <span className="text-lg font-extrabold text-white">▲</span>
-          </div>
-          <span className="text-xl font-bold tracking-tight text-heading">
-            AV<span className="text-blue-500">Genix</span>
-          </span>
-        </Link>
+        <Link href="/" className="flex items-center transition-opacity hover:opacity-80" aria-label="AVGenix home"><BrandLogo /></Link>
         {/* <div className="flex items-center gap-3">
           <button
             onClick={toggle}

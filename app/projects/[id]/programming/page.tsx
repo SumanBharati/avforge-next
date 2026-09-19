@@ -40,7 +40,7 @@ export default function ProgrammingPage({ params }: { params: { id: string } }) 
         </h1>
       </div>
 
-      <div className="flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ minHeight: "calc(100vh - 72px - 85px)" }}>
+      <div className="flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ minHeight: "calc(100vh - 124px - 85px)" }}>
         <div className="flex h-14 w-14 items-center justify-center rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-400">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="3" width="20" height="14" rx="2" />

@@ -11,7 +11,7 @@ export default function WelcomePage() {
   // If user already has an org, skip this page
   useEffect(() => {
     if (!loading && activeOrg) {
-      router.replace("/home");
+      router.replace("/dashboard");
     }
   }, [loading, activeOrg, router]);
 
