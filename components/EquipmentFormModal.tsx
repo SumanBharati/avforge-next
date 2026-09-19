@@ -174,7 +174,7 @@ export default function EquipmentFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="flex w-full max-w-2xl max-h-[85vh] flex-col rounded-2xl border border-border bg-forge-bg shadow-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <h3 className="text-[15px] font-bold text-heading">{title}</h3>

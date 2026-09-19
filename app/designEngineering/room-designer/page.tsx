@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import { searchProducts } from "@/lib/av-products";
 import { searchOrgLibrary } from "@/lib/equipment-library";
-import { useBOM } from "@/lib/bom-context";
+import { useBOM, roomDeviceToBOM, type BOMDeviceEntry } from "@/lib/bom-context";
 import { useOrg } from "@/components/OrgProvider";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
@@ -15,6 +15,13 @@ import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
 import { dxfToBackgroundImage } from "@/lib/dxf-import";
 import { pdfToBackgroundImage } from "@/lib/pdf-import";
 import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
+import { ensureRoomDeviceItemIds, newItemId, productKeyOf } from "@/lib/design-identity";
+import { loadToolData, saveToolData } from "@/lib/tool-data";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import {
+  fetchScopeUnits, loadScopeManifest, saveScopeManifest,
+  wipeRoomDesignerEquipment, wipeSignalFlowEquipment, SCOPE_REIMPORT_WARNING,
+} from "@/lib/scope-manifest";
 
 /* Theme-aware canvas colors */
 const canvasColors = {
@@ -80,6 +87,10 @@ interface RoomType {
 interface DeviceCatalogItem {
   id: string; name: string; icon: string; w: number; h: number;
   wall: string; type: string; color: string;
+  // Cross-tool unit identity — see lib/design-identity.ts. Optional here
+  // because the built-in sidebar catalog entries are templates, not units;
+  // addDeviceToRoom mints the id at the moment a template becomes a placement.
+  itemId?: string; productKey?: string; productId?: string | null;
   // Real equipment from the database (search modal) carries its own FOV/
   // coverage spec through here; built-in catalog items leave these unset and
   // addDeviceToRoom falls back to its hardcoded per-type/id defaults.
@@ -252,6 +263,13 @@ const deviceCatalog = [
     { id:"display-110",    name:'110" Display',       icon:"monitor", w:7.97, h:4.49, wall:"front",   type:"display",   color:"#8b5cf6" },
     { id:"projector-screen",name:"Projection Screen", icon:"presentation", w:7.87, h:4.92, wall:"front",   type:"display",   color:"#8b5cf6" },
     { id:"led-wall",       name:"LED Video Wall",     icon:"tv", w:9.84, h:5.58, wall:"front",   type:"display",   color:"#06b6d4" },
+    // A projector UNIT (not the screen it projects onto) — physically a
+    // compact ~20"x20" ceiling-mounted box, so it deliberately does NOT use
+    // type:"display" (that renders every device as a flat wall-mounted
+    // bezel/screen bar, wrong for a ceiling box). type:"projector" has no
+    // dedicated render branch, so it falls through to the generic small-box
+    // rendering already used for any other unrecognized ceiling device.
+    { id:"projector",      name:"Projector",          icon:"projector", w:1.67, h:1.67, wall:"ceiling", type:"projector", color:"#8b5cf6" },
   ]},
   { cat:"Cameras", items:[
     { id:"ptz-cam",      name:"PTZ Camera",         icon:"confbar", w:0.49, h:0.39, wall:"front",   type:"camera",    color:"#22c55e" },
@@ -360,6 +378,10 @@ export default function RoomDesignerPage() {
   const [modalLoading,  setModalLoading]  = useState(false);
   const [modalSelected, setModalSelected] = useState<any>(null);
   const [modalGlobalSearch, setModalGlobalSearch] = useState(false);
+  // When set, the Add Equipment modal is in "Replace" mode — confirming
+  // swaps the selected library item's specs onto this existing device
+  // (keeping its position/uid) instead of adding a new one to the room.
+  const [replacingDeviceUid, setReplacingDeviceUid] = useState<number | null>(null);
   const [modalDeviceName, setModalDeviceName] = useState("");
   const [modalMake,     setModalMake]     = useState("");
   const [modalModel,    setModalModel]    = useState("");
@@ -468,6 +490,9 @@ export default function RoomDesignerPage() {
   };
   const [selectedUid,   setSelectedUid]   = useState<number|null>(null);
   const [clipboard,     setClipboard]     = useState<PlacedDevice[]>([]);
+  const [generatingFromScope, setGeneratingFromScope] = useState(false);
+  const [scopeReimportConfirm, setScopeReimportConfirm] = useState(false);
+  const [generateNotice, setGenerateNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
   const [showHfov,      setShowHfov]      = useState(false);
   const [viewMode,      setViewMode]      = useState("plan");
   const [zoom,          setZoom]          = useState(1.5);
@@ -780,13 +805,13 @@ export default function RoomDesignerPage() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveDesign(placedDevices, {
-        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
         floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Auto-save on changes (after step 2 is active, and only once this room's
   // own saved design has actually finished loading — otherwise the reset
@@ -801,8 +826,8 @@ export default function RoomDesignerPage() {
   const { activeOrg } = useOrg();
   React.useEffect(() => {
     updateSlice('room-designer', placedDevices
-      .filter(d => d.type !== 'furniture')
-      .map(d => ({ name: d.name, cat: d.type })));
+      .map(roomDeviceToBOM)
+      .filter(Boolean) as BOMDeviceEntry[]);
   }, [placedDevices, updateSlice]);
 
   // Auto-expand BOM when a device is added (not on initial load)
@@ -869,6 +894,54 @@ export default function RoomDesignerPage() {
   const closeModal = () => {
     setShowAddModal(false); setModalSearch(""); setModalSelected(null);
     setModalDeviceName(""); setModalMake(""); setModalModel(""); setModalGlobalSearch(false);
+    setReplacingDeviceUid(null);
+  };
+
+  // Swap a different piece of equipment onto an EXISTING device — same
+  // field-resolution as addFromModal (rd_type-enriched product vs a
+  // category-name-inferred fallback), but applied as an update that keeps
+  // the device's uid/x/y/z/mountWall/rotation instead of creating a new one.
+  const replaceDeviceFromModal = () => {
+    if (replacingDeviceUid == null) return;
+    const sel = modalSelected;
+    const name = sel ? sel.type : modalDeviceName.trim();
+    let devType: string, wall: string, icon: string, color: string, w: number, h: number;
+
+    if (sel?.rd_type) {
+      devType = sel.rd_type;
+      wall    = sel.rd_wall    || "floor";
+      icon    = sel.rd_icon    || "📦";
+      w       = sel.rd_width_ft  || 0.5;
+      h       = sel.rd_height_ft || 0.5;
+      color   = sel.color      || "#64748b";
+    } else {
+      const cat      = (sel?.cat || "").toLowerCase();
+      const typeName = name.toLowerCase();
+      devType = "custom"; wall = "floor"; icon = "📦"; color = sel?.color || "#64748b"; w = 0.5; h = 0.5;
+      if (cat.includes("display") || typeName.includes("display") || typeName.includes("monitor") || typeName.includes(" tv") || typeName.includes("screen")) {
+        devType = "display"; wall = "front"; icon = "monitor"; color = "#8b5cf6"; w = 4.0; h = 2.26;
+      } else if (cat.includes("projector") || typeName.includes("projector")) {
+        devType = "display"; wall = "ceiling"; icon = "📽️"; color = "#8b5cf6"; w = 0.8; h = 0.5;
+      } else if (cat.includes("camera") || typeName.includes("camera") || typeName.includes(" cam")) {
+        devType = "camera"; wall = "front"; icon = "confbar"; color = "#22c55e"; w = 0.5; h = 0.3;
+      } else if (cat.includes("microphone") || cat.includes(" mic") || typeName.includes("mic") || typeName.includes("microphone")) {
+        devType = "mic"; wall = "ceiling"; icon = "🎙"; color = "#f59e0b"; w = 0.25; h = 0.25;
+      } else if (cat.includes("speaker") || typeName.includes("speaker")) {
+        devType = "speaker"; wall = "ceiling"; icon = "🔊"; color = "#ef4444"; w = 0.3; h = 0.3;
+      }
+    }
+    pushUndo();
+    setPlacedDevices(prev => prev.map(d => d.uid === replacingDeviceUid ? {
+      ...d,
+      name, icon, w, h, wall, type: devType, color,
+      hfov: sel?.hfov_deg ?? undefined,
+      covShape: sel?.coverage_pattern === "circular" ? "round" : sel?.coverage_pattern === "rectangular" ? "square" : undefined,
+      covDiameter: sel?.coverage_diameter_ft ?? undefined,
+      dispersion: sel?.coverage_angle_deg ?? undefined,
+      covW: sel?.coverage_width_ft ?? undefined,
+      covL: sel?.coverage_depth_ft ?? undefined,
+    } : d));
+    closeModal();
   };
 
   const exportAsPDF = () => {
@@ -1101,6 +1174,29 @@ export default function RoomDesignerPage() {
       coverageAngleDeg: sel?.coverage_angle_deg ?? null,
       coverageWidthFt: sel?.coverage_width_ft ?? null,
       coverageDepthFt: sel?.coverage_depth_ft ?? null,
+      // Carry the product's own identity and spec through. This used to stop
+      // at the geometry fields, so a unit added here reached the BOM with no
+      // manufacturer, price or part number, and — because rack_units never
+      // came across — could never be recognised as rack equipment at all.
+      ...(sel ? {
+        productId: sel.id ?? null,
+        productKey: sel.id ? `p:${sel.id}` : undefined,
+        mfr: sel.manufacturer ?? undefined,
+        model: sel.model_name ?? undefined,
+        price: sel.price ?? undefined,
+        part_number: sel.part_number ?? null,
+        cat: sel.category ?? sel.type ?? undefined,
+        msrp: sel.msrp ?? null, cost: sel.cost ?? null,
+        margin: sel.margin ?? null, markup: sel.markup ?? null,
+        ports: sel.ports ?? undefined,
+        amp_draw: sel.amp_draw ?? null, voltage: sel.voltage ?? null,
+        power_watts: sel.power_watts ?? null, btu_hr: sel.btu_hr ?? null,
+        rackMounted: sel.rack_mounted ?? undefined,
+        rack_units: sel.rack_units ?? null,
+        rack_ear_included: sel.rack_ear_included ?? undefined,
+        width_in: sel.width_in ?? null, height_in: sel.height_in ?? null,
+        depth_in: sel.depth_in ?? null, weight_lb: sel.weight_lb ?? null,
+      } : {}),
     });
     closeModal();
   };
@@ -1109,7 +1205,7 @@ export default function RoomDesignerPage() {
   React.useEffect(() => {
     const handler = () => {
       saveDesign(placedDevices, {
-        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, placedDoors,
+        roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, placedDoors,
         annotations: annotate.annotations,
         floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
@@ -1117,7 +1213,7 @@ export default function RoomDesignerPage() {
     };
     window.addEventListener("avgenix-save", handler);
     return () => window.removeEventListener("avgenix-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
   // the room or project actually changes (not just on mount), since switching
@@ -1190,7 +1286,7 @@ export default function RoomDesignerPage() {
         setRdLoaded(true);
         if (!designRow?.data) return;
         const saved = designRow.data as { devices?: PlacedDevice[]; config?: Record<string, unknown> };
-        if (saved.devices?.length) setPlacedDevices(saved.devices);
+        if (saved.devices?.length) setPlacedDevices(ensureRoomDeviceItemIds(saved.devices).items);
         if (saved.config) {
           if (saved.config.roomType) setRoomType(saved.config.roomType as string);
           if (saved.config.roomW) setRoomW(saved.config.roomW as number);
@@ -1199,6 +1295,7 @@ export default function RoomDesignerPage() {
           if (saved.config.tableShape) setTableShape(saved.config.tableShape as string);
           if (saved.config.tableSeats) setTableSeats(saved.config.tableSeats as number);
           if (saved.config.tableWidth) setTableWidth(saved.config.tableWidth as number);
+          if (saved.config.tableLengthOverride !== undefined) setTableLengthOverride(saved.config.tableLengthOverride as number | null);
           if (saved.config.tableWallDist) setTableWallDist(saved.config.tableWallDist as number);
           if (saved.config.showTable !== undefined) setShowTable(saved.config.showTable as boolean);
           if (saved.config.selectedWall) setSelectedWall(saved.config.selectedWall as string);
@@ -1570,6 +1667,15 @@ export default function RoomDesignerPage() {
   const freeDragPos = useRef<{x:number;y:number}|null>(null);
 
   const handleDeviceMouseDown = (e: React.MouseEvent, uid: number) => {
+    // Right/middle-click must fall through to the browser's contextmenu
+    // event untouched — this handler used to run unconditionally on ANY
+    // mousedown, so a right-click also kicked off drag-start bookkeeping
+    // (setDragUid/setSelectedUid, etc.) a split second before the
+    // contextmenu event fired. That state change was enough to make the
+    // subsequent contextmenu event resolve to a different element than the
+    // device (no preventDefault there), so the browser's native menu won
+    // instead of this app's Edit/Replace/Delete menu.
+    if (e.button !== 0) return;
     if (isDrawingWall) return; // Don't drag devices while drawing walls
     if (annotate.activeTool) { annotate.handleDown(e); return; } // Annotation tools draw over devices
     if (dragNewChair?.active || dragNewTable?.active || dragNewDoor?.active) return; // Don't drag while placement tool is active
@@ -1737,6 +1843,7 @@ export default function RoomDesignerPage() {
   const calloutDragOrigin = useRef<{ dx: number; dy: number } | null>(null);
 
   const handleCalloutMouseDown = (e: React.MouseEvent, dev: PlacedDevice) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     pushUndo();
     setSelectedUid(dev.uid); clearSelection();
@@ -1804,7 +1911,8 @@ export default function RoomDesignerPage() {
             draggable area to the label's full apparent extent. */}
         <rect x={side > 0 ? labelX : labelX - Math.max(30, label.length * 4.6)} y={labelY - 5}
           width={Math.max(30, label.length * 4.6)} height={9} fill="transparent" pointerEvents="auto"
-          style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)} />
+          style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)}
+          onContextMenu={e => handleDeviceContextMenu(e, dev.uid)} />
         {/* Deliberately NOT className="dev-label" — that class (globals.css)
             is hover-only opacity:0 by default, built for the old glued-on
             caption in a busy room. A call-out is meant to read like a
@@ -1816,10 +1924,12 @@ export default function RoomDesignerPage() {
           pointerEvents="auto"
           style={{ cursor: "move" }}
           onMouseDown={e => handleCalloutMouseDown(e, dev)}
+          onContextMenu={e => handleDeviceContextMenu(e, dev.uid)}
         >{label}</text>
         {isSelected && (
           <circle cx={labelX} cy={labelY} r={2.5} fill="#8b5cf6" stroke="#fff" strokeWidth={0.5} pointerEvents="auto"
-            style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)} />
+            style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)}
+            onContextMenu={e => handleDeviceContextMenu(e, dev.uid)} />
         )}
       </g>
     );
@@ -1856,6 +1966,7 @@ export default function RoomDesignerPage() {
   };
 
   const handleWallEdgeDown = (edge: "north"|"south"|"east"|"west", e: React.MouseEvent) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     pushUndo();
     const svg = svgRef.current; if (!svg) return;
@@ -1895,7 +2006,7 @@ export default function RoomDesignerPage() {
     setPlacedDevices([]); setStep(2);
   };
 
-  const addDeviceToRoom = (dev: DeviceCatalogItem) => {
+  const addDeviceToRoom = (dev: DeviceCatalogItem & Partial<PlacedDevice>) => {
     const id = Date.now();
     let x=0.5, y=0.5, z=0, mountWall="north";
     let rotation: number|undefined, wallUid: number|undefined;
@@ -1931,10 +2042,323 @@ export default function RoomDesignerPage() {
     const covW = dev.coverageWidthFt ?? ((dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined);
     const covL = dev.coverageDepthFt ?? ((dev.type==="mic"&&dev.wall==="ceiling") ? 6 : undefined);
     const dispersion = dev.coverageAngleDeg ?? ((dev.type==="speaker"&&dev.wall==="ceiling") ? 90 : undefined);
-    setPlacedDevices(prev=>[...prev,{...dev,uid:id,x,y,z,mountWall,rotation,wallUid,hfov,covShape,covDiameter,covW,covL,dispersion}]);
+    setPlacedDevices(prev=>[...prev,{...dev,itemId:dev.itemId||newItemId(),uid:id,x,y,z,mountWall,rotation,wallUid,hfov,covShape,covDiameter,covW,covL,dispersion}]);
   };
 
   const removeDevice = (uid: number) => { pushUndo(); setPlacedDevices(prev=>prev.filter(d=>d.uid!==uid)); };
+
+  // AI: Generate devices from this room's Site Survey Scope of Work — the
+  // same feature as Signal Flow Builder's "Generate from Scope", rebuilt for
+  // real floor-plan geometry (walls/ceiling/table) instead of an abstract
+  // canvas. Only categories with a real deviceCatalog icon get placed; a
+  // scope item the AI identifies with no matching icon (a DSP, amplifier,
+  // etc.) is skipped and called out in the summary rather than force-placed.
+  const resolveScopeDeviceTemplate = (category: string, label: string, location: string): DeviceCatalogItem | null => {
+    const l = label.toLowerCase();
+    const loc = location.toLowerCase();
+    const isCeiling = loc.includes("ceiling");
+    const isTable = loc.includes("table");
+    const find = (id: string) => deviceCatalog.flatMap(g => g.items).find((i: any) => i.id === id) || null;
+    // Keyword matches checked first, independent of the AI's own category —
+    // the model doesn't consistently classify a "video bar" as "camera" or
+    // a "projection screen" as "display" (often lands in "other" instead),
+    // but these still have real, unambiguous icons and shouldn't be skipped
+    // just because the category guess was off.
+    if (l.includes("soundbar") || l.includes("video bar") || l.includes("conference bar")) return find("soundbar-cam");
+    if (l.includes("led") && (l.includes("wall") || l.includes("video wall"))) return find("led-wall");
+    if (l.includes("projection screen") || l.includes("projector screen") || (l.includes("screen") && !l.includes("touch"))) return find("projector-screen");
+    // A bare "projector" (no "screen" in the label — that case is already
+    // handled above) is the physical ceiling-mounted unit, not the screen.
+    if (l.includes("projector")) return find("projector");
+    switch (category) {
+      case "display":
+        return find("display-55");
+      case "camera":
+        if (isCeiling) return find("ceiling-cam");
+        return find("ptz-cam");
+      case "speaker":
+        return isCeiling ? find("ceiling-spk") : find("soundbar");
+      case "microphone":
+        return isTable ? find("table-mic") : find("ceiling-mic");
+      case "touch_panel":
+        return l.includes("table") ? find("table-touch") : find("touch-panel");
+      default:
+        return null; // "other" (DSP, amplifier, network switch, ...) — no matching icon, skipped
+    }
+  };
+
+  const resolveScopeMountWall = (location: string): "north"|"south"|"west"|"east"|"ceiling"|"table" => {
+    const loc = location.toLowerCase();
+    if (loc.includes("ceiling")) return "ceiling";
+    if (loc.includes("table")) return "table";
+    if (loc.includes("front")) return "north";
+    if (loc.includes("rear") || loc.includes("back")) return "south";
+    if (loc.includes("left")) return "west";
+    if (loc.includes("right")) return "east";
+    if (loc.includes("side")) return "east";
+    return "north";
+  };
+
+  // Lays out a group of devices sharing the same wall/ceiling/table mount so
+  // they don't all stack on the exact same point — addDeviceToRoom (above)
+  // has no such spacing since it only ever places one device at a time.
+  const spreadDevicesOnMount = (devices: PlacedDevice[], mount: "north"|"south"|"west"|"east"|"ceiling"|"table", rw: number = roomW, rl: number = roomL, rh: number = roomH): PlacedDevice[] => {
+    const GAP = 0.5;
+    const totalW = devices.reduce((s, d) => s + d.w, 0) + GAP * Math.max(0, devices.length - 1);
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    if (mount === "north" || mount === "south") {
+      let cursor = rw / 2 - totalW / 2;
+      const y = mount === "north" ? 0.02 : rl - 0.02;
+      return devices.map(d => {
+        const x = clamp(cursor + d.w / 2, d.w / 2, rw - d.w / 2);
+        cursor += d.w + GAP;
+        return { ...d, x, y, z: rh * 0.55, mountWall: mount };
+      });
+    }
+    if (mount === "west" || mount === "east") {
+      let cursor = rl / 2 - totalW / 2;
+      const x = mount === "west" ? 0.02 : rw - 0.02;
+      return devices.map(d => {
+        const y = clamp(cursor + d.w / 2, d.w / 2, rl - d.w / 2);
+        cursor += d.w + GAP;
+        return { ...d, x, y, z: rh * 0.55, mountWall: mount, rotation: 90 };
+      });
+    }
+    if (mount === "ceiling") {
+      let cursor = rw / 2 - totalW / 2;
+      return devices.map(d => {
+        const x = clamp(cursor + d.w / 2, d.w / 2, rw - d.w / 2);
+        cursor += d.w + GAP;
+        return { ...d, x, y: rl / 2, z: rh - 0.05, mountWall: "ceiling" };
+      });
+    }
+    // table
+    let cursor = rw / 2 - totalW / 2;
+    return devices.map(d => {
+      const x = clamp(cursor + d.w / 2, d.w / 2, rw - d.w / 2);
+      cursor += d.w + GAP;
+      return { ...d, x, y: rl / 2, z: 0.76, mountWall: "floor" };
+    });
+  };
+
+  // Re-importing replaces the equipment in all three tools, so it asks first.
+  // The room itself (dimensions, walls, table, chairs) and all annotations are
+  // kept — only things that bill are cleared and regenerated.
+  const requestScopeImport = async () => {
+    if (!projectParam || !roomParam || roomParam === "default" || generatingFromScope || !rdLoaded) return;
+    const existing = await loadScopeManifest(roomParam, projectParam);
+    if (existing) { setScopeReimportConfirm(true); return; }
+    generateDevicesFromScopeRD(false);
+  };
+
+  const wipeAllToolsForReimport = async () => {
+    setPlacedDevices(prev => wipeRoomDesignerEquipment(prev));
+    const [sf, rack] = await Promise.all([
+      loadToolData("signal-flow", roomParam, projectParam),
+      loadToolData("rack-planner", roomParam, projectParam),
+    ]);
+    await Promise.all([
+      saveToolData("signal-flow", { ...(sf || {}), ...wipeSignalFlowEquipment() }, roomParam, projectParam),
+      saveToolData("rack-planner", { ...(rack || {}), items: [] }, roomParam, projectParam),
+    ]);
+  };
+
+  const generateDevicesFromScopeRD = async (isReimport = false) => {
+    // rdLoaded gates this room's own saved config (roomType/roomW/roomL/
+    // roomH/placedDevices) having finished loading — without it, the
+    // "is this room still untouched" check below could read this component's
+    // initial-state defaults instead of what's actually saved, and wrongly
+    // resize a room that was already configured.
+    if (!projectParam || !roomParam || roomParam === "default" || generatingFromScope || !rdLoaded) return;
+    setGeneratingFromScope(true);
+    try {
+      if (isReimport) await wipeAllToolsForReimport();
+      const { data: survey, error: surveyError } = await supabase
+        .from("site_surveys")
+        .select("data")
+        .eq("project_id", projectParam)
+        .maybeSingle();
+      if (surveyError) throw new Error(surveyError.message);
+
+      const buildings: any[] = survey?.data?.buildings || [];
+      let scopeText = "";
+      let surveyRoomData: Record<string, string> | null = null;
+      for (const b of buildings) {
+        const room = (b.rooms || []).find((r: any) => r.id === roomParam);
+        if (room) { scopeText = room.data?.scope_of_work || ""; surveyRoomData = room.data || {}; break; }
+      }
+      if (!scopeText.trim()) {
+        setGenerateNotice({ kind: "error", message: "No Scope of Work found for this room — add one in Site Survey first." });
+        window.setTimeout(() => setGenerateNotice(null), 5000);
+        return;
+      }
+
+      // Captured once, up front, so a resize below and the device placement
+      // further down both undo together in a single Ctrl+Z — pushUndo()
+      // snapshots the CURRENT roomW/roomL/roomH, so it must run before
+      // either is changed.
+      pushUndo();
+
+      // Auto-size the room from Site Survey's real recorded dimensions —
+      // but only when the room still looks untouched (still the default
+      // "medium" preset with nothing placed yet), so this can never
+      // silently overwrite a room a user already configured by hand.
+      let effectiveRoomW = roomW, effectiveRoomL = roomL, effectiveRoomH = roomH;
+      const wallDevicesToAdd: PlacedDevice[] = [];
+      const isUntouchedRoom = roomType === "medium" && placedDevices.length === 0;
+      if (isUntouchedRoom && surveyRoomData) {
+        const feet = (ftKey: string, inKey: string) => {
+          const ft = parseFloat(surveyRoomData![ftKey] || "");
+          const inch = parseFloat(surveyRoomData![inKey] || "");
+          const total = (Number.isFinite(ft) ? ft : 0) + (Number.isFinite(inch) ? inch : 0) / 12;
+          return total > 0 ? total : null;
+        };
+        const surveyW = feet("room_width", "room_width_in");
+        const surveyL = feet("room_length", "room_length_in");
+        const surveyH = feet("room_height", "room_height_in");
+        if (surveyW && surveyL) {
+          effectiveRoomW = surveyW;
+          effectiveRoomL = surveyL;
+          if (surveyH) effectiveRoomH = surveyH;
+          setRoomW(effectiveRoomW);
+          setRoomL(effectiveRoomL);
+          if (surveyH) setRoomH(effectiveRoomH);
+
+          const purpose = (surveyRoomData.room_purpose || "").toLowerCase();
+          const byName = roomTypes.find(rt => purpose.includes(rt.name.toLowerCase()) || rt.name.toLowerCase().includes(purpose));
+          const surveyArea = effectiveRoomW * effectiveRoomL;
+          const byArea = roomTypes.reduce((best, rt) => Math.abs(rt.w * rt.l - surveyArea) < Math.abs(best.w * best.l - surveyArea) ? rt : best, roomTypes[0]);
+          const matchedRoomType = byName || byArea;
+          setRoomType(matchedRoomType.id);
+
+          // A table + chairs by default, sized off the matched room preset —
+          // selectRoom (picking a preset manually) sets these same seat/width
+          // values but never actually turns showTable on, so even that path
+          // doesn't show a table without this; a fresh room otherwise shows
+          // walls and devices floating with nothing to sit at.
+          setShowTable(true);
+          setTableShape("rectangular");
+          setTableSeats(matchedRoomType.maxSeats);
+          // Width and length both scale with the actual room, not just a
+          // seat-count bucket — a 4-seat table in a 30ft room should be
+          // bigger than the same 4-seat table in an 8ft huddle room.
+          const seatBasedWidth = matchedRoomType.maxSeats <= 6 ? 3.5 : matchedRoomType.maxSeats <= 12 ? 4.0 : 5.0;
+          setTableWidth(Math.max(2.5, Math.min(seatBasedWidth, effectiveRoomW * 0.35)));
+          // Exactly 4ft of clearance front and back: tableWallDist is the
+          // gap from the front wall to the table's near edge, and the
+          // renderer places the table's center at tableWallDist + length/2
+          // (~line 5960's tcy), so its far edge lands at
+          // tableWallDist + length — set length to roomL - 8 to land that
+          // far edge exactly 4ft short of the rear wall too.
+          const FRONT_REAR_CLEARANCE = 4;
+          setTableWallDist(FRONT_REAR_CLEARANCE);
+          // tableLengthOverride defaults to a fixed 2ft and always wins over
+          // the built-in seat-count length formula (see its use ~line 3408)
+          // — left alone, every auto-generated table would render at a tiny
+          // fixed 2ft regardless of room size. Floored at 2ft so a room too
+          // short for 4+4ft clearance still gets a usable (if cramped)
+          // table instead of a negative/zero length.
+          setTableLengthOverride(Math.max(2, effectiveRoomL - FRONT_REAR_CLEARANCE * 2));
+          setTableDeleted(false);
+          setDeletedChairs(new Set());
+
+          // This app has no "just type in dimensions and get a rectangle"
+          // mode — every room's visible boundary comes from explicit wall
+          // segments (see createWallSegment, the same thing a user creates
+          // by hand with the Drywall tool). Draw the 4 walls of the new
+          // rectangle in the same shape it produces, so the resize above
+          // actually becomes a visible room, not just numbers nothing reads.
+          const makeWall = (x1: number, y1: number, x2: number, y2: number): PlacedDevice => {
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            return {
+              id: "wall-partition", name: "Drywall", icon: "🧱",
+              w: len, h: 0.15, wall: "floor", type: "furniture", color: "rgb(var(--text-subtle))",
+              uid: Date.now() + Math.random(), x: (x1 + x2) / 2, y: (y1 + y2) / 2, z: 0, mountWall: "floor",
+              wallAngle: Math.atan2(dy, dx), wallType: "drywall",
+            } as PlacedDevice;
+          };
+          wallDevicesToAdd.push(
+            makeWall(0, 0, effectiveRoomW, 0),                       // north
+            makeWall(effectiveRoomW, 0, effectiveRoomW, effectiveRoomL), // east
+            makeWall(effectiveRoomW, effectiveRoomL, 0, effectiveRoomL), // south
+            makeWall(0, effectiveRoomL, 0, 0),                       // west
+          );
+        }
+      }
+
+      const items = await fetchScopeUnits(scopeText);
+      // Recorded before placement: units this tool has no icon for (a DSP, an
+      // amplifier) still belong to the import, and Signal Flow and the rack
+      // materialise them from here even though no floor-plan symbol exists.
+      if (items.length) {
+        await saveScopeManifest(
+          { importedAt: Date.now(), importedBy: "room-designer", units: items, materialisedBy: ["room-designer"] },
+          roomParam, projectParam,
+        );
+      }
+      if (!items.length) {
+        setGenerateNotice({ kind: "error", message: "No AV devices were recognized in this room's Scope of Work." });
+        window.setTimeout(() => setGenerateNotice(null), 5000);
+        return;
+      }
+
+      const skipped: string[] = [];
+      const byMount = new Map<"north"|"south"|"west"|"east"|"ceiling"|"table", PlacedDevice[]>();
+      let seq = 0;
+      items.forEach((item) => {
+        const location = item.location || "";
+        const template = resolveScopeDeviceTemplate(item.category, item.label, location);
+        if (!template) { if (!skipped.includes(item.label)) skipped.push(item.label); return; }
+        // A device whose catalog template is inherently ceiling- or
+        // table-mounted (ceiling mic/speaker/camera/projector, table
+        // mic/touch panel) stays there regardless of what wall the AI's
+        // location text described — "front" in the scope usually describes
+        // where the room/screen faces, not where a ceiling unit is bolted.
+        const mount = template.wall === "ceiling" ? "ceiling" : template.wall === "table" ? "table" : resolveScopeMountWall(location);
+        const hfov = template.hfovDeg ?? (template.type === "camera" ? (template.id === "soundbar-cam" ? 120 : template.id === "ceiling-cam" ? 90 : 70) : undefined);
+        const covShape = template.coveragePattern === "circular" ? "round" as const : template.coveragePattern === "rectangular" ? "square" as const
+          : (template.type === "mic" && template.wall === "ceiling") ? "round" as const : undefined;
+        const covDiameter = template.coverageDiameterFt ?? ((template.type === "mic" && template.wall === "ceiling") ? 6 : template.id === "table-mic" ? 2 : undefined);
+        const covW = template.coverageWidthFt ?? ((template.type === "mic" && template.wall === "ceiling") ? 6 : undefined);
+        const covL = template.coverageDepthFt ?? ((template.type === "mic" && template.wall === "ceiling") ? 6 : undefined);
+        const dispersion = template.coverageAngleDeg ?? ((template.type === "speaker" && template.wall === "ceiling") ? 90 : undefined);
+        // Each unit is already one physical item — fetchScopeUnits expanded
+        // quantities and stamped the shared identity, so the same unit can be
+        // recognised here, in Signal Flow and in the rack.
+        const uid = Date.now() + (seq++) + Math.random();
+        const placed: PlacedDevice = {
+          ...template, itemId: item.itemId, productKey: item.productKey,
+          rack_units: item.rackUnits, uid, name: item.name,
+          x: 0, y: 0, z: 0, mountWall: mount, hfov, covShape, covDiameter, covW, covL, dispersion,
+        };
+        if (!byMount.has(mount)) byMount.set(mount, []);
+        byMount.get(mount)!.push(placed);
+      });
+
+      const allNewDevices: PlacedDevice[] = [];
+      byMount.forEach((devs, mount) => allNewDevices.push(...spreadDevicesOnMount(devs, mount, effectiveRoomW, effectiveRoomL, effectiveRoomH)));
+
+      if (!allNewDevices.length && !wallDevicesToAdd.length) {
+        setGenerateNotice({ kind: "error", message: skipped.length ? `No devices could be placed — no matching icon for: ${skipped.join(", ")}.` : "No AV devices were recognized in this room's Scope of Work." });
+        window.setTimeout(() => setGenerateNotice(null), 5000);
+        return;
+      }
+
+      setPlacedDevices(prev => [...prev, ...wallDevicesToAdd, ...allNewDevices]);
+
+      const roomMsg = wallDevicesToAdd.length ? `Sized the room to Site Survey's dimensions; ` : "";
+      const addedMsg = allNewDevices.length ? `added ${allNewDevices.length} device${allNewDevices.length===1?"":"s"} from Scope of Work` : "no devices placed";
+      const skippedMsg = skipped.length ? `; ${skipped.length} item${skipped.length===1?"":"s"} skipped (no matching icon): ${skipped.join(", ")}` : "";
+      setGenerateNotice({ kind: "ok", message: `${roomMsg}${addedMsg}${skippedMsg}.` });
+      window.setTimeout(() => setGenerateNotice(null), 7000);
+    } catch (error: any) {
+      setGenerateNotice({ kind: "error", message: error?.message || "Unable to generate devices from scope." });
+      window.setTimeout(() => setGenerateNotice(null), 5000);
+    } finally {
+      setGeneratingFromScope(false);
+    }
+  };
 
   const handleDeviceContextMenu = (e: React.MouseEvent, uid: number) => {
     e.preventDefault();
@@ -1949,7 +2373,10 @@ export default function RoomDesignerPage() {
     pushUndo();
     const newUid = Date.now();
     const offset = Math.min(1, Math.max(roomW, roomL) * 0.05);
-    setPlacedDevices(prev=>[...prev, {...dev, uid:newUid, x:dev.x+offset, y:dev.y+offset}]);
+    // A duplicate is a second physical unit, so it gets its own identity —
+    // spreading `dev` would otherwise copy itemId and make the BOM count the
+    // two as one, while the sync steps treated one as a stale copy to prune.
+    setPlacedDevices(prev=>[...prev, {...dev, itemId:newItemId(), uid:newUid, x:dev.x+offset, y:dev.y+offset}]);
     setSelectedUid(newUid);
   };
 
@@ -2243,7 +2670,7 @@ export default function RoomDesignerPage() {
     const covW = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
     const covL = (item.type === "mic" && item.wall === "ceiling") ? 6 : undefined;
     const dispersion = (item.type === "speaker" && item.wall === "ceiling") ? 90 : undefined;
-    setPlacedDevices(prev => [...prev, { ...item, uid: id, x, y, z, mountWall, rotation, wallUid, hfov, covShape, covDiameter, covW, covL, dispersion }]);
+    setPlacedDevices(prev => [...prev, { ...item, itemId: item.itemId || newItemId(), uid: id, x, y, z, mountWall, rotation, wallUid, hfov, covShape, covDiameter, covW, covL, dispersion }]);
     setDragNewDevice(null);
   };
 
@@ -3732,6 +4159,15 @@ export default function RoomDesignerPage() {
                   </svg>
                   <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>Add<br/>Equipment</span>
                 </button>
+                <button onClick={requestScopeImport} disabled={generatingFromScope || !rdLoaded} title="Generate devices from this room's Site Survey Scope of Work"
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:"transparent",border:"1px solid transparent",borderRadius:4,cursor:generatingFromScope?"default":"pointer",opacity:generatingFromScope?0.5:1,transition:"all 0.15s",minWidth:56}}
+                  onMouseEnter={e=>{if(!generatingFromScope){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#8b5cf6">
+                    <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z"/>
+                  </svg>
+                  <span style={{fontSize:9,color:"rgb(var(--text-subtle))",lineHeight:1.3,whiteSpace:"nowrap",textAlign:"center"}}>{generatingFromScope?<>Generating…</>:<>Generate from<br/>Scope</>}</span>
+                </button>
               </div>
               <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Create</span>
             </div>
@@ -3823,6 +4259,11 @@ export default function RoomDesignerPage() {
             </div>
           </div>
         </div>
+        {generateNotice && (
+          <div style={{padding:"7px 16px",background:generateNotice.kind==="ok"?"rgba(34,197,94,0.14)":"rgba(239,68,68,0.14)",borderBottom:`1px solid ${generateNotice.kind==="ok"?"rgba(34,197,94,0.4)":"rgba(239,68,68,0.4)"}`,color:generateNotice.kind==="ok"?"#22c55e":"#ef4444",fontSize:11,textAlign:"center",flexShrink:0}}>
+            {generateNotice.message}
+          </div>
+        )}
         <div style={{display:"flex",flex:1,overflow:"hidden"}}>
       {/* ── Canvas sections (scrollable) ───────────────── */}
       <div id="rd-canvas-export" style={{flex:1,overflowY:"auto"}}>
@@ -4908,6 +5349,11 @@ export default function RoomDesignerPage() {
                     // the same reason as cpx2/cpy2 above.
                     const sx=cpx2, sy=cpy2;
                     return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {/* Invisible hit-area padding — extends up over the
+                          label (rendered above the panel body) so a
+                          right-click on the text itself still hits this
+                          group instead of falling through to the canvas. */}
+                      <rect x={sx-bw/2-4} y={sy-bh/2-14} width={bw+8} height={bh+18} fill="transparent" pointerEvents="all"/>
                       {isSelected&&<rect x={sx-bw/2-3} y={sy-bh/2-3} width={bw+6} height={bh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={sx-bw/2-1} y={sy-bh/2-1} width={bw+2} height={bh+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -4929,6 +5375,11 @@ export default function RoomDesignerPage() {
                   if(isTableTouch){
                     const tw=dev.w*planScale, th=dev.h*planScale;
                     return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {/* Invisible hit-area padding — extends up over the
+                          label (rendered above the panel body) so a
+                          right-click on the text itself still hits this
+                          group instead of falling through to the canvas. */}
+                      <rect x={cpx2-tw/2-4} y={cpy2-th/2-14} width={tw+8} height={th+18} fill="transparent" pointerEvents="all"/>
                       {isSelected&&<rect x={cpx2-tw/2-3} y={cpy2-th/2-3} width={tw+6} height={th+6} rx={4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={cpx2-tw/2-1} y={cpy2-th/2-1} width={tw+2} height={th+2} rx={3} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -4950,6 +5401,11 @@ export default function RoomDesignerPage() {
                   if(isCableCubby){
                     const cw=dev.w*planScale, ch=dev.h*planScale;
                     return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
+                      {/* Invisible hit-area padding — extends up over the
+                          label (rendered above the body) so a right-click
+                          on the text itself still hits this group instead
+                          of falling through to the canvas. */}
+                      <rect x={cpx2-cw/2-4} y={cpy2-ch/2-14} width={cw+8} height={ch+18} fill="transparent" pointerEvents="all"/>
                       {isSelected&&<rect x={cpx2-cw/2-3} y={cpy2-ch/2-3} width={cw+6} height={ch+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       {/* Purple boundary */}
                       <rect x={cpx2-cw/2-1} y={cpy2-ch/2-1} width={cw+2} height={ch+2} rx={2} fill="none" stroke={dev.color+"88"} strokeWidth={0.8}/>
@@ -4969,6 +5425,11 @@ export default function RoomDesignerPage() {
                     </g>);
                   }
                   return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
+                    {/* Invisible hit-area padding — extends down over the
+                        label (rendered below the icon) so a right-click on
+                        the text itself still hits this group instead of
+                        falling through to the canvas. */}
+                    <rect x={cpx2-10} y={cpy2-8} width={20} height={26} fill="transparent" pointerEvents="all"/>
                     {isSelected&&<rect x={cpx2-8} y={cpy2-6} width={16} height={12} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
                     <rect x={cpx2-5} y={cpy2-3.5} width={10} height={7} rx={2} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1}/>
                     <text x={cpx2} y={cpy2+14} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
@@ -5940,6 +6401,17 @@ export default function RoomDesignerPage() {
       {/* Annotation text editor overlay */}
       {annotate.overlay}
 
+      {scopeReimportConfirm && (
+        <ConfirmDialog
+          title="Re-import from Scope"
+          message={SCOPE_REIMPORT_WARNING}
+          confirmLabel="Confirm"
+          busy={generatingFromScope}
+          onCancel={() => setScopeReimportConfirm(false)}
+          onConfirm={() => { setScopeReimportConfirm(false); generateDevicesFromScopeRD(true); }}
+        />
+      )}
+
       {/* ── Right Panel: Shared BOM + Device Properties ──────── */}
       <BOMPanel
         collapsed={bomCollapsed}
@@ -5965,6 +6437,17 @@ export default function RoomDesignerPage() {
             onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Edit equipment
+          </button>
+          <button onClick={()=>{
+            setReplacingDeviceUid(deviceContextMenu.uid);
+            setShowAddModal(true);
+            setModalSearch("");setModalSelected(null);setModalDeviceName("");setModalMake("");setModalModel("");setModalGlobalSearch(false);
+            setDeviceContextMenu(null);
+          }}
+            style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            Replace
           </button>
           <button onClick={()=>{
             duplicateDevice(deviceContextMenu.uid);
@@ -6081,6 +6564,8 @@ export default function RoomDesignerPage() {
         saveDisabled={!(editingDevice.name||"").trim()}
         notesLabel="Description"
         categories={deviceCatalog.map(g=>g.cat)}
+        showAIImport
+        aiMode="update"
       />
     )}
 
@@ -6097,7 +6582,7 @@ export default function RoomDesignerPage() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-body))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
               </svg>
-              <span style={{fontSize:15,fontWeight:700,color:"rgb(var(--text-body))"}}>Add Equipment</span>
+              <span style={{fontSize:15,fontWeight:700,color:"rgb(var(--text-body))"}}>{replacingDeviceUid!=null?"Replace Equipment":"Add Equipment"}</span>
             </div>
             <button onClick={closeModal}
               style={{background:"none",border:"none",color:"rgb(var(--text-subtle))",cursor:"pointer",fontSize:20,lineHeight:1,padding:"2px 4px"}}>×</button>
@@ -6185,9 +6670,9 @@ export default function RoomDesignerPage() {
             </button>
             <button
               disabled={!modalSelected && !modalDeviceName.trim()}
-              onClick={addFromModal}
+              onClick={replacingDeviceUid!=null ? replaceDeviceFromModal : addFromModal}
               style={{padding:"8px 18px",background:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--forge-surface))":"#8b5cf6",border:"1px solid "+((!modalSelected&&!modalDeviceName.trim())?"rgb(var(--border))":"#8b5cf6"),borderRadius:6,color:(!modalSelected&&!modalDeviceName.trim())?"rgb(var(--text-subtle))":"#fff",fontSize:12,cursor:(!modalSelected&&!modalDeviceName.trim())?"not-allowed":"pointer",fontWeight:600,transition:"all 0.15s"}}>
-              + Add
+              {replacingDeviceUid!=null?"Replace":"+ Add"}
             </button>
           </div>
         </div>

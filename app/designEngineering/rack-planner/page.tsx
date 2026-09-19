@@ -4,12 +4,18 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts, type AVProduct } from "@/lib/av-products";
-import { useBOM } from "@/lib/bom-context";
+import { useBOM, rackItemToBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
+import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
+import { supabase } from "@/lib/supabase";
+import { displayNameOf, ensureRackItemIds, ensureRoomDeviceItemIds, ensureSignalFlowItemIds, isRackApplicable, meaningfulMfr, meaningfulModel, newItemId } from "@/lib/design-identity";
 
 type RackItem = {
+  /** Cross-tool unit identity — see lib/design-identity.ts. */
+  itemId?: string;
+  productKey?: string;
   sourceDeviceId?: string | number;
   productId?: string;
   manual?: boolean;
@@ -36,7 +42,88 @@ type RackItem = {
   name: string;
   ru: number;
   color: string;
+  // Discrete equipment-spec fields, editable via the same shared
+  // EquipmentFormModal used by Signal Flow Builder/Room Designer (see
+  // rackItemToFormValue/applyFormValueToRackItem below). Optional/undefined
+  // on older saved items — name (mfr + model) stays the source of truth for
+  // display until an item is edited through that form.
+  mfr?: string;
+  model?: string;
+  cat?: string;
+  notes?: string;
+  partNumber?: string | null;
+  msrp?: number | null;
+  cost?: number | null;
+  margin?: number | null;
+  markup?: number | null;
+  ports?: EquipmentFormValue["ports"];
+  heightIn?: number | null;
+  depthIn?: number | null;
+  weightLb?: number | null;
+  rackEarIncluded?: boolean;
 };
+
+function rackItemToFormValue(item: RackItem): EquipmentFormValue {
+  return {
+    manufacturer: item.mfr || "",
+    model: item.model || "",
+    category: item.cat || "",
+    notes: item.notes || "",
+    unitCost: 0,
+    partNumber: item.partNumber ?? null,
+    msrp: item.msrp ?? null,
+    cost: item.cost ?? null,
+    margin: item.margin ?? null,
+    markup: item.markup ?? null,
+    ports: item.ports || [],
+    ampDraw: item.ampDraw ?? null,
+    voltage: item.voltage ?? null,
+    powerWatts: item.powerWatts ?? null,
+    btuHr: item.btuHr ?? null,
+    rackMounted: item.rackMounted ?? false,
+    rackUnits: item.ru ?? null,
+    rackEarsIncluded: item.rackEarIncluded ?? false,
+    widthIn: item.widthIn ?? null,
+    heightIn: item.heightIn ?? null,
+    depthIn: item.depthIn ?? null,
+    weightLb: item.weightLb ?? null,
+    hfovDeg: null,
+    vfovDeg: null,
+    coveragePattern: null,
+    coverageDiameterFt: null,
+    coverageAngleDeg: null,
+    coverageWidthFt: null,
+    coverageDepthFt: null,
+  };
+}
+
+function applyFormValueToRackItem(item: RackItem, v: EquipmentFormValue): RackItem {
+  const name = [v.manufacturer, v.model].filter(Boolean).join(" ") || v.notes || item.name;
+  return {
+    ...item,
+    mfr: v.manufacturer,
+    model: v.model,
+    cat: v.category,
+    notes: v.notes,
+    name,
+    partNumber: v.partNumber,
+    msrp: v.msrp,
+    cost: v.cost,
+    margin: v.margin,
+    markup: v.markup,
+    ports: v.ports,
+    ampDraw: v.ampDraw,
+    voltage: v.voltage,
+    powerWatts: v.powerWatts,
+    btuHr: v.btuHr,
+    ru: v.rackUnits && v.rackUnits > 0 ? Math.max(1, Math.floor(v.rackUnits)) : item.ru,
+    rackEarIncluded: v.rackEarsIncluded,
+    widthIn: v.widthIn,
+    heightIn: v.heightIn,
+    depthIn: v.depthIn,
+    weightLb: v.weightLb,
+  };
+}
 
 // EIA-310's rail-to-rail spacing puts the actual usable front-panel width in
 // a 19" rack at 17.75" nominal — narrower faceplates (half-rack ~8.5-9.5",
@@ -148,7 +235,7 @@ export default function RackPlannerPage() {
   const [hoveredRackNumber, setHoveredRackNumber] = useState<number|null>(null);
   const [rackContextMenu, setRackContextMenu] = useState<{x:number;y:number;index:number}|null>(null);
   const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
-  const [rackEditDraft, setRackEditDraft] = useState({name:"",ru:"1",voltage:"",ampDraw:"",powerWatts:"",btuHr:"",widthIn:""});
+  const [rackEditDraft, setRackEditDraft] = useState<RackItem|null>(null);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
   const { updateSlice } = useBOM();
 
@@ -181,16 +268,38 @@ export default function RackPlannerPage() {
     annotate.setAnnotations([]);
     setSelectedIdxs(new Set());
     setEditingIdx(null);
-    Promise.all([loadToolData("rack-planner", roomParam, projectParam), loadToolData("signal-flow", roomParam, projectParam)]).then(async ([rackData, signalData]) => {
+    Promise.all([
+      loadToolData("rack-planner", roomParam, projectParam),
+      loadToolData("signal-flow", roomParam, projectParam),
+      supabase.from("room_designs").select("data").eq("project_id", projectParam).eq("room_id", roomParam || "default").maybeSingle(),
+    ]).then(async ([rackData, signalData, roomRow]) => {
       if (cancelled) return;
-      const savedItems = Array.isArray(rackData?.items) ? rackData.items as RackItem[] : [];
-      const savedBySourceId = new Map(
-        savedItems
-          .filter(item => item.sourceDeviceId !== undefined)
-          .map(item => [String(item.sourceDeviceId), item])
+      const rawSavedItems = Array.isArray(rackData?.items) ? rackData.items as RackItem[] : [];
+      const signalDevices = ensureSignalFlowItemIds(
+        Array.isArray(signalData?.devices) ? signalData.devices as any[] : []
+      ).items;
+      const roomDevices = ensureRoomDeviceItemIds(
+        ((roomRow as any)?.data?.data?.devices as any[]) || []
+      ).items;
+      const savedItems = ensureRackItemIds(rawSavedItems, signalDevices).items;
+      const savedByItemId = new Map(
+        savedItems.filter(item => item.itemId).map(item => [item.itemId as string, item])
       );
-      const signalDevices = Array.isArray(signalData?.devices) ? signalData.devices as any[] : [];
-      const enrichedSignalDevices=await Promise.all(signalDevices.map(async device=>{
+
+      // Units the rack can draw from: every Signal Flow block, plus any Room
+      // Designer device that hasn't reached Signal Flow yet — which is the case
+      // whenever the user adds equipment there and comes straight here without
+      // opening the diagram in between.
+      const sfItemIds = new Set(signalDevices.map((d: any) => d.itemId).filter(Boolean));
+      const sourceUnits: any[] = [
+        ...signalDevices,
+        ...roomDevices.filter((d: any) => d.itemId && !sfItemIds.has(d.itemId) && d.type !== "furniture" && d.id !== "wall-partition"),
+      ];
+
+      const enrichedSignalDevices=await Promise.all(sourceUnits.filter(isRackApplicable).map(async device=>{
+        // A unit carrying a real library id already brought its power spec with
+        // it; the fuzzy name lookup below is only a fallback for older saves.
+        if(device.productId||device.libraryProductId||device.product_id)return device;
         if(device.power_watts||device.amp_draw||device.btu_hr)return device;
         const query=(device.model&&device.model!=="—"?device.model:device.type)||"";
         if(!query)return device;
@@ -206,16 +315,20 @@ export default function RackPlannerPage() {
       // have changed again while those were in flight.
       if (cancelled) return;
       const mountedItems = enrichedSignalDevices
-        .filter(device => (device.rackMounted ?? device.rack_mounted ?? false) === true)
         .map((device, index): RackItem => {
-          const saved = savedBySourceId.get(String(device.id));
+          const saved = device.itemId ? savedByItemId.get(device.itemId) : undefined;
           const catalogRU = Number(device.rackUnits ?? device.rack_units);
-          const modelName = device.model && device.model !== "—" ? device.model : null;
-          const manufacturer = device.mfr && device.mfr !== "Generic" ? device.mfr : null;
-          const sourceName = [manufacturer, modelName].filter(Boolean).join(" ") || device.type || "Rack Device";
+          const modelName = meaningfulModel(device.model) || null;
+          const manufacturer = meaningfulMfr(device.mfr) || null;
+          const sourceName = displayNameOf(device) || "Rack Device";
           return {
-            sourceDeviceId: device.id,
-            productId: saved?.productId ?? device.product_id,
+            // The rack row is the same physical unit as the Signal Flow block,
+            // seen from the elevation — it adopts that block's identity rather
+            // than minting one, which is what keeps the BOM from counting it twice.
+            itemId: device.itemId ?? saved?.itemId,
+            productKey: device.productKey ?? saved?.productKey,
+            sourceDeviceId: device.id ?? device.uid,
+            productId: saved?.productId ?? device.productId ?? device.product_id,
             rackMounted: true,
             rackOrder: saved?.rackOrder,
             rackStartRU: saved?.rackStartRU,
@@ -225,12 +338,26 @@ export default function RackPlannerPage() {
             powerWatts: saved?.powerWatts ?? device.power_watts ?? null,
             btuHr: saved?.btuHr ?? device.btu_hr ?? null,
             widthIn: saved?.widthIn ?? device.width_in ?? null,
+            heightIn: saved?.heightIn ?? device.height_in ?? null,
+            depthIn: saved?.depthIn ?? device.depth_in ?? null,
+            weightLb: saved?.weightLb ?? device.weight_lb ?? null,
+            mfr: saved?.mfr ?? manufacturer ?? undefined,
+            model: saved?.model ?? modelName ?? undefined,
+            cat: saved?.cat ?? device.cat ?? undefined,
+            notes: saved?.notes ?? device.type ?? undefined,
+            partNumber: saved?.partNumber ?? device.part_number ?? null,
+            ports: saved?.ports ?? device.ports ?? undefined,
+            rackEarIncluded: saved?.rackEarIncluded ?? device.rack_ear_included ?? undefined,
             name: saved?.name || sourceName,
             ru: saved?.ru || (Number.isFinite(catalogRU) && catalogRU > 0 ? Math.max(1, Math.round(catalogRU)) : 1),
             color: saved?.color || device.color || rackColors[index % rackColors.length],
           };
         });
-      const manualItems = savedItems.filter(item => item.manual === true);
+      // A manual row is kept only while nothing upstream claims the same unit.
+      // Without the itemId check, a manual item that later reached Signal Flow
+      // would come back derived AND be re-appended here, doubling every load.
+      const derivedItemIds = new Set(mountedItems.map(item => item.itemId).filter(Boolean));
+      const manualItems = savedItems.filter(item => item.manual === true && !(item.itemId && derivedItemIds.has(item.itemId)));
       const restored=[...mountedItems,...manualItems].sort((a,b)=>(a.rackOrder??Number.MAX_SAFE_INTEGER)-(b.rackOrder??Number.MAX_SAFE_INTEGER));
       const restoredMounted=restored.filter(item=>item.rackMounted!==false);
       let nextTopRU=restoredMounted.reduce((sum,item)=>sum+item.ru,0);
@@ -306,20 +433,20 @@ export default function RackPlannerPage() {
     if (selectedProduct) {
       const ru = selectedProduct.rack_units && selectedProduct.rack_units > 0 ? Math.max(1, Math.round(selectedProduct.rack_units)) : 1;
       const name = [selectedProduct.manufacturer, selectedProduct.model_name].filter(Boolean).join(" ") || selectedProduct.type;
-      setPendingRackItem({manual:true,productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr,widthIn:selectedProduct.width_in});
+      setPendingRackItem({manual:true,itemId:newItemId(),productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr,widthIn:selectedProduct.width_in,mfr:selectedProduct.manufacturer||undefined,model:selectedProduct.model_name||undefined,cat:selectedProduct.type||undefined,partNumber:selectedProduct.part_number,heightIn:selectedProduct.height_in,depthIn:selectedProduct.depth_in,weightLb:selectedProduct.weight_lb,rackEarIncluded:selectedProduct.rack_ear_included??undefined});
       closeAddEquipment();
       return;
     }
     const description = newDescription.trim();
     const makeModel = [newMake.trim(), newModel.trim()].filter(Boolean).join(" ");
     if (!description && !makeModel) return;
-    setPendingRackItem({manual:true,name:makeModel||description,ru:1,color:rackColors[items.length%rackColors.length]});
+    setPendingRackItem({manual:true,itemId:newItemId(),name:makeModel||description,ru:1,color:rackColors[items.length%rackColors.length]});
     closeAddEquipment();
   };
 
   // Sync rack items to shared BOM
   useEffect(() => {
-    updateSlice('rack-builder', items.map(item => ({ name: item.name, cat: 'Rack Equipment' })));
+    updateSlice('rack-builder', items.map(rackItemToBOM));
   }, [items, updateSlice]);
 
   // Auto-expand BOM when a device is added (not on initial load)
@@ -562,7 +689,7 @@ export default function RackPlannerPage() {
   const openRackEquipmentEditor=(index:number)=>{
     const item=items[index];
     if(!item)return;
-    setRackEditDraft({name:item.name,ru:String(item.ru),voltage:item.voltage==null?"":String(item.voltage),ampDraw:item.ampDraw==null?"":String(item.ampDraw),powerWatts:item.powerWatts==null?"":String(item.powerWatts),btuHr:item.btuHr==null?"":String(item.btuHr),widthIn:item.widthIn==null?"":String(item.widthIn)});
+    setRackEditDraft(item);
     setRackEditingIndex(index);
     setRackContextMenu(null);
   };
@@ -928,15 +1055,32 @@ export default function RackPlannerPage() {
         <button onClick={()=>{setItems(current=>current.filter((_,index)=>index!==rackContextMenu.index));setRackContextMenu(null);setEditingIdx(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Delete equipment</button>
       </div></>}
 
-      {rackEditingIndex!==null&&<div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.55)"}} onClick={()=>setRackEditingIndex(null)}><div style={{width:500,background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:10,boxShadow:"0 16px 48px rgba(0,0,0,0.5)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgb(var(--border))"}}><strong style={{fontSize:14,color:"rgb(var(--text-body))"}}>Edit Equipment</strong><button onClick={()=>setRackEditingIndex(null)} style={{background:"none",border:"none",fontSize:20,color:"rgb(var(--text-subtle))",cursor:"pointer"}}>×</button></div>
-        <div style={{padding:20}}>
-          <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))",marginBottom:14}}>Description<input autoFocus value={rackEditDraft.name} onChange={e=>setRackEditDraft(draft=>({...draft,name:e.target.value}))} style={{padding:"9px 10px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/></label>
-          <div style={{fontSize:11,fontWeight:700,color:"rgb(var(--text-muted))",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:9}}>Equipment Specifications</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>{([{key:"ru",label:"Rack Units",unit:"RU"},{key:"widthIn",label:"Width",unit:"in"},{key:"voltage",label:"Voltage",unit:"V"},{key:"ampDraw",label:"Current Draw",unit:"A"},{key:"powerWatts",label:"Power",unit:"W"},{key:"btuHr",label:"Heat Output",unit:"BTU/hr"}] as const).map(field=><label key={field.key} style={{display:"flex",flexDirection:"column",gap:5,fontSize:11,color:"rgb(var(--text-subtle))"}}>{field.label}<div style={{display:"flex",alignItems:"center",gap:5}}><input type="number" min={field.key==="ru"?1:0} step={field.key==="ru"?1:"any"} value={rackEditDraft[field.key]} onChange={e=>setRackEditDraft(draft=>({...draft,[field.key]:e.target.value}))} style={{width:"100%",padding:"8px 9px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRadius:5,color:"rgb(var(--text-body))",outline:"none"}}/><span style={{minWidth:36,fontSize:9,color:"rgb(var(--text-subtle))"}}>{field.unit}</span></div></label>)}</div>
-        </div>
-        <div style={{padding:"12px 20px",borderTop:"1px solid rgb(var(--border))",display:"flex",justifyContent:"flex-end",gap:9}}><button onClick={()=>setRackEditingIndex(null)} style={{padding:"8px 17px",background:"transparent",border:"1px solid rgb(var(--border))",borderRadius:6,color:"rgb(var(--text-body))",cursor:"pointer"}}>Cancel</button><button disabled={!rackEditDraft.name.trim()} onClick={()=>{const value=(text:string)=>text.trim()===""?null:Number(text);setItems(current=>current.map((item,index)=>index===rackEditingIndex?{...item,name:rackEditDraft.name.trim(),ru:Math.max(1,Math.floor(Number(rackEditDraft.ru)||1)),voltage:value(rackEditDraft.voltage),ampDraw:value(rackEditDraft.ampDraw),powerWatts:value(rackEditDraft.powerWatts),btuHr:value(rackEditDraft.btuHr),widthIn:value(rackEditDraft.widthIn)}:item));setRackEditingIndex(null);}} style={{padding:"8px 17px",background:"#8b5cf6",border:"1px solid #8b5cf6",borderRadius:6,color:"white",fontWeight:600,cursor:"pointer"}}>Save</button></div>
-      </div></div>}
+      {/* Edit Equipment Modal — same form used by Signal Flow Builder/Room
+          Designer and the Organization/AVGenix Equipment Library. Saves
+          only into local `items` state (this project's own tool_data),
+          never into equipment_library/av_products. */}
+      {rackEditingIndex!==null && rackEditDraft && (
+        <EquipmentFormModal
+          title="Edit Equipment"
+          value={rackItemToFormValue(rackEditDraft)}
+          onChange={(v)=>setRackEditDraft(prev=>prev?applyFormValueToRackItem(prev,v):prev)}
+          onCancel={()=>{setRackEditingIndex(null);setRackEditDraft(null);}}
+          onSave={()=>{
+            const index=rackEditingIndex;
+            const draft=rackEditDraft;
+            setItems(current=>current.map((it,i)=>i===index?draft:it));
+            setRackEditingIndex(null);
+            setRackEditDraft(null);
+          }}
+          saving={false}
+          saveDisabled={!rackEditDraft.name.trim()}
+          notesLabel="Description"
+          saveLabel="Save Item"
+          categories={[]}
+          showAIImport
+          aiMode="update"
+        />
+      )}
 
       {showAddEquipment && (
         <div onMouseDown={e=>{if(e.target===e.currentTarget)closeAddEquipment();}} style={{position:"fixed",inset:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(2,6,23,0.62)",padding:20}}>

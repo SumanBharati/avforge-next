@@ -16,7 +16,7 @@ interface BOMPanelProps {
 }
 
 export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPanelProps) {
-  const { bomItems, prices, totalQty, totalCost, setPrice } = useBOM();
+  const { bomItems, totalQty, totalCost, setPrice, unitPriceOf } = useBOM();
 
   return (
     <div style={{
@@ -86,10 +86,10 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                 </thead>
                 <tbody>
                   {bomItems.map((item, i) => {
-                    const unitPrice = prices[item.name] !== undefined ? prices[item.name] : item.listPrice;
+                    const unitPrice = unitPriceOf(item);
                     const extPrice = unitPrice * item.qty;
                     return (
-                      <tr key={item.name} style={{ background: i % 2 === 0 ? 'transparent' : 'rgb(var(--forge-surface) / 0.3)' }}>
+                      <tr key={item.key} style={{ background: i % 2 === 0 ? 'transparent' : 'rgb(var(--forge-surface) / 0.3)' }}>
                         <td style={{ ...tdSt, paddingLeft: 10, color: 'rgb(var(--text-subtle))' }}>{i + 1}</td>
                         <td style={{ ...tdSt, padding: '6px 10px' }}>
                           <div style={{ color: 'rgb(var(--text-body))', fontWeight: 500, fontSize: 11 }}>{item.name}</div>
@@ -123,7 +123,7 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                           <input
                             type="number"
                             value={unitPrice}
-                            onChange={e => setPrice(item.name, parseFloat(e.target.value) || 0)}
+                            onChange={e => setPrice(item.key, parseFloat(e.target.value) || 0)}
                             style={{ width: 60, padding: '3px 5px', background: 'rgb(var(--forge-surface))', border: '1px solid rgb(var(--border))', borderRadius: 4, color: 'rgb(var(--text-body))', fontSize: 10, fontFamily: "'JetBrains Mono',monospace", textAlign: 'right', outline: 'none' }}
                           />
                         </td>
