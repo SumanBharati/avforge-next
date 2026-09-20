@@ -5,7 +5,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const { transcript, existingRooms } = await req.json();
+    const { transcript, existingRooms, activeRoom } = await req.json();
 
     if (!transcript || typeof transcript !== "string" || transcript.trim().length < 10) {
       return NextResponse.json({ error: "Transcript too short" }, { status: 400 });
@@ -181,7 +181,8 @@ For "select" type fields, use the EXACT option text from these choices:
 - emergency_paging: "Required — integration with AV speakers", "Separate system (not AV)", "Not required", "Unknown"
 
 IMPORTANT for touch panels: touch_panel_location is a LOCATION select only. Any discussion of quantity, make/model, screen size, features, or specific hardware requirements for touch panels — including existing touch panels being reused/replaced — goes in control_notes.
-${existingRooms?.length ? `\nExisting rooms in the survey: ${existingRooms.join(", ")}. Update these if referenced, or add new ones.` : ""}`,
+${existingRooms?.length ? `\nExisting rooms in the survey: ${existingRooms.join(", ")}. Update these if referenced, or add new ones.` : ""}
+${typeof activeRoom === "string" && activeRoom.trim() ? `\nThe engineer is currently working in the room "${activeRoom.trim()}". Unless the conversation clearly names a different room, set room_name to exactly "${activeRoom.trim()}" so the extracted data fills that room. Never invent a new room name just because the conversation says "the room" or describes the space generically.` : ""}`,
       messages: [{ role: "user", content: `Here is the conversation transcript from a site survey:\n\n${transcript}` }],
     });
 

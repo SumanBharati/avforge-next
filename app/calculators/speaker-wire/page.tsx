@@ -205,9 +205,9 @@ export default function SpeakerWirePage() {
 
           {/* ── AWG Comparison Table ── */}
           <div className="rounded-xl border border-border bg-forge-surface/50 p-5">
-            <h3 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
+            <h2 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
               All Gauge Comparison
-            </h3>
+            </h2>
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
@@ -277,9 +277,9 @@ export default function SpeakerWirePage() {
             combined height of the stacked cards on the left. ── */}
         <div className="w-full shrink-0 lg:w-[800px]">
           <div className="h-full rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-5">
-            <h3 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
+            <h2 className="mb-3 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
               References
-            </h3>
+            </h2>
             <div className="grid grid-cols-1 gap-3">
 
               <div className="rounded-lg border border-border bg-forge-surface/40 px-4 py-3">

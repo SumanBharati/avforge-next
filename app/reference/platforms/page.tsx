@@ -1,3 +1,13 @@
+import type { Metadata } from "next";
+import BackLink from "@/components/BackLink";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Q-SYS vs Crestron vs Extron Comparison",
+  description: "Side-by-side comparison of Q-SYS, Crestron and Extron: control processors, programming languages, network AV, DSP, touch panels, AEC and licensing.",
+  path: "/reference/platforms",
+});
+
 const PLATFORM_COMPARISONS = [
   { feature: "Control Processor",      qsys: "Core 110f/510i",             crestron: "CP4/PRO4",                  extron: "IPCP Pro 550",               biamp: "TesiraFORTÉ" },
   { feature: "Programming Language",   qsys: "Lua + Q-SYS Designer",       crestron: "SIMPL+ / SIMPL#",           extron: "Global Scripter (Python)",   biamp: "Composer (Drag & Drop)" },
@@ -14,8 +24,8 @@ const PLATFORM_COMPARISONS = [
 export default function PlatformComparisonPage() {
   return (
     <div className="animate-fade-in p-6 max-w-[1100px]">
-      <a href="/reference" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← Back to Reference</a>
-      <h2 className="mb-1 text-lg font-semibold text-heading">⚔️ Platform Comparison</h2>
+      <BackLink href="/reference" label="Back to Reference" />
+      <h1 className="mb-1 text-lg font-semibold text-heading">⚔️ Platform Comparison</h1>
       <p className="mb-5 text-[13px] text-subtle">Q-SYS vs Crestron vs Extron vs Biamp — feature-by-feature breakdown</p>
 
       <div className="overflow-x-auto rounded-xl border border-border">

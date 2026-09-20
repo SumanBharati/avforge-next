@@ -722,6 +722,7 @@ function avProductToFormValue(p: AVProduct): EquipmentFormValue {
     widthIn: p.width_in,
     heightIn: p.height_in,
     depthIn: p.depth_in,
+    diameterIn: p.diameter_in,
     weightLb: p.weight_lb,
     hfovDeg: p.hfov_deg,
     vfovDeg: p.vfov_deg,
@@ -757,6 +758,7 @@ function applyFormValueToAVProduct(base: AVProduct, v: EquipmentFormValue): AVPr
     width_in: v.widthIn,
     height_in: v.heightIn,
     depth_in: v.depthIn,
+    diameter_in: v.diameterIn ?? null,
     weight_lb: v.weightLb,
     hfov_deg: v.hfovDeg,
     vfov_deg: v.vfovDeg,
@@ -874,6 +876,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
         width_in: product.width_in,
         height_in: product.height_in,
         depth_in: product.depth_in,
+        ...(product.diameter_in != null ? { diameter_in: product.diameter_in } : {}),
         weight_lb: product.weight_lb,
       })
       .eq("id", existingId);
@@ -924,6 +927,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
             width_in: product.width_in,
             height_in: product.height_in,
             depth_in: product.depth_in,
+            ...(product.diameter_in != null ? { diameter_in: product.diameter_in } : {}),
             weight_lb: product.weight_lb,
           });
           if (!error) { added++; setAddedIds((prev) => new Set(prev).add(product.id)); }
@@ -1036,6 +1040,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
         width_in: product.width_in,
         height_in: product.height_in,
         depth_in: product.depth_in,
+        ...(product.diameter_in != null ? { diameter_in: product.diameter_in } : {}),
         weight_lb: product.weight_lb,
       });
       if (!error) setAddedIds((prev) => new Set(prev).add(product.id));
@@ -1627,6 +1632,7 @@ function orgItemToFormValue(item: OrgEquipmentItem | Omit<OrgEquipmentItem, "id"
     widthIn: item.width_in,
     heightIn: item.height_in,
     depthIn: item.depth_in,
+    diameterIn: item.diameter_in ?? null,
     weightLb: item.weight_lb,
     hfovDeg: item.hfov_deg,
     vfovDeg: item.vfov_deg,
@@ -1662,6 +1668,10 @@ function applyFormValueToOrgItem<T extends OrgEquipmentItem | Omit<OrgEquipmentI
     width_in: v.widthIn,
     height_in: v.heightIn,
     depth_in: v.depthIn,
+    // Only carried when there's something to say (a value, or an existing
+    // column being cleared): the column comes from migration 025, and sending
+    // the key at all to a database without it would fail the whole save.
+    ...(v.diameterIn != null || "diameter_in" in base ? { diameter_in: v.diameterIn ?? null } : {}),
     weight_lb: v.weightLb,
     hfov_deg: v.hfovDeg,
     vfov_deg: v.vfovDeg,
@@ -1821,6 +1831,7 @@ function OrgLibraryView({ onBack }: { onBack: () => void }) {
           width_in: editing.width_in,
           height_in: editing.height_in,
           depth_in: editing.depth_in,
+          ...("diameter_in" in editing ? { diameter_in: editing.diameter_in ?? null } : {}),
           weight_lb: editing.weight_lb,
         })
         .eq("id", editing.id);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import BackLink from "@/components/BackLink";
+import FormulaSheetIcon from "@/components/FormulaSheetIcon";
 
 const CTS_FORMULAS = [
   {
@@ -86,9 +87,9 @@ export default function StandardsPage() {
   );
 
   return (
-    <div className="animate-fade-in p-6 max-w-[860px]">
-      <Link href="/references" className="mb-4 inline-block text-[12px] text-subtle hover:text-secondary">← References</Link>
-      <h2 className="mb-1 text-xl font-semibold text-heading">📐 Formula Sheet</h2>
+    <div className="animate-fade-in mx-auto p-6 max-w-[860px]">
+      <BackLink href="/references" label="Back to References" />
+      <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-heading"><FormulaSheetIcon size={26} /> Formula Sheet</h1>
       <p className="mb-5 text-[13px] text-subtle">AVIXA / CTS-D engineering formulas with examples</p>
 
       {/* Search */}

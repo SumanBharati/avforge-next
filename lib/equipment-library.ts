@@ -41,6 +41,10 @@ export interface OrgEquipmentItem {
   coverage_angle_deg: number | null;
   coverage_width_ft: number | null;
   coverage_depth_ft: number | null;
+  // Physical diameter of a round unit, in inches (migration 025). Optional so
+  // everything still compiles and runs against a database that doesn't have
+  // the column yet — it is only ever sent when it has a value.
+  diameter_in?: number | null;
 }
 
 const SEARCHABLE_LIBRARY_COLUMNS = ["manufacturer", "model", "part_number"];

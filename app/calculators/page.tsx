@@ -1,5 +1,12 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import React from 'react';
+import { pageMetadata } from '@/lib/seo';
+import ConduitIcon from '@/components/ConduitIcon';
+import SpeakerWireIcon from '@/components/SpeakerWireIcon';
+import Rj45Icon from '@/components/Rj45Icon';
+import TwoWayArrowsIcon from '@/components/TwoWayArrowsIcon';
+import OhmIcon from '@/components/OhmIcon';
 
 const VideoWallIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
@@ -37,6 +44,12 @@ const DisplaySizingIcon = () => (
   </svg>
 );
 
+export const metadata: Metadata = pageMetadata({
+  title: 'Free AV Calculators for Engineers & Integrators',
+  description: 'Free online AV calculators: display sizing, LED pixel pitch, projector throw, speaker wire gauge, PoE budget, Dante bandwidth, conduit fill and more.',
+  path: '/calculators',
+});
+
 export default function CalculatorsPage() {
   const calculators: { id: string; name: string; icon: React.ReactNode; desc: string }[] = [
     { id: 'display-sizing',   name: 'Display Sizing',     icon: <DisplaySizingIcon />, desc: 'Image height and viewer distance' },
@@ -46,20 +59,20 @@ export default function CalculatorsPage() {
     { id: 'projector-lumens', name: 'Projector Lumens',   icon: '💡', desc: 'Required lumens based on screen size and room' },
     { id: 'led-pitch',        name: 'LED Pixel Pitch',    icon: <VideoWallIcon />, desc: 'Optimal viewing distance for LED walls' },
     { id: 'speaker-coverage', name: 'Speaker Coverage',   icon: '🔊', desc: 'EPR-based speaker aiming calculator' },
-    { id: 'speaker-wire',     name: 'Speaker Wire Gauge', icon: '🔧', desc: 'NEC/AVIXA minimum AWG for any speaker run' },
-    { id: 'speaker-impedance', name: 'Speaker Impedance', icon: '🎚️', desc: 'Series, parallel, and series/parallel load calculator' },
+    { id: 'speaker-wire',     name: 'Speaker Wire Gauge', icon: <SpeakerWireIcon />, desc: 'NEC/AVIXA minimum AWG for any speaker run' },
+    { id: 'speaker-impedance', name: 'Speaker Impedance', icon: <OhmIcon />, desc: 'Series, parallel, and series/parallel load calculator' },
     { id: 'pag-nag',          name: 'PAG / NAG',          icon: '🎤', desc: 'Potential acoustic gain stability' },
     { id: '70v-tap',          name: '70V Tap',            icon: '⚡', desc: 'Transformer tap and wattage calculator' },
-    { id: 'conduit-fill',     name: 'Conduit Fill',       icon: '🔌', desc: 'NEC conduit fill with jam ratio check' },
+    { id: 'conduit-fill',     name: 'Conduit Fill',       icon: <ConduitIcon />, desc: 'NEC conduit fill with jam ratio check' },
     { id: 'rack-heat',        name: 'Rack Heat Load',     icon: '🌡️', desc: 'BTU/hr thermal calculation' },
     { id: 'unit-converter',   name: 'Unit Converter',     icon: '🔄', desc: 'AV-specific unit conversions' },
-    { id: 'poe-budget',       name: 'PoE Budget',         icon: '🔋', desc: 'IEEE af/at/bt power budgeting' },
-    { id: 'dante-bandwidth',  name: 'Dante Bandwidth',    icon: '📶', desc: 'Per-flow Dante/AES67 bandwidth' },
+    { id: 'poe-budget',       name: 'PoE Budget',         icon: <Rj45Icon />, desc: 'IEEE af/at/bt power budgeting' },
+    { id: 'dante-bandwidth',  name: 'Dante Bandwidth',    icon: <TwoWayArrowsIcon />, desc: 'Per-flow Dante/AES67 bandwidth' },
   ];
 
   return (
     <div className="animate-fade-in p-4 sm:p-6 lg:p-8">
-      <h2 style={{ fontSize: 22, marginBottom: 4, fontWeight: 600 }} className="text-heading">Calculators</h2>
+      <h1 style={{ fontSize: 22, marginBottom: 4, fontWeight: 600 }} className="text-heading">Calculators</h1>
       <p style={{ fontSize: 14, marginBottom: 28 }} className="text-subtle">
         Interactive tools with live results and INFOCOMM standard references
       </p>

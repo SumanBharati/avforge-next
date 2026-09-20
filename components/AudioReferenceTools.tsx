@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 
 const INTERCONNECTS = [
   ["RCA", "RCA", "Unbalanced", "Signal → signal; shield → shield"],
@@ -60,6 +60,17 @@ const INTERCONNECT_DIAGRAMS: Record<string, { src: string; alt: string }> = {
 };
 
 export default function AudioReferenceTools() {
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+
+  function toggleRow(key: string) {
+    setOpenRows(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   return (
     <section className="mt-8 space-y-7">
       <div>
@@ -67,20 +78,40 @@ export default function AudioReferenceTools() {
         <p className="mb-3 text-[12px] text-subtle">Common analog-audio cable mappings. Direction matters when converting balanced outputs to unbalanced inputs; follow the equipment maker’s output-stage guidance.</p>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-[12px]">
-            <thead><tr className="border-b border-border bg-forge-surface/60"><th className="px-3 py-2 text-left text-secondary">From</th><th className="px-3 py-2 text-left text-secondary">To</th><th className="px-3 py-2 text-left text-secondary">Link</th><th className="px-3 py-2 text-left text-secondary">Typical wiring</th></tr></thead>
+            <thead><tr className="border-b border-border bg-forge-surface/60"><th className="w-8 px-3 py-2"><span className="sr-only">Show wiring diagram</span></th><th className="px-3 py-2 text-left text-secondary">From</th><th className="px-3 py-2 text-left text-secondary">To</th><th className="px-3 py-2 text-left text-secondary">Link</th><th className="px-3 py-2 text-left text-secondary">Typical wiring</th></tr></thead>
             <tbody>{INTERCONNECTS.map(row => {
               const diagram = INTERCONNECT_DIAGRAMS[`${row[0]}->${row[1]}`];
+              const rowKey = `${row[0]}-${row[1]}`;
+              const isOpen = openRows.has(rowKey);
               return (
-                <Fragment key={`${row[0]}-${row[1]}`}>
-                  <tr className="border-b border-border/50">
+                <Fragment key={rowKey}>
+                  <tr
+                    className={`border-b border-border/50 ${diagram ? "cursor-pointer transition-colors hover:bg-forge-surface/40" : ""}`}
+                    onClick={diagram ? () => toggleRow(rowKey) : undefined}
+                  >
+                    <td className="w-8 py-2 pl-3 pr-0">
+                      {diagram && (
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          aria-controls={`interconnect-diagram-${rowKey}`}
+                          aria-label={`${isOpen ? "Hide" : "Show"} wiring diagram for ${row[0]} to ${row[1]}`}
+                          className="flex h-5 w-5 items-center justify-center text-subtle"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" className={`transition-transform ${isOpen ? "rotate-90" : ""}`}>
+                            <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      )}
+                    </td>
                     <td className="px-3 py-2 font-medium text-muted">{row[0]}</td>
                     <td className="px-3 py-2 font-medium text-muted">{row[1]}</td>
                     <td className="px-3 py-2 text-subtle">{row[2]}</td>
                     <td className="px-3 py-2 text-subtle">{row[3]}</td>
                   </tr>
-                  {diagram && (
-                    <tr className="border-b border-border/50">
-                      <td colSpan={4} className="bg-forge-surface/30 p-3">
+                  {diagram && isOpen && (
+                    <tr id={`interconnect-diagram-${rowKey}`} className="border-b border-border/50">
+                      <td colSpan={5} className="bg-forge-surface/30 p-3">
                         <Image
                           src={diagram.src}
                           alt={diagram.alt}

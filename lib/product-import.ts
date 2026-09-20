@@ -1,6 +1,7 @@
-import type { AVProduct } from "@/lib/av-products";
+import type { AVProduct, ProductImportRow } from "@/lib/av-products";
 
-type ImportProduct = Omit<AVProduct,"id">;
+// Placement / FOV / coverage columns are deliberately absent: a spreadsheet has none, and sending null would wipe what the library already holds.
+type ImportProduct = ProductImportRow;
 
 const text=(value:unknown)=>String(value??"").trim();
 const numeric=(value:unknown)=>{
@@ -76,8 +77,6 @@ export function parseProductRows(rows:unknown[][]):{products:ImportProduct[];err
       rack_mounted:yes(rackDetail),rack_units:numeric(get(indexes.rackUnits)),width_in:numeric(get(indexes.width)),height_in:numeric(get(indexes.height)),depth_in:numeric(get(indexes.depth)),
       diameter_in:numeric(get(indexes.diameter)),weight_lb:numeric(get(indexes.weight)),rack_mountable_detail:rackDetail||null,rack_ear_included:rackEarDetail?yes(rackEarDetail):null,rack_ear_detail:rackEarDetail||null,
       shelf_required:shelfDetail?yes(shelfDetail):null,shelf_requirement:shelfDetail||null,voltage_detail:voltageDetail||null,current_detail:currentDetail||null,power_supply_type:get(indexes.powerSupply)||null,notes:get(indexes.notes)||null,
-      rd_type:null,rd_wall:null,rd_width_ft:null,rd_height_ft:null,rd_icon:null,
-      hfov_deg:null,vfov_deg:null,coverage_pattern:null,coverage_diameter_ft:null,coverage_angle_deg:null,coverage_width_ft:null,coverage_depth_ft:null,
     });
   }
   return {products,errors};

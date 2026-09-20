@@ -1,8 +1,9 @@
 import Link from "next/link";
+import FormulaSheetIcon from "@/components/FormulaSheetIcon";
 
 export default function ReferencePage() {
   const refs = [
-    { id: "standards",    name: "Formula Sheet",        icon: "📐", desc: "AVIXA / CTS-D engineering formulas with examples" },
+    { id: "standards",    name: "Formula Sheet",        icon: <FormulaSheetIcon />, desc: "AVIXA / CTS-D engineering formulas with examples" },
     { id: "poe-database", name: "PoE Device Database",  icon: "📦", desc: "Per-device PoE class and draw reference" },
   ];
 

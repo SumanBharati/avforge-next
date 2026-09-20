@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import Image from "next/image";
 import type { HomeBanner } from "@/lib/home-banners";
 import { useTheme } from "@/components/ThemeProvider";
 
 const AUTOPLAY_MS = 5000;
+// The framed screenshot fills ~82% of a half-width column on desktop and ~82% of the full width on mobile.
+const BANNER_IMAGE_SIZES = "(min-width: 1024px) 42vw, 84vw";
 
 export default function HomeBannerCarousel({ banners }: { banners: HomeBanner[] }) {
   const { theme } = useTheme();
@@ -72,19 +74,15 @@ export default function HomeBannerCarousel({ banners }: { banners: HomeBanner[] 
           const purpleDetails = banner.detailsTheme === "purple";
           const seamlessPurple = banner.seamlessBackground === true;
           const shineEffect = banner.shineEffect === true;
+          const Title = index === 0 ? "h1" : "h2";
           const imageSrc = theme === "light" && banner.imageSrcLight ? banner.imageSrcLight : banner.imageSrc;
           const secondaryImageSrc = theme === "light" && banner.secondaryImageSrcLight ? banner.secondaryImageSrcLight : banner.secondaryImageSrc;
           const details = (
             <div className={`relative flex h-1/2 w-full items-center overflow-hidden px-8 py-10 sm:px-12 lg:h-full lg:w-1/2 lg:px-[7vw] ${seamlessPurple ? "bg-transparent" : purpleDetails ? "bg-gradient-to-br from-violet-700 via-blue-600 to-indigo-950" : "bg-forge-bg"} ${shineEffect ? "banner-shine" : ""}`}>
               <div className="relative z-10 mx-auto max-w-xl lg:mx-0">
                 <p className={`mb-4 text-xs font-bold uppercase tracking-[0.22em] ${purpleDetails ? "text-white/70" : "text-blue-500"}`}>{banner.eyebrow}</p>
-                <h1 className={`font-display text-3xl font-bold leading-tight sm:text-4xl xl:text-5xl ${purpleDetails ? "text-white" : "text-heading"}`}>{banner.title}</h1>
+                <Title className={`font-display text-3xl font-bold leading-tight sm:text-4xl xl:text-5xl ${purpleDetails ? "text-white" : "text-heading"}`}>{banner.title}</Title>
                 <p className={`mt-5 max-w-lg text-base leading-7 sm:text-lg ${purpleDetails ? "text-white/80" : "text-muted"}`}>{banner.description}</p>
-                {banner.ctaHref ? (
-                  <Link href={banner.ctaHref} className={`mt-7 inline-flex rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${purpleDetails ? "border border-white/30 bg-white/10 text-white hover:bg-white/20" : "border border-blue-500/30 text-blue-500 hover:bg-blue-500/10"}`}>{banner.ctaLabel}</Link>
-                ) : (
-                  <span className={`mt-7 inline-flex rounded-lg px-4 py-2 text-sm font-semibold ${purpleDetails ? "border border-white/30 bg-white/10 text-white" : "border border-blue-500/30 text-blue-500"}`}>Content coming soon</span>
-                )}
               </div>
             </div>
           );
@@ -94,20 +92,24 @@ export default function HomeBannerCarousel({ banners }: { banners: HomeBanner[] 
               <div className="absolute -bottom-28 -right-20 h-96 w-96 rounded-full border border-white/10" />
               {secondaryImageSrc ? (
                 <div className="relative flex h-[82%] w-[82%] items-center justify-center">
-                  <img src={imageSrc} alt={banner.imageAlt || banner.imageLabel} className="h-full w-full rounded-2xl object-fill shadow-2xl shadow-black/30" />
-                  <img
+                  <Image src={imageSrc} alt={banner.imageAlt || banner.imageLabel} width={1448} height={1086} sizes={BANNER_IMAGE_SIZES} priority={index === 0} loading={index <= 1 ? "eager" : "lazy"} className="h-full w-full rounded-2xl object-fill shadow-2xl shadow-black/30" />
+                  <Image
                     src={secondaryImageSrc}
                     alt={banner.secondaryImageAlt || "Related feature view"}
+                    width={1301}
+                    height={1209}
+                    sizes="(min-width: 1024px) 14vw, 26vw"
+                    loading="lazy"
                     className="absolute bottom-[4%] right-[3%] z-10 h-auto max-h-[52%] w-[31%] rounded-xl border border-white/35 object-contain shadow-2xl shadow-black/40"
                   />
                 </div>
               ) : (
-                <img src={imageSrc} alt={banner.imageAlt || banner.imageLabel} className="relative h-[78%] w-[78%] rounded-2xl object-fill shadow-2xl shadow-black/30" />
+                <Image src={imageSrc} alt={banner.imageAlt || banner.imageLabel} width={1448} height={1086} sizes={BANNER_IMAGE_SIZES} priority={index === 0} loading={index <= 1 ? "eager" : "lazy"} className="relative h-[78%] w-[78%] rounded-2xl object-fill shadow-2xl shadow-black/30" />
               )}
             </div>
           ) : imageSrc ? (
             <div className="flex h-1/2 w-full items-center justify-center overflow-hidden bg-white lg:h-full lg:w-1/2">
-              <img src={imageSrc} alt={banner.imageAlt || banner.imageLabel} className="h-full w-full object-fill" />
+              <Image src={imageSrc} alt={banner.imageAlt || banner.imageLabel} width={1448} height={1086} sizes="(min-width: 1024px) 50vw, 100vw" loading={index <= 1 ? "eager" : "lazy"} className="h-full w-full object-fill" />
             </div>
           ) : (
             <div className={`relative flex h-1/2 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-violet-700 via-blue-600 to-indigo-950 lg:h-full lg:w-1/2 ${shineEffect ? "banner-shine" : ""}`}>

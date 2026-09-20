@@ -26,6 +26,8 @@ export interface EquipmentFormValue {
   widthIn: number | null;
   heightIn: number | null;
   depthIn: number | null;
+  /** Physical diameter of a round unit (a ceiling speaker or mic). Optional so a host that doesn't store it can ignore it. */
+  diameterIn?: number | null;
   weightLb: number | null;
   hfovDeg: number | null;
   vfovDeg: number | null;
@@ -383,12 +385,12 @@ export default function EquipmentFormModal({
               />
               <label htmlFor={rackEarsId} className="text-[12px] text-body">Includes rack ears</label>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] gap-3">
               <div>
                 <label className={labelCls}>Weight (lb)</label>
                 <input type="number" min={0} step="0.1" value={value.weightLb ?? ""} onChange={(e) => onChange({ ...value, weightLb: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <div>
                   <label className={labelCls}>W (in)</label>
                   <input type="number" min={0} step="0.1" value={value.widthIn ?? ""} onChange={(e) => onChange({ ...value, widthIn: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
@@ -400,6 +402,19 @@ export default function EquipmentFormModal({
                 <div>
                   <label className={labelCls}>D (in)</label>
                   <input type="number" min={0} step="0.1" value={value.depthIn ?? ""} onChange={(e) => onChange({ ...value, depthIn: e.target.value === "" ? null : Number(e.target.value) })} className={inputCls} placeholder="—" />
+                </div>
+                <div>
+                  <label className={labelCls}>Dia (in)</label>
+                  {/* A round unit is as wide as it is tall, so entering a diameter also sets W and H to it
+                      (still editable afterwards) — that is the footprint drawn on the plan. */}
+                  <input
+                    type="number" min={0} step="0.1" value={value.diameterIn ?? ""}
+                    onChange={(e) => {
+                      const dia = e.target.value === "" ? null : Number(e.target.value);
+                      onChange({ ...value, diameterIn: dia, ...(dia != null && dia > 0 ? { widthIn: dia, heightIn: dia } : {}) });
+                    }}
+                    className={inputCls} placeholder="—"
+                  />
                 </div>
               </div>
             </div>

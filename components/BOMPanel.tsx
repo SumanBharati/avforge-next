@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { useBOM, BOMSource } from '@/lib/bom-context';
+import { useBOM, BOMSource, BOM_UNIT_DRAG_TYPE, type BOMDragUnit } from '@/lib/bom-context';
 
 const SOURCE_META: Record<BOMSource, { label: string; color: string }> = {
   'signal-flow':    { label: 'SIG',  color: '#8b5cf6' },
@@ -16,7 +16,7 @@ interface BOMPanelProps {
 }
 
 export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPanelProps) {
-  const { bomItems, totalQty, totalCost, setPrice, unitPriceOf } = useBOM();
+  const { bomItems, totalQty, totalCost, setPrice, unitPriceOf, hiddenUnits } = useBOM();
 
   return (
     <div style={{
@@ -77,8 +77,8 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                 <thead>
                   <tr>
                     <th style={{ ...thSt, textAlign: 'left', paddingLeft: 10 }}>#</th>
-                    <th style={{ ...thSt, textAlign: 'left' }}>Device</th>
-                    <th style={thSt}>Mfr</th>
+                    <th style={{ ...thSt, textAlign: 'left' }}>Make</th>
+                    <th style={{ ...thSt, textAlign: 'left' }}>Model</th>
                     <th style={thSt}>Qty</th>
                     <th style={{ ...thSt, textAlign: 'right' }}>Unit $</th>
                     <th style={{ ...thSt, textAlign: 'right', paddingRight: 10 }}>Ext $</th>
@@ -88,17 +88,53 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                   {bomItems.map((item, i) => {
                     const unitPrice = unitPriceOf(item);
                     const extPrice = unitPrice * item.qty;
+                    // A row with a unit that Room Designer isn't showing — hidden
+                    // there, or never placed in it at all (it only exists in Signal
+                    // Flow or the rack) — can be dragged onto the Room Designer
+                    // canvas to put that unit on the plan. (Units without an id
+                    // predate cross-tool identity and can't be matched up.)
+                    const dropTarget = hiddenUnits?.source === 'room-designer' ? hiddenUnits : null;
+                    const unplacedId = dropTarget
+                      ? item.itemIds.find(id => !id.startsWith('anon:') && !item.placement['room-designer'].includes(id))
+                      : undefined;
+                    const unplacedIsHidden = !!unplacedId && !!dropTarget?.items.some(h => h.itemId === unplacedId);
                     return (
-                      <tr key={item.key} style={{ background: i % 2 === 0 ? 'transparent' : 'rgb(var(--forge-surface) / 0.3)' }}>
+                      <tr
+                        key={item.key}
+                        draggable={!!unplacedId}
+                        onDragStart={unplacedId ? e => {
+                          const unit: BOMDragUnit = {
+                            itemId: unplacedId, productKey: item.key,
+                            name: item.unitNames[unplacedId] || item.name,
+                            mfr: item.mfr || undefined, model: item.model || undefined, cat: item.cat || undefined,
+                          };
+                          e.dataTransfer.setData(BOM_UNIT_DRAG_TYPE, JSON.stringify(unit));
+                          e.dataTransfer.setData('text/plain', unit.name);
+                          e.dataTransfer.effectAllowed = 'move';
+                        } : undefined}
+                        title={unplacedId ? (unplacedIsHidden ? 'Hidden in ROOM' : 'Not in ROOM yet') + ' — drag onto the canvas to place it' : undefined}
+                        style={{
+                          background: i % 2 === 0 ? 'transparent' : 'rgb(var(--forge-surface) / 0.3)',
+                          cursor: unplacedId ? 'grab' : undefined,
+                        }}
+                      >
                         <td style={{ ...tdSt, paddingLeft: 10, color: 'rgb(var(--text-subtle))' }}>{i + 1}</td>
+                        <td style={{ ...tdSt, padding: '6px 6px', color: 'rgb(var(--text-muted))', fontSize: 10.5 }}>
+                          {item.make}
+                        </td>
                         <td style={{ ...tdSt, padding: '6px 10px' }}>
-                          <div style={{ color: 'rgb(var(--text-body))', fontWeight: 500, fontSize: 11 }}>{item.name}</div>
+                          <div style={{ color: 'rgb(var(--text-body))', fontWeight: 500, fontSize: 11 }}>{item.model}</div>
                           {item.partNumber && (
                             <div style={{ color: 'rgb(var(--text-muted))', fontSize: 9.5, fontFamily: "'JetBrains Mono',monospace", marginTop: 1 }}>
                               PN: {item.partNumber}
                             </div>
                           )}
-                          <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
+                          <div style={{ display: 'flex', gap: 3, marginTop: 2, alignItems: 'center' }}>
+                            {unplacedId && (
+                              <span style={{ fontSize: 8, color: 'rgb(var(--text-subtle))', letterSpacing: '0.02em' }}>
+                                ⠿ {unplacedIsHidden ? 'hidden in' : 'not in'} {SOURCE_META['room-designer'].label} — drag to place
+                              </span>
+                            )}
                             {item.sources.map(src => (
                               <span key={src} style={{
                                 fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
@@ -110,9 +146,6 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                               </span>
                             ))}
                           </div>
-                        </td>
-                        <td style={{ ...tdSt, textAlign: 'center', color: 'rgb(var(--text-muted))', fontSize: 10 }}>
-                          {item.mfr || '—'}
                         </td>
                         <td style={{ ...tdSt, textAlign: 'center' }}>
                           <span style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', padding: '2px 8px', borderRadius: 10, fontWeight: 600, fontSize: 11 }}>
@@ -145,6 +178,27 @@ export default function BOMPanel({ collapsed, onToggle, propertiesSlot }: BOMPan
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          )}
+
+          {/* Equipment this tool has hidden. Still in the BOM and in every other
+              tool — just not drawn here — so it can be brought back. */}
+          {hiddenUnits && hiddenUnits.items.length > 0 && (
+            <div style={{ padding: '10px 14px', borderTop: '1px solid rgb(var(--border))' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'rgb(var(--text-subtle))', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+                Hidden in {SOURCE_META[hiddenUnits.source].label} ({hiddenUnits.items.length})
+              </div>
+              {hiddenUnits.items.map(item => (
+                <div key={item.itemId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 0' }}>
+                  <span style={{ fontSize: 11, color: 'rgb(var(--text-body))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                  <button
+                    onClick={() => hiddenUnits.show(item.itemId)}
+                    style={{ flexShrink: 0, fontSize: 10, fontWeight: 600, color: '#8b5cf6', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}
+                  >
+                    Show
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 

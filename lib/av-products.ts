@@ -103,8 +103,19 @@ export async function getProductById(id: string): Promise<AVProduct | null> {
   return data ?? null;
 }
 
+// Columns a spreadsheet import doesn't carry: Room Designer placement, camera
+// FOV and mic/speaker coverage. Leaving them out of an upsert payload leaves
+// whatever the row already has, where sending null would wipe it.
+export type ProductPlacementKey =
+  | "rd_type" | "rd_wall" | "rd_width_ft" | "rd_height_ft" | "rd_icon"
+  | "hfov_deg" | "vfov_deg"
+  | "coverage_pattern" | "coverage_diameter_ft" | "coverage_angle_deg" | "coverage_width_ft" | "coverage_depth_ft";
+
+/** A product as a spreadsheet import supplies it — everything but the placement columns. */
+export type ProductImportRow = Omit<AVProduct, "id" | ProductPlacementKey> & Partial<Pick<AVProduct, ProductPlacementKey>>;
+
 export async function upsertProducts(
-  products: Omit<AVProduct, "id">[]
+  products: ProductImportRow[]
 ): Promise<{ count: number; error?: string }> {
   if (products.length === 0) return { count: 0 };
   const { data, error } = await supabase

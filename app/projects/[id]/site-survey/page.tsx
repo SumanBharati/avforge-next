@@ -1187,6 +1187,7 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
           onRecordingChange={setAiRecording}
           shouldSaveAndClose={aiSaveAndClose}
           existingRooms={survey.buildings.flatMap(b => b.rooms.map(r => r.data.room_name || r.name))}
+          activeRoomName={currentRoom ? (currentRoom.data.room_name || currentRoom.name) : undefined}
           savedSummaries={((survey as any).ai_summaries as any[]) || []}
           onSaveSummary={(summary: any) => {
             const next = { ...survey, ai_summaries: [...(((survey as any).ai_summaries as any[]) || []), summary] } as any;
@@ -1210,7 +1211,8 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
             // writing the AI's data, including any new room, into the wrong
             // building, making it look like room creation had failed.
             const building = next.buildings.find(b => b.id === activeView?.buildingId) || next.buildings[0];
-            if (!building) return;
+            const result: ApplyResult = { updated: [], created: [] };
+            if (!building) return result;
 
             // Apply building-level data
             if (aiData.building) {
@@ -1234,9 +1236,11 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
                 if (!room && !roomName && aiData.rooms.length === 1 && activeRoomId) {
                   room = building.rooms.find(r => r.id === activeRoomId);
                 }
+                let isNew = false;
                 if (!room && roomName) {
                   room = { id: crypto.randomUUID(), name: roomName, data: { room_name: roomName } };
                   building.rooms.push(room);
+                  isNew = true;
                 }
                 if (room) {
                   Object.entries(aiRoom).forEach(([k, v]) => {
@@ -1244,11 +1248,15 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
                       room!.data[k] = v;
                     }
                   });
+                  const label = room.data.room_name || room.name;
+                  const bucket = isNew ? result.created : result.updated;
+                  if (!bucket.includes(label)) bucket.push(label);
                 }
               });
             }
 
             persist(next);
+            return result;
             // Don't close the modal — applyAndFlash already auto-saves this
             // to Past Summaries; leaving it open lets the user keep recording
             // or apply again. They close it themselves.
@@ -1273,13 +1281,16 @@ export default function SiteSurveyPage({ params }: { params: { id: string } }) {
 }
 
 /* ── AI Recording Modal ───────────────────────────────────── */
-function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAndClose, existingRooms, onApply, savedSummaries, onSaveSummary, onDeleteSummary }: {
+type ApplyResult = { updated: string[]; created: string[] };
+
+function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAndClose, existingRooms, activeRoomName, onApply, savedSummaries, onSaveSummary, onDeleteSummary }: {
   onClose: () => void;
   onMinimize: () => void;
   onRecordingChange: (recording: boolean) => void;
   shouldSaveAndClose: boolean;
   existingRooms: string[];
-  onApply: (data: any) => void;
+  activeRoomName?: string;
+  onApply: (data: any) => ApplyResult | void;
   savedSummaries: any[];
   onSaveSummary: (summary: any) => void;
   onDeleteSummary: (index: number) => void;
@@ -1294,6 +1305,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
   const [aiResult, setAiResult] = useState<any>(null);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [applyFlash, setApplyFlash] = useState(false);
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
   const [appliedHistoryIndex, setAppliedHistoryIndex] = useState<number | null>(null);
   const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -1306,7 +1318,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
   }
 
   function applyAndFlash(data: any) {
-    onApply(data);
+    setApplyResult(onApply(data) ?? null);
     // Only auto-save a fresh extraction — reapplying an already-saved
     // Past Summary would otherwise create a duplicate entry of itself.
     if (!viewingSaved) {
@@ -1319,7 +1331,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
       });
     }
     setApplyFlash(true);
-    setTimeout(() => setApplyFlash(false), 2000);
+    setTimeout(() => setApplyFlash(false), 6000);
   }
 
   function applyHistoryAndFlash(data: any, i: number) {
@@ -1359,7 +1371,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
       const res = await fetch("/api/summarize-survey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: cleanTranscript, existingRooms }),
+        body: JSON.stringify({ transcript: cleanTranscript, existingRooms, activeRoom: activeRoomName }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to process");
@@ -1543,7 +1555,7 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
       const res = await fetch("/api/summarize-survey", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: cleanTranscript, existingRooms }),
+        body: JSON.stringify({ transcript: cleanTranscript, existingRooms, activeRoom: activeRoomName }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to process");
@@ -1793,7 +1805,15 @@ function AIRecordingModal({ onClose, onMinimize, onRecordingChange, shouldSaveAn
               {applyFlash ? "Applied to Survey" : "Apply to Survey"}
             </button>
             {applyFlash && (
-              <p className="mt-2 text-xs text-emerald-400">Applied — and automatically saved to Past Summaries with a date/time stamp.</p>
+              <p className="mt-2 text-xs text-emerald-400">
+                {applyResult && (applyResult.updated.length > 0 || applyResult.created.length > 0) ? (
+                  <>
+                    {applyResult.updated.length > 0 && <>Filled in: {applyResult.updated.join(", ")}. </>}
+                    {applyResult.created.length > 0 && <>Created new room{applyResult.created.length > 1 ? "s" : ""}: {applyResult.created.join(", ")}. </>}
+                  </>
+                ) : "Applied. "}
+                Saved to Past Summaries with a date/time stamp.
+              </p>
             )}
           </div>
           </>}

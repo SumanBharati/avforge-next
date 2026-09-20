@@ -1,5 +1,8 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import React from 'react';
+import { pageMetadata } from '@/lib/seo';
+import FormulaSheetIcon from '@/components/FormulaSheetIcon';
 
 const ConnectorIcon = () => (
   <svg width="30" height="30" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
@@ -33,17 +36,23 @@ const ResolutionIcon = () => (
   </svg>
 );
 
+export const metadata: Metadata = pageMetadata({
+  title: 'AV Reference Library — Pinouts, Formulas & More',
+  description: 'Free AV reference library: connector and cable pinouts, microphone polar patterns, display resolution tables and the AVIXA / CTS-D formula sheet.',
+  path: '/references',
+});
+
 export default function ReferencesPage() {
   const references: { id: string; name: string; icon: React.ReactNode; desc: string }[] = [
     { id: 'connectors',       name: 'Connectors & Cables', icon: <ConnectorIcon />, desc: 'Pinouts, versions, and field wiring' },
     { id: 'microphone-polar-patterns', name: 'Microphone Polar Patterns', icon: <PolarPatternIcon />, desc: 'Pickup direction and rejection reference' },
     { id: 'resolution-reference', name: 'Resolution Reference', icon: <ResolutionIcon />, desc: 'Computed aspect ratios and megapixels' },
-    { id: 'standards',        name: 'Formula Sheet',      icon: '📐', desc: 'AVIXA / CTS-D engineering formulas with examples' },
+    { id: 'standards',        name: 'Formula Sheet',      icon: <FormulaSheetIcon />, desc: 'AVIXA / CTS-D engineering formulas with examples' },
   ];
 
   return (
     <div className="animate-fade-in p-4 sm:p-6 lg:p-8">
-      <h2 style={{ fontSize: 22, marginBottom: 4, fontWeight: 600 }} className="text-heading">References</h2>
+      <h1 style={{ fontSize: 22, marginBottom: 4, fontWeight: 600 }} className="text-heading">References</h1>
       <p style={{ fontSize: 14, marginBottom: 28 }} className="text-subtle">
         Lookup tables and standards for pinouts, polar patterns, and resolutions
       </p>

@@ -22,7 +22,7 @@ interface CalcResult {
 function SectionHeader({ title }: { icon?: React.ReactNode; title: string }) {
   return (
     <div className="mb-4 border-b border-border pb-2.5">
-      <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{title}</h3>
+      <h2 className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{title}</h2>
     </div>
   );
 }

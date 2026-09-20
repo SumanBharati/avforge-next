@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import { searchProducts } from "@/lib/av-products";
 import { searchOrgLibrary } from "@/lib/equipment-library";
-import { useBOM, roomDeviceToBOM, type BOMDeviceEntry } from "@/lib/bom-context";
+import { loadUnitSpecs, diffSpec, identityAfterEdit, isLibraryProduct, specFromRoomDevice, applySpecToRoomDevice } from "@/lib/unit-specs";
+import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, roomDeviceToBOM, BOM_UNIT_DRAG_TYPE, type BOMDeviceEntry, type BOMDragUnit } from "@/lib/bom-context";
 import { useOrg } from "@/components/OrgProvider";
 import BOMPanel from "@/components/BOMPanel";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
@@ -20,7 +21,7 @@ import { loadToolData, saveToolData } from "@/lib/tool-data";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   fetchScopeUnits, loadScopeManifest, saveScopeManifest,
-  wipeRoomDesignerEquipment, wipeSignalFlowEquipment, SCOPE_REIMPORT_WARNING,
+  wipeRoomDesignerEquipment, wipeSignalFlowEquipment, isRoomFurniture, SCOPE_REIMPORT_WARNING,
 } from "@/lib/scope-manifest";
 
 /* Theme-aware canvas colors */
@@ -130,6 +131,7 @@ interface PlacedDevice extends DeviceCatalogItem {
   amp_draw?: number | null; voltage?: number | null; power_watts?: number | null; btu_hr?: number | null;
   rackMounted?: boolean; rack_units?: number | null; rack_ear_included?: boolean;
   width_in?: number | null; height_in?: number | null; depth_in?: number | null; weight_lb?: number | null;
+  diameter_in?: number | null;
 }
 
 // Revit-style "Elevation Marker" — a placeable, rotatable tag dropped
@@ -194,6 +196,7 @@ function deviceToFormValue(d: PlacedDevice): EquipmentFormValue {
     widthIn: Math.round((d.w || 0) * 12 * 100) / 100,
     heightIn: Math.round((d.h || 0) * 12 * 100) / 100,
     depthIn: d.depth_in ?? null,
+    diameterIn: d.diameter_in ?? null,
     weightLb: d.weight_lb ?? null,
     hfovDeg: d.hfov ?? null,
     vfovDeg: d.vfov ?? null,
@@ -229,6 +232,7 @@ function applyFormValueToDevice(d: PlacedDevice, v: EquipmentFormValue): PlacedD
     width_in: v.widthIn,
     height_in: v.heightIn,
     depth_in: v.depthIn,
+    diameter_in: v.diameterIn ?? null,
     weight_lb: v.weightLb,
     w: v.widthIn != null && v.widthIn > 0 ? v.widthIn / 12 : d.w,
     h: v.heightIn != null && v.heightIn > 0 ? v.heightIn / 12 : d.h,
@@ -423,6 +427,10 @@ export default function RoomDesignerPage() {
   // Set when a ctrl+click toggle or group drag just happened, so the click that
   // follows on mouseup doesn't wipe the multi-selection via the canvas handler
   const suppressClickClear = useRef(false);
+  // Latest "built-in table/chairs -> placed furniture" converter, for the
+  // window-level Ctrl+C handler (its effect doesn't re-subscribe on table
+  // edits, so it would otherwise copy from a stale table position).
+  const copyBuiltInRef = useRef<() => PlacedDevice[]>(() => []);
 
   const [deletedChairs, setDeletedChairs] = useState<Set<number>>(new Set());
   const [tableDeleted,  setTableDeleted]  = useState(false);
@@ -447,7 +455,7 @@ export default function RoomDesignerPage() {
   // Table edge resize drag
   const [tableResizeDrag, setTableResizeDrag] = useState<{edge:"left"|"right"|"top"|"bottom";startSvgX:number;startSvgY:number;origWidth:number;origLength:number;origSeats:number}|null>(null);
   // Multi-item drag
-  const [multiDrag,     setMultiDrag]     = useState<{startSvgX:number;startSvgY:number;origTableCX:number;origWallDist:number;origChairOffsets:Record<number,{dx:number;dy:number}>;items:Set<string>}|null>(null);
+  const [multiDrag,     setMultiDrag]     = useState<{startSvgX:number;startSvgY:number;origTableCX:number;origWallDist:number;origChairOffsets:Record<number,{dx:number;dy:number}>;items:Set<string>;origDevs:{uid:number;x:number;y:number}[]}|null>(null);
 
   // Undo history
   type UndoSnapshot = {
@@ -455,6 +463,7 @@ export default function RoomDesignerPage() {
     deletedWalls: Set<string>; deletedChairs: Set<number>; tableDeleted: boolean;
     doorDeleted: boolean; placedDevices: PlacedDevice[]; showTable: boolean; placedDoors: PlacedDoor[]; tableLengthOverride: number|null; tableRotation: number;
     tableCenterX: number|null; tableWallDist: number; chairOffsets: Record<number,{dx:number;dy:number}>;
+    hiddenDevices: PlacedDevice[];
   };
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
   const pushUndo = () => {
@@ -466,6 +475,7 @@ export default function RoomDesignerPage() {
       placedDevices: [...placedDevices],
       showTable, tableCenterX, tableWallDist, placedDoors: [...placedDoors], tableLengthOverride, tableRotation,
       chairOffsets: {...chairOffsets},
+      hiddenDevices: [...hiddenDevices],
     }]);
   };
   const popUndo = () => {
@@ -485,10 +495,18 @@ export default function RoomDesignerPage() {
       setTableCenterX(snap.tableCenterX);
       setTableWallDist(snap.tableWallDist);
       setChairOffsets({...snap.chairOffsets});
+      setHiddenDevices([...snap.hiddenDevices]);
       return prev.slice(0, -1);
     });
   };
   const [selectedUid,   setSelectedUid]   = useState<number|null>(null);
+  // Equipment hidden from THIS view only. Kept in the saved design (so it isn't
+  // re-imported from Signal Flow) but not drawn, listed or exported here; every
+  // other tool and the BOM still have it. Not part of `placedDevices` so the
+  // rest of this file never has to know to skip it.
+  const [hiddenDevices, setHiddenDevices] = useState<PlacedDevice[]>([]);
+  // Equipment awaiting the "delete from every tool?" confirmation.
+  const [deleteConfirm, setDeleteConfirm] = useState<{ uids: number[]; names: string[] } | null>(null);
   const [clipboard,     setClipboard]     = useState<PlacedDevice[]>([]);
   const [generatingFromScope, setGeneratingFromScope] = useState(false);
   const [scopeReimportConfirm, setScopeReimportConfirm] = useState(false);
@@ -801,17 +819,30 @@ export default function RoomDesignerPage() {
     }
   }, []);
 
+  // The room's built-in table and chairs are drawn from `showTable` plus a set
+  // of edits layered on top (table deleted, individual chairs deleted, table
+  // moved/rotated, chairs nudged, edges removed). All of it has to be saved
+  // together: persisting only `showTable` meant a deleted table and chairs
+  // came straight back on refresh with their default layout.
+  const tableEditsConfig = () => ({
+    tableDeleted, tableCenterX, tableRotation, chairOffsets,
+    deletedChairs: Array.from(deletedChairs),
+    deletedWalls: Array.from(deletedWalls),
+    hiddenDevices,
+  });
+
   const triggerAutoSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, placedDoors,
+        ...tableEditsConfig(),
         annotations: annotate.annotations,
         floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
       });
     }, 1500);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, tableDeleted, tableCenterX, tableRotation, chairOffsets, deletedChairs, deletedWalls, hiddenDevices, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Auto-save on changes (after step 2 is active, and only once this room's
   // own saved design has actually finished loading — otherwise the reset
@@ -822,13 +853,191 @@ export default function RoomDesignerPage() {
   }, [placedDevices, placedDoors, tableShape, tableSeats, tableWidth, tableWallDist, showTable, selectedWall, annotate.annotations, step, rdLoaded, triggerAutoSave]);
 
   // Sync placed AV devices to shared BOM
-  const { updateSlice } = useBOM();
+  const { updateSlice, reloadBaseline, updateUnitSpec, updateUnitSpecs } = useBOM();
   const { activeOrg } = useOrg();
   React.useEffect(() => {
-    updateSlice('room-designer', placedDevices
-      .map(roomDeviceToBOM)
-      .filter(Boolean) as BOMDeviceEntry[]);
-  }, [placedDevices, updateSlice]);
+    updateSlice('room-designer', [
+      ...(placedDevices.map(roomDeviceToBOM).filter(Boolean) as BOMDeviceEntry[]),
+      // Hidden here, still bought: counted by the BOM but without the ROOM tag.
+      ...(hiddenDevices.map(roomDeviceToBOM).filter(Boolean) as BOMDeviceEntry[]).map(e => ({ ...e, hidden: true })),
+    ]);
+  }, [placedDevices, hiddenDevices, updateSlice]);
+
+  // One unit, one existence across Room Designer / Signal Flow / the rack:
+  // deleting equipment here removes it from the other two and from the BOM
+  // (a scope re-import rebuilds everything itself, so it is left out). Hidden
+  // equipment is still this tool's, so hiding never reads as a deletion.
+  useRetireRemovedUnits(
+    "room-designer",
+    [...placedDevices, ...hiddenDevices].filter(d => !isRoomFurniture(d)).map(d => d.itemId),
+    rdLoaded,
+    generatingFromScope,
+  );
+
+  // A unit edited or replaced in another tool carries that change here: lay the
+  // room's recorded unit specs over this tool's copies once its own data is in.
+  React.useEffect(() => {
+    if (!rdLoaded || !projectParam) return;
+    let cancelled = false;
+    loadUnitSpecs(roomParam, projectParam).then(specs => {
+      if (cancelled) return;
+      // A real product this tool holds that nobody has shared yet (swapped in
+      // before changes were shared between tools): share it now, so Signal Flow
+      // and the rack show it instead of their still-generic copy.
+      const unshared = [...placedDevices, ...hiddenDevices]
+        .filter(d => d.itemId && !isRoomFurniture(d) && isLibraryProduct(d)
+          && (!specs[d.itemId] || (!("ports" in specs[d.itemId]) && (d.ports?.length ?? 0) > 0)))
+        .map(d => [d.itemId as string, specFromRoomDevice(d)] as [string, ReturnType<typeof specFromRoomDevice>]);
+      if (unshared.length) updateUnitSpecs(unshared);
+      if (Object.keys(specs).length === 0) return;
+      const overlay = (list: PlacedDevice[]) => {
+        let changed = false;
+        const next = list.map(d => {
+          const sp = d.itemId ? specs[d.itemId] : undefined;
+          if (!sp) return d;
+          changed = true;
+          return applySpecToRoomDevice(d, sp);
+        });
+        return changed ? next : list;
+      };
+      setPlacedDevices(overlay);
+      setHiddenDevices(overlay);
+    });
+    return () => { cancelled = true; };
+  }, [rdLoaded, roomParam, projectParam]);
+
+  // Delete vs Hide. Delete removes the unit from every tool and the BOM, so
+  // equipment always asks first; walls, tables and chairs are just drawing
+  // geometry and are deleted straight away.
+  const deleteDevicesNow = (uids: number[]) => {
+    const gone = new Set(uids);
+    pushUndo();
+    setPlacedDoors(prev => prev.filter(d => !gone.has(d.wallUid ?? -1)));
+    setPlacedDevices(prev => prev.filter(d => !gone.has(d.uid)));
+    setSelectedUid(null);
+    setSelectedUids(new Set());
+  };
+  const requestDeleteDevices = (uids: number[]) => {
+    const targets = placedDevices.filter(d => uids.includes(d.uid));
+    if (!targets.length) return;
+    const equipment = targets.filter(d => !isRoomFurniture(d));
+    if (equipment.length) setDeleteConfirm({ uids: targets.map(d => d.uid), names: equipment.map(d => d.name) });
+    else deleteDevicesNow(targets.map(d => d.uid));
+  };
+  // The keyboard shortcut lives in a window-level effect that doesn't
+  // re-subscribe on every change, so it calls through a ref to stay current.
+  const requestDeleteRef = React.useRef(requestDeleteDevices);
+  requestDeleteRef.current = requestDeleteDevices;
+
+  // Hide: take the equipment out of this view only. It stays in Signal Flow,
+  // the rack and the BOM (which just drops the ROOM tag for it).
+  const hideDevices = (uids: number[]) => {
+    const targets = placedDevices.filter(d => uids.includes(d.uid) && !isRoomFurniture(d));
+    if (!targets.length) return;
+    pushUndo();
+    const gone = new Set(targets.map(d => d.uid));
+    setHiddenDevices(prev => [...prev, ...targets.map(d => ({ ...d, itemId: d.itemId || newItemId() }))]);
+    setPlacedDevices(prev => prev.filter(d => !gone.has(d.uid)));
+    setSelectedUid(null);
+    setSelectedUids(new Set());
+  };
+  const showHiddenDevice = (itemId: string) => {
+    const dev = hiddenDevices.find(d => d.itemId === itemId);
+    if (!dev) return;
+    pushUndo();
+    setHiddenDevices(prev => prev.filter(d => d.itemId !== itemId));
+    setPlacedDevices(prev => [...prev, dev]);
+  };
+  // Drag a BOM row onto the Floor Plan or Ceiling Plan to put one of its units
+  // on the plan where it is dropped. That unit is either one hidden in this
+  // view (brought straight back) or one that only exists in Signal Flow / the
+  // rack (a new device is created for it, carrying the SAME itemId so it stays
+  // one unit across the tools). Wall-mounted equipment snaps to a wall when
+  // dropped near one (same rule as dragging it); from the Ceiling Plan only
+  // ceiling-mounted equipment is repositioned, anything else lands where it
+  // would on a fresh placement.
+  const acceptBomUnit = (e: React.DragEvent) => {
+    if (Array.from(e.dataTransfer.types).includes(BOM_UNIT_DRAG_TYPE)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+  // A device for a unit that has never been on this plan: the same icon/size/
+  // mount its category or name maps to in a scope import, or — for something
+  // with no floor-plan symbol (a compute unit, a switch) — a plain box, like
+  // "Add Equipment" gives an unrecognised item.
+  const deviceFromBomUnit = (u: BOMDragUnit): PlacedDevice => {
+    const template = resolveScopeDeviceTemplate(u.cat || "", u.name, "");
+    const base: any = template ?? { id: "custom", name: u.name, icon: "📦", w: 0.5, h: 0.5, wall: "floor", type: "custom", color: "#64748b" };
+    const isCeilingMic = base.type === "mic" && base.wall === "ceiling";
+    return {
+      ...base, itemId: u.itemId, productKey: u.productKey, name: u.name,
+      ...(u.mfr && u.mfr !== "Generic" ? { mfr: u.mfr, ...(u.model ? { model: u.model } : {}) } : {}),
+      uid: Date.now() + Math.random(), x: 0, y: 0, z: 0, mountWall: "floor",
+      hfov: base.hfovDeg ?? (base.type === "camera" ? (base.id === "soundbar-cam" ? 120 : base.id === "ceiling-cam" ? 90 : 70) : undefined),
+      covShape: base.coveragePattern === "circular" ? "round" : base.coveragePattern === "rectangular" ? "square" : isCeilingMic ? "round" : undefined,
+      covDiameter: base.coverageDiameterFt ?? (isCeilingMic ? 6 : base.id === "table-mic" ? 2 : undefined),
+      covW: base.coverageWidthFt ?? (isCeilingMic ? 6 : undefined),
+      covL: base.coverageDepthFt ?? (isCeilingMic ? 6 : undefined),
+      dispersion: base.coverageAngleDeg ?? (base.type === "speaker" && base.wall === "ceiling" ? 90 : undefined),
+    } as PlacedDevice;
+  };
+  const dropBomUnit = (e: React.DragEvent, view: "plan" | "ceil") => {
+    const raw = e.dataTransfer.getData(BOM_UNIT_DRAG_TYPE);
+    if (!raw) return;
+    e.preventDefault();
+    let unit: BOMDragUnit;
+    try { unit = JSON.parse(raw) as BOMDragUnit; } catch { return; }
+    if (!unit?.itemId) return;
+    // Already on the plan (dropped twice, or added another way meanwhile): nothing to do.
+    if (placedDevices.some(d => d.itemId === unit.itemId)) return;
+    const hidden = hiddenDevices.find(d => d.itemId === unit.itemId);
+    const dev = hidden ?? deviceFromBomUnit(unit);
+    let { x, y } = dev;
+    let { z, mountWall } = dev;
+    let extra: Partial<PlacedDevice> = {};
+    const svg = view === "plan" ? svgRef.current : ceilSvgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (svg && ctm) {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const p = pt.matrixTransform(ctm.inverse());
+      let wx: number, wy: number;
+      if (view === "plan") {
+        wx = (p.x - planOffX) / planScale; wy = (p.y - planOffY) / planScale;
+      } else {
+        const cScale = Math.min(380 / roomW, 270 / roomL);
+        wx = (p.x - (600 - roomW * cScale) / 2) / cScale; wy = (p.y - (420 - roomL * cScale) / 2) / cScale;
+      }
+      wx = Math.max(cMinX, Math.min(cMaxX, wx)); wy = Math.max(cMinY, Math.min(cMaxY, wy));
+      const onCeiling = dev.wall === "ceiling" || dev.mountWall === "ceiling";
+      const wallType = dev.wall === "front" || dev.wall === "side";
+      const wasWallMounted = dev.mountWall === "north" || dev.mountWall === "south" || dev.mountWall === "west" || dev.mountWall === "east" || dev.mountWall === "drawn";
+      if (hidden && view === "ceil" && !onCeiling) {
+        // a hidden wall/floor unit dropped on the Ceiling Plan: keep its original position
+      } else if (wallType || wasWallMounted) {
+        const snap = snapDeviceToNearestWall(wx, wy);
+        if (snap && (hidden ? snap.dist < 1.5 : true)) {
+          x = snap.x; y = snap.y; z = roomH * 0.55;
+          extra = { mountWall: snap.mountWall as PlacedDevice["mountWall"], wallUid: snap.wallUid, rotation: snap.angleDeg };
+        } else { x = wx; y = wy; }
+      } else {
+        x = wx; y = wy;
+        if (!hidden) {
+          if (dev.wall === "ceiling") { z = roomH - 0.05; mountWall = "ceiling"; }
+          else if (dev.wall === "table") { z = 0.76; mountWall = "floor"; }
+        }
+      }
+    }
+    pushUndo();
+    if (hidden) setHiddenDevices(prev => prev.filter(d => d.itemId !== unit.itemId));
+    setPlacedDevices(prev => [...prev, { ...dev, z, mountWall, ...extra, x, y }]);
+    setSelectedUid(dev.uid);
+  };
+  useHiddenUnitsRegistry(
+    "room-designer",
+    hiddenDevices.map(d => ({ itemId: d.itemId as string, name: d.name })),
+    showHiddenDevice,
+  );
 
   // Auto-expand BOM when a device is added (not on initial load)
   const bomBaseline = React.useRef(-1);
@@ -859,6 +1068,9 @@ export default function RoomDesignerPage() {
         try {
           const dbData = await searchProducts(modalSearch).catch(() => []);
           setModalResults(dbData.map((p: any) => ({
+            // The whole product record travels with the pick (id, ports, price, specs ...):
+            // Add / Replace read it to give the placed unit its real make, model and spec.
+            ...p,
             type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
             color: p.color || "#64748b", cat: p.category,
             // Room Designer placement fields (null when product not yet enriched)
@@ -880,7 +1092,8 @@ export default function RoomDesignerPage() {
       try {
         const orgData = await searchOrgLibrary(modalSearch, activeOrg.id).catch(() => []);
         setModalResults(orgData.map((p: any) => ({
-          type: p.description || p.model, mfr: p.manufacturer, price: p.unit_cost,
+          ...p,
+          type: p.description || p.model, mfr: p.manufacturer, model: p.model, model_name: p.model, price: p.unit_cost,
           color: p.color || "#64748b", cat: p.category,
           hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
           coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
@@ -940,7 +1153,17 @@ export default function RoomDesignerPage() {
       dispersion: sel?.coverage_angle_deg ?? undefined,
       covW: sel?.coverage_width_ft ?? undefined,
       covL: sel?.coverage_depth_ft ?? undefined,
+      // The unit keeps its own itemId (it's still the same slot in the design and
+      // in the other tools); it takes on the new product's make, model and spec.
+      ...libraryPickFields(sel),
     } : d));
+    // Same for a swap: the other tools' copy of this unit becomes the new product too.
+    const swapped = placedDevices.find(d => d.uid === replacingDeviceUid);
+    if (swapped?.itemId) {
+      const updated: any = { ...swapped, name, ...libraryPickFields(sel) };
+      const changes = diffSpec(specFromRoomDevice(swapped), specFromRoomDevice(updated));
+      if (Object.keys(changes).length) updateUnitSpec(swapped.itemId, changes);
+    }
     closeModal();
   };
 
@@ -1136,6 +1359,35 @@ export default function RoomDesignerPage() {
     downloadDxf(dxf, `Room Designer${roomParam && roomParam !== "default" ? " - " + roomParam : ""}`);
   };
 
+  // Identity and spec for the unit being added / swapped in: a library pick
+  // carries the product's own maker, model, price, ports and specs (this used
+  // to stop at the geometry fields, so a unit reached the BOM with no
+  // manufacturer, price or part number, and — because rack_units never came
+  // across — could never be recognised as rack equipment at all). "Create
+  // new" carries whatever Make / Model were typed instead.
+  const libraryPickFields = (sel: any) => sel ? {
+    productId: sel.id ?? null,
+    productKey: sel.id ? `p:${sel.id}` : undefined,
+    mfr: sel.manufacturer ?? undefined,
+    model: sel.model_name ?? undefined,
+    price: sel.price ?? undefined,
+    part_number: sel.part_number ?? null,
+    cat: sel.category ?? sel.type ?? undefined,
+    msrp: sel.msrp ?? null, cost: sel.cost ?? null,
+    margin: sel.margin ?? null, markup: sel.markup ?? null,
+    ports: sel.ports ?? undefined,
+    amp_draw: sel.amp_draw ?? null, voltage: sel.voltage ?? null,
+    power_watts: sel.power_watts ?? null, btu_hr: sel.btu_hr ?? null,
+    rackMounted: sel.rack_mounted ?? undefined,
+    rack_units: sel.rack_units ?? null,
+    rack_ear_included: sel.rack_ear_included ?? undefined,
+    width_in: sel.width_in ?? null, height_in: sel.height_in ?? null,
+    depth_in: sel.depth_in ?? null, diameter_in: sel.diameter_in ?? null, weight_lb: sel.weight_lb ?? null,
+  } : {
+    productId: null, productKey: undefined,
+    mfr: modalMake.trim() || undefined, model: modalModel.trim() || undefined,
+  };
+
   const addFromModal = () => {
     const sel = modalSelected;
     const name = sel ? sel.type : modalDeviceName.trim();
@@ -1174,29 +1426,7 @@ export default function RoomDesignerPage() {
       coverageAngleDeg: sel?.coverage_angle_deg ?? null,
       coverageWidthFt: sel?.coverage_width_ft ?? null,
       coverageDepthFt: sel?.coverage_depth_ft ?? null,
-      // Carry the product's own identity and spec through. This used to stop
-      // at the geometry fields, so a unit added here reached the BOM with no
-      // manufacturer, price or part number, and — because rack_units never
-      // came across — could never be recognised as rack equipment at all.
-      ...(sel ? {
-        productId: sel.id ?? null,
-        productKey: sel.id ? `p:${sel.id}` : undefined,
-        mfr: sel.manufacturer ?? undefined,
-        model: sel.model_name ?? undefined,
-        price: sel.price ?? undefined,
-        part_number: sel.part_number ?? null,
-        cat: sel.category ?? sel.type ?? undefined,
-        msrp: sel.msrp ?? null, cost: sel.cost ?? null,
-        margin: sel.margin ?? null, markup: sel.markup ?? null,
-        ports: sel.ports ?? undefined,
-        amp_draw: sel.amp_draw ?? null, voltage: sel.voltage ?? null,
-        power_watts: sel.power_watts ?? null, btu_hr: sel.btu_hr ?? null,
-        rackMounted: sel.rack_mounted ?? undefined,
-        rack_units: sel.rack_units ?? null,
-        rack_ear_included: sel.rack_ear_included ?? undefined,
-        width_in: sel.width_in ?? null, height_in: sel.height_in ?? null,
-        depth_in: sel.depth_in ?? null, weight_lb: sel.weight_lb ?? null,
-      } : {}),
+      ...libraryPickFields(sel),
     });
     closeModal();
   };
@@ -1206,6 +1436,7 @@ export default function RoomDesignerPage() {
     const handler = () => {
       saveDesign(placedDevices, {
         roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, placedDoors,
+        ...tableEditsConfig(),
         annotations: annotate.annotations,
         floorPlanImg, floorPlanWidthFt, floorPlanOffset,
         elevationMarkers,
@@ -1213,7 +1444,7 @@ export default function RoomDesignerPage() {
     };
     window.addEventListener("avgenix-save", handler);
     return () => window.removeEventListener("avgenix-save", handler);
-  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
+  }, [placedDevices, placedDoors, roomType, roomW, roomL, roomH, tableShape, tableSeats, tableWidth, tableLengthOverride, tableWallDist, showTable, tableDeleted, tableCenterX, tableRotation, chairOffsets, deletedChairs, deletedWalls, hiddenDevices, selectedWall, annotate.annotations, floorPlanImg, floorPlanWidthFt, floorPlanOffset, elevationMarkers, saveDesign]);
 
   // Load room dimensions from site survey + saved design — re-runs whenever
   // the room or project actually changes (not just on mount), since switching
@@ -1238,6 +1469,7 @@ export default function RoomDesignerPage() {
     setUndoStack([]);
     setDeletedWalls(new Set()); setDeletedChairs(new Set()); setTableDeleted(false); setDoorDeleted(false);
     setChairOffsets({}); setTableCenterX(null); setTableRotation(0); setTableLengthOverride(2.0);
+    setHiddenDevices([]); setDeleteConfirm(null);
     setFloorPlanImg(null); setFloorPlanWidthFt(16); setFloorPlanOffset({x:0,y:0}); setIsScalingFloorPlan(false); setScaleRefPoints([]); setScaleRefLength(""); setScaleRefInches("");
     setElevationMarkers([]); setSelectedElevationId(null); setActiveElevationKey(null);
 
@@ -1298,6 +1530,13 @@ export default function RoomDesignerPage() {
           if (saved.config.tableLengthOverride !== undefined) setTableLengthOverride(saved.config.tableLengthOverride as number | null);
           if (saved.config.tableWallDist) setTableWallDist(saved.config.tableWallDist as number);
           if (saved.config.showTable !== undefined) setShowTable(saved.config.showTable as boolean);
+          if (saved.config.tableDeleted !== undefined) setTableDeleted(saved.config.tableDeleted as boolean);
+          if (saved.config.tableCenterX !== undefined) setTableCenterX(saved.config.tableCenterX as number | null);
+          if (saved.config.tableRotation) setTableRotation(saved.config.tableRotation as number);
+          if (saved.config.chairOffsets) setChairOffsets(saved.config.chairOffsets as Record<number, { dx: number; dy: number }>);
+          if (Array.isArray(saved.config.deletedChairs)) setDeletedChairs(new Set(saved.config.deletedChairs as number[]));
+          if (Array.isArray(saved.config.deletedWalls)) setDeletedWalls(new Set(saved.config.deletedWalls as string[]));
+          if (Array.isArray(saved.config.hiddenDevices)) setHiddenDevices(ensureRoomDeviceItemIds(saved.config.hiddenDevices as PlacedDevice[]).items);
           if (saved.config.selectedWall) setSelectedWall(saved.config.selectedWall as string);
           if (saved.config.placedDoors) setPlacedDoors(saved.config.placedDoors as PlacedDoor[]);
           if (saved.config.annotations) annotate.setAnnotations(saved.config.annotations as any[]);
@@ -1647,6 +1886,27 @@ export default function RoomDesignerPage() {
         }
       });
       annotate.selectInRect(mX1,mY1,mX2,mY2,isWindow);
+      // The room's built-in table and chairs aren't placed devices — they carry
+      // a data-sel-id and are matched by their on-screen bounds (which already
+      // include any rotation / per-chair offset), same window vs crossing rule.
+      const builtInHits = new Set<string>();
+      const svgEl = svgRef.current;
+      const ctm = svgEl?.getScreenCTM();
+      if (svgEl && ctm) {
+        const a = svgEl.createSVGPoint(); a.x = mX1; a.y = mY1;
+        const b = svgEl.createSVGPoint(); b.x = mX2; b.y = mY2;
+        const s1 = a.matrixTransform(ctm), s2 = b.matrixTransform(ctm);
+        const sx1 = Math.min(s1.x, s2.x), sx2 = Math.max(s1.x, s2.x);
+        const sy1 = Math.min(s1.y, s2.y), sy2 = Math.max(s1.y, s2.y);
+        svgEl.querySelectorAll("[data-sel-id]").forEach(el => {
+          const r = el.getBoundingClientRect();
+          const hit = isWindow
+            ? r.left >= sx1 && r.right <= sx2 && r.top >= sy1 && r.bottom <= sy2
+            : !(r.right < sx1 || r.left > sx2 || r.bottom < sy1 || r.top > sy2);
+          if (hit) builtInHits.add(el.getAttribute("data-sel-id")!);
+        });
+      }
+      setSelected(builtInHits);
       setSelectedUids(hits);
       setSelectedUid(null);
       didMarqueeDrag.current = true;
@@ -1841,8 +2101,13 @@ export default function RoomDesignerPage() {
   const [calloutDragUid, setCalloutDragUid] = useState<number | null>(null);
   const [calloutDragStart, setCalloutDragStart] = useState<{ x: number; y: number } | null>(null);
   const calloutDragOrigin = useRef<{ dx: number; dy: number } | null>(null);
+  // Call-outs are drawn on both the Floor Plan and the Ceiling Plan; each has
+  // its own SVG and scale (feet -> px), so a drag has to know which it is on.
+  type CalloutView = "plan" | "ceil";
+  const calloutDragView = useRef<CalloutView>("plan");
+  const ceilScale = () => Math.min(380 / roomW, 270 / roomL);
 
-  const handleCalloutMouseDown = (e: React.MouseEvent, dev: PlacedDevice) => {
+  const handleCalloutMouseDown = (e: React.MouseEvent, dev: PlacedDevice, view: CalloutView = "plan") => {
     if (e.button !== 0) return;
     e.stopPropagation();
     pushUndo();
@@ -1850,7 +2115,8 @@ export default function RoomDesignerPage() {
     const def = defaultCalloutOffset(dev);
     calloutDragOrigin.current = { dx: dev.calloutDx ?? def.dx, dy: dev.calloutDy ?? def.dy };
     setCalloutDragUid(dev.uid);
-    const svg = svgRef.current; if (!svg) return;
+    calloutDragView.current = view;
+    const svg = (view === "ceil" ? ceilSvgRef : svgRef).current; if (!svg) return;
     const pt = svg.createSVGPoint();
     pt.x = e.clientX; pt.y = e.clientY;
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
@@ -1859,12 +2125,14 @@ export default function RoomDesignerPage() {
 
   const handleCalloutMouseMove = (e: React.MouseEvent) => {
     if (!calloutDragUid || !calloutDragStart || !calloutDragOrigin.current) return;
-    const svg = svgRef.current; if (!svg) return;
+    const view = calloutDragView.current;
+    const svg = (view === "ceil" ? ceilSvgRef : svgRef).current; if (!svg) return;
+    const scale = view === "ceil" ? ceilScale() : planScale;
     const pt = svg.createSVGPoint();
     pt.x = e.clientX; pt.y = e.clientY;
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
-    const dxW = (svgP.x - calloutDragStart.x) / planScale;
-    const dyW = (svgP.y - calloutDragStart.y) / planScale;
+    const dxW = (svgP.x - calloutDragStart.x) / scale;
+    const dyW = (svgP.y - calloutDragStart.y) / scale;
     const newDx = calloutDragOrigin.current.dx + dxW;
     const newDy = calloutDragOrigin.current.dy + dyW;
     setPlacedDevices(prev => prev.map(d => d.uid === calloutDragUid ? { ...d, calloutDx: newDx, calloutDy: newDy } : d));
@@ -1882,11 +2150,15 @@ export default function RoomDesignerPage() {
   // their own icon in an SVG rotate() transform to match wall orientation,
   // and a label inside that group would rotate sideways along with it.
   const CALLOUT_STUB_PX = 20;
-  const renderCallout = (dev: PlacedDevice) => {
-    const anchorPx = pX(dev.x), anchorPy = pY(dev.y || 0.1);
+  const renderCallout = (dev: PlacedDevice, view: CalloutView = "plan") => {
+    // Feet -> px for the canvas this call-out is on.
+    const scale = view === "ceil" ? ceilScale() : planScale;
+    const offX = view === "ceil" ? (600 - roomW * scale) / 2 : planOffX;
+    const offY = view === "ceil" ? (420 - roomL * scale) / 2 : planOffY;
+    const anchorPx = offX + dev.x * scale, anchorPy = offY + (dev.y || 0.1) * scale;
     const def = defaultCalloutOffset(dev);
     const dxFt = dev.calloutDx ?? def.dx, dyFt = dev.calloutDy ?? def.dy;
-    const labelX = anchorPx + dxFt * planScale, labelY = anchorPy + dyFt * planScale;
+    const labelX = anchorPx + dxFt * scale, labelY = anchorPy + dyFt * scale;
     const side = labelX >= anchorPx ? 1 : -1;
     const elbowX = labelX - side * CALLOUT_STUB_PX, elbowY = labelY;
     const label = calloutLabel(dev);
@@ -1901,9 +2173,9 @@ export default function RoomDesignerPage() {
       // click/drag handlers would never fire at all for a click that lands on
       // callout graphics instead.
       <g key={`callout-${dev.uid}`} pointerEvents="none">
-        <line x1={anchorPx} y1={anchorPy} x2={elbowX} y2={elbowY} stroke="#4b5563" strokeWidth={0.6} />
-        <line x1={elbowX} y1={elbowY} x2={labelX} y2={labelY} stroke="#4b5563" strokeWidth={0.6} />
-        <circle cx={anchorPx} cy={anchorPy} r={1.2} fill="#4b5563" />
+        <line x1={anchorPx} y1={anchorPy} x2={elbowX} y2={elbowY} stroke="rgb(var(--text-muted))" strokeWidth={0.6} />
+        <line x1={elbowX} y1={elbowY} x2={labelX} y2={labelY} stroke="rgb(var(--text-muted))" strokeWidth={0.6} />
+        <circle cx={anchorPx} cy={anchorPy} r={1.2} fill="rgb(var(--text-muted))" />
         {/* A bare <text> only hit-tests its actual glyph ink, not its logical
             bounding box, so a click landing in the gap between characters
             (or in the box's padding) falls through instead of starting a
@@ -1911,7 +2183,7 @@ export default function RoomDesignerPage() {
             draggable area to the label's full apparent extent. */}
         <rect x={side > 0 ? labelX : labelX - Math.max(30, label.length * 4.6)} y={labelY - 5}
           width={Math.max(30, label.length * 4.6)} height={9} fill="transparent" pointerEvents="auto"
-          style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)}
+          style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev, view)}
           onContextMenu={e => handleDeviceContextMenu(e, dev.uid)} />
         {/* Deliberately NOT className="dev-label" — that class (globals.css)
             is hover-only opacity:0 by default, built for the old glued-on
@@ -1920,15 +2192,15 @@ export default function RoomDesignerPage() {
         <text
           x={labelX + side * 4} y={labelY + 2.5}
           textAnchor={side > 0 ? "start" : "end"}
-          fontSize={7} fontWeight={600} fill="#1f2937" fontFamily="Inter, sans-serif"
+          fontSize={7} fontWeight={600} fill="rgb(var(--text-body))" fontFamily="Inter, sans-serif"
           pointerEvents="auto"
           style={{ cursor: "move" }}
-          onMouseDown={e => handleCalloutMouseDown(e, dev)}
+          onMouseDown={e => handleCalloutMouseDown(e, dev, view)}
           onContextMenu={e => handleDeviceContextMenu(e, dev.uid)}
         >{label}</text>
         {isSelected && (
           <circle cx={labelX} cy={labelY} r={2.5} fill="#8b5cf6" stroke="#fff" strokeWidth={0.5} pointerEvents="auto"
-            style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev)}
+            style={{ cursor: "move" }} onMouseDown={e => handleCalloutMouseDown(e, dev, view)}
             onContextMenu={e => handleDeviceContextMenu(e, dev.uid)} />
         )}
       </g>
@@ -2147,19 +2419,26 @@ export default function RoomDesignerPage() {
   const requestScopeImport = async () => {
     if (!projectParam || !roomParam || roomParam === "default" || generatingFromScope || !rdLoaded) return;
     const existing = await loadScopeManifest(roomParam, projectParam);
-    if (existing) { setScopeReimportConfirm(true); return; }
+    // Equipment already on the plan counts too, not just a saved manifest —
+    // otherwise generating on top of an earlier set (placed before the
+    // manifest existed, or whose manifest is gone) stacked a second full set
+    // of projectors and speakers on the first instead of replacing it.
+    const hasEquipment = placedDevices.some(d => !isRoomFurniture(d)) || hiddenDevices.length > 0;
+    if (existing || hasEquipment) { setScopeReimportConfirm(true); return; }
     generateDevicesFromScopeRD(false);
   };
 
   const wipeAllToolsForReimport = async () => {
     setPlacedDevices(prev => wipeRoomDesignerEquipment(prev));
+    // Hidden equipment is equipment too — a re-import replaces it as well.
+    setHiddenDevices([]);
     const [sf, rack] = await Promise.all([
       loadToolData("signal-flow", roomParam, projectParam),
       loadToolData("rack-planner", roomParam, projectParam),
     ]);
     await Promise.all([
       saveToolData("signal-flow", { ...(sf || {}), ...wipeSignalFlowEquipment() }, roomParam, projectParam),
-      saveToolData("rack-planner", { ...(rack || {}), items: [] }, roomParam, projectParam),
+      saveToolData("rack-planner", { ...(rack || {}), items: [], hiddenItems: [] }, roomParam, projectParam),
     ]);
   };
 
@@ -2172,7 +2451,6 @@ export default function RoomDesignerPage() {
     if (!projectParam || !roomParam || roomParam === "default" || generatingFromScope || !rdLoaded) return;
     setGeneratingFromScope(true);
     try {
-      if (isReimport) await wipeAllToolsForReimport();
       const { data: survey, error: surveyError } = await supabase
         .from("site_surveys")
         .select("data")
@@ -2193,6 +2471,31 @@ export default function RoomDesignerPage() {
         return;
       }
 
+      // Everything that can fail — the AI call, the manifest save — runs BEFORE
+      // the plan is touched at all. The room shell (table, chairs, walls) used
+      // to be applied first and the AI call made afterwards, so a failed or
+      // empty AI response left just the table and chairs on screen with no
+      // walls or devices, and a re-import had already wiped the old equipment.
+      const items = await fetchScopeUnits(scopeText);
+      if (!items.length) {
+        setGenerateNotice({ kind: "error", message: "No AV devices were recognized in this room's Scope of Work — nothing was changed." });
+        window.setTimeout(() => setGenerateNotice(null), 10000);
+        return;
+      }
+      // Recorded before placement: units this tool has no icon for (a DSP, an
+      // amplifier) still belong to the import, and Signal Flow and the rack
+      // materialise them from here even though no floor-plan symbol exists.
+      if (isReimport) await wipeAllToolsForReimport();
+      await saveScopeManifest(
+        { importedAt: Date.now(), importedBy: "room-designer", units: items, materialisedBy: ["room-designer"] },
+        roomParam, projectParam,
+      );
+      // The import just rewrote Signal Flow's and the rack's saved data and the
+      // scope manifest — have the BOM re-read them so it shows the new units
+      // under Signal Flow too (and none of the old ones) without waiting for a
+      // visit to that tool.
+      await reloadBaseline("room-designer");
+
       // Captured once, up front, so a resize below and the device placement
       // further down both undo together in a single Ctrl+Z — pushUndo()
       // snapshots the CURRENT roomW/roomL/roomH, so it must run before
@@ -2200,12 +2503,20 @@ export default function RoomDesignerPage() {
       pushUndo();
 
       // Auto-size the room from Site Survey's real recorded dimensions —
-      // but only when the room still looks untouched (still the default
-      // "medium" preset with nothing placed yet), so this can never
-      // silently overwrite a room a user already configured by hand.
+      // but only when the room has no structure of its own (no walls, no
+      // furniture, no doors), so this can never silently overwrite a room a
+      // user already built by hand. Judged by what is actually on the plan,
+      // not by the room preset: a previous generate (or a manual preset
+      // pick) leaves roomType on something other than "medium", which used
+      // to make an emptied room look "configured" so no walls/table came
+      // back. Equipment doesn't count as structure, and on a re-import it is
+      // being wiped anyway — `placedDevices` here is still the pre-wipe
+      // snapshot, hence checking the structure rather than its length.
       let effectiveRoomW = roomW, effectiveRoomL = roomL, effectiveRoomH = roomH;
       const wallDevicesToAdd: PlacedDevice[] = [];
-      const isUntouchedRoom = roomType === "medium" && placedDevices.length === 0;
+      let roomShellNote = "";
+      const hasStructure = wipeRoomDesignerEquipment(placedDevices).length > 0 || placedDoors.length > 0;
+      const isUntouchedRoom = !hasStructure && (isReimport || placedDevices.length === 0);
       if (isUntouchedRoom && surveyRoomData) {
         const feet = (ftKey: string, inKey: string) => {
           const ft = parseFloat(surveyRoomData![ftKey] || "");
@@ -2261,6 +2572,11 @@ export default function RoomDesignerPage() {
           setTableLengthOverride(Math.max(2, effectiveRoomL - FRONT_REAR_CLEARANCE * 2));
           setTableDeleted(false);
           setDeletedChairs(new Set());
+          // A table someone moved, rotated or re-arranged before removing it
+          // shouldn't come back where they left it — start from the default.
+          setTableCenterX(null);
+          setTableRotation(0);
+          setChairOffsets({});
 
           // This app has no "just type in dimensions and get a rectangle"
           // mode — every room's visible boundary comes from explicit wall
@@ -2284,23 +2600,9 @@ export default function RoomDesignerPage() {
             makeWall(effectiveRoomW, effectiveRoomL, 0, effectiveRoomL), // south
             makeWall(0, effectiveRoomL, 0, 0),                       // west
           );
+        } else {
+          roomShellNote = " Walls, table and chairs weren't created because this room has no length/width in Site Survey — add them there and generate again.";
         }
-      }
-
-      const items = await fetchScopeUnits(scopeText);
-      // Recorded before placement: units this tool has no icon for (a DSP, an
-      // amplifier) still belong to the import, and Signal Flow and the rack
-      // materialise them from here even though no floor-plan symbol exists.
-      if (items.length) {
-        await saveScopeManifest(
-          { importedAt: Date.now(), importedBy: "room-designer", units: items, materialisedBy: ["room-designer"] },
-          roomParam, projectParam,
-        );
-      }
-      if (!items.length) {
-        setGenerateNotice({ kind: "error", message: "No AV devices were recognized in this room's Scope of Work." });
-        window.setTimeout(() => setGenerateNotice(null), 5000);
-        return;
       }
 
       const skipped: string[] = [];
@@ -2347,14 +2649,14 @@ export default function RoomDesignerPage() {
 
       setPlacedDevices(prev => [...prev, ...wallDevicesToAdd, ...allNewDevices]);
 
-      const roomMsg = wallDevicesToAdd.length ? `Sized the room to Site Survey's dimensions; ` : "";
+      const roomMsg = wallDevicesToAdd.length ? `Sized the room to Site Survey's dimensions, added walls, table and chairs; ` : "";
       const addedMsg = allNewDevices.length ? `added ${allNewDevices.length} device${allNewDevices.length===1?"":"s"} from Scope of Work` : "no devices placed";
       const skippedMsg = skipped.length ? `; ${skipped.length} item${skipped.length===1?"":"s"} skipped (no matching icon): ${skipped.join(", ")}` : "";
-      setGenerateNotice({ kind: "ok", message: `${roomMsg}${addedMsg}${skippedMsg}.` });
-      window.setTimeout(() => setGenerateNotice(null), 7000);
+      setGenerateNotice({ kind: "ok", message: `${roomMsg}${addedMsg}${skippedMsg}.${roomShellNote}` });
+      window.setTimeout(() => setGenerateNotice(null), roomShellNote ? 12000 : 7000);
     } catch (error: any) {
-      setGenerateNotice({ kind: "error", message: error?.message || "Unable to generate devices from scope." });
-      window.setTimeout(() => setGenerateNotice(null), 5000);
+      setGenerateNotice({ kind: "error", message: `Generate from Scope failed: ${error?.message || "unable to generate devices from scope"}.` });
+      window.setTimeout(() => setGenerateNotice(null), 10000);
     } finally {
       setGeneratingFromScope(false);
     }
@@ -2711,6 +3013,15 @@ export default function RoomDesignerPage() {
     const svg = svgRef.current; if (!svg) return;
     const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
     const svgP = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+    // Ctrl+click on something already selected takes it back out of the
+    // selection (mousedown starts a drag, so the click handler can't do this).
+    if ((e.ctrlKey || e.metaKey) && selected.has(triggerId)) {
+      const next = new Set(selected);
+      next.delete(triggerId);
+      setSelected(next);
+      dragStartedRef.current = true; // swallow the click that follows this mousedown
+      return;
+    }
     pushUndo();
     // Build the set of items to drag
     let items: Set<string>;
@@ -2733,6 +3044,8 @@ export default function RoomDesignerPage() {
       origWallDist: tableWallDist,
       origChairOffsets: {...chairOffsets},
       items,
+      // Placed devices that are part of the same selection travel with it
+      origDevs: placedDevices.filter(d => selectedUids.has(d.uid)).map(d => ({ uid: d.uid, x: d.x, y: d.y })),
     });
   };
   const handleMultiDragMove = (e: React.MouseEvent) => {
@@ -2778,6 +3091,13 @@ export default function RoomDesignerPage() {
         }
       });
       setChairOffsets(newOffsets);
+    }
+    if (multiDrag.origDevs.length > 0) {
+      const orig = new Map(multiDrag.origDevs.map(d => [d.uid, d]));
+      setPlacedDevices(prev => prev.map(d => {
+        const o = orig.get(d.uid);
+        return o ? { ...d, x: Math.max(cMinX, Math.min(cMaxX, o.x + dx)), y: Math.max(cMinY, Math.min(cMaxY, o.y + dy)) } : d;
+      }));
     }
   };
 
@@ -3143,12 +3463,13 @@ export default function RoomDesignerPage() {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         e.preventDefault();
-        if (selectedUids.size > 0) {
-          setClipboard(placedDevices.filter(d => selectedUids.has(d.uid)));
-        } else if (selectedUid !== null) {
-          const dev = placedDevices.find(d => d.uid === selectedUid);
-          if (dev) setClipboard([dev]);
-        }
+        const fromDevices = selectedUids.size > 0
+          ? placedDevices.filter(d => selectedUids.has(d.uid))
+          : selectedUid !== null ? placedDevices.filter(d => d.uid === selectedUid) : [];
+        // The room's built-in table and chairs are copied as ordinary placed
+        // furniture, so a copy of them is independent of the original.
+        const clip = [...fromDevices, ...copyBuiltInRef.current()];
+        if (clip.length > 0) setClipboard(clip);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "v") {
@@ -3158,11 +3479,17 @@ export default function RoomDesignerPage() {
           const base = Date.now();
           const pasted = clipboard.map((d, i) => ({
             ...d,
+            // A pasted device is a new physical unit — reusing the original's
+            // itemId made the pair indistinguishable in the BOM and manifest.
+            ...(d.itemId ? { itemId: newItemId() } : {}),
             uid: base + i,
             x: d.x + 0.3,
             y: d.y + 0.3,
           }));
           setPlacedDevices(prev => [...prev, ...pasted]);
+          // Drop any table/chair selection, or dragging the pasted group would
+          // drag the original built-in table along with it.
+          setSelected(new Set());
           if (pasted.length === 1) {
             setSelectedUid(pasted[0].uid);
             setSelectedUids(new Set());
@@ -3215,20 +3542,13 @@ export default function RoomDesignerPage() {
         });
         clearSelection();
       }
-      // Delete selected device (furniture, walls etc.)
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedUid) {
-        pushUndo();
-        // Also remove doors attached to this wall if it's a wall-partition
-        setPlacedDoors(prev => prev.filter(d => d.wallUid !== selectedUid));
-        setPlacedDevices(prev => prev.filter(d => d.uid !== selectedUid));
-        setSelectedUid(null);
-      }
-      // Delete all marquee-selected devices
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedUids.size > 0) {
-        pushUndo();
-        setPlacedDoors(prev => prev.filter(d => !selectedUids.has(d.wallUid ?? -1)));
-        setPlacedDevices(prev => prev.filter(d => !selectedUids.has(d.uid)));
-        setSelectedUids(new Set());
+      // Delete the selected device(s) — one selected, or a marquee / Ctrl+click
+      // group. Equipment asks first (it is removed from every tool); walls and
+      // furniture go straight away. Doors attached to a deleted wall go too.
+      if ((e.key === "Delete" || e.key === "Backspace") && (selectedUid || selectedUids.size > 0)) {
+        const uids = new Set<number>(selectedUids);
+        if (selectedUid) uids.add(selectedUid);
+        requestDeleteRef.current(Array.from(uids));
       }
       // Rotate selected furniture by 90 degrees
       if (e.key === "r" && selectedUid && !e.ctrlKey && !e.metaKey) {
@@ -3710,13 +4030,63 @@ export default function RoomDesignerPage() {
     );
   };
 
+  // Turns the selected built-in table / chairs into placed furniture
+  // (Conference or Round Table + Side Chairs) at their current on-screen
+  // positions, for copy & paste. Chair positions are read back off the drawn
+  // chairs, so table rotation and hand-nudged chairs come out exactly as shown.
+  const builtInSelectionToDevices = (): PlacedDevice[] => {
+    if (selected.size === 0) return [];
+    const out: PlacedDevice[] = [];
+    const base = Date.now();
+    if (selected.has("table") && showTable && !tableDeleted) {
+      const round = tableShape === "round";
+      const tpl = roomElementItems.find(i => i.id === (round ? "round-table" : "conf-table"))!;
+      const dia = Math.max(tW, tL);
+      out.push({
+        ...tpl, w: round ? dia : tW, h: round ? dia : tL,
+        uid: base, x: tableCenterX ?? roomW / 2, y: tableWallDist + tL / 2, z: 0, mountWall: "floor", rotation: tableRotation,
+      } as PlacedDevice);
+    }
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (svg && ctm) {
+      const inv = ctm.inverse();
+      const chairTpl = roomElementItems.find(i => i.id === "side-chair")!;
+      selected.forEach(id => {
+        if (!id.startsWith("chair:")) return;
+        const el = svg.querySelector(`[data-sel-id="${id}"]`) as SVGGraphicsElement | null;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const pt = svg.createSVGPoint(); pt.x = r.left + r.width / 2; pt.y = r.top + r.height / 2;
+        const p = pt.matrixTransform(inv);
+        const sizeFt = el.getBBox().width / planScale;
+        out.push({
+          ...chairTpl, w: sizeFt, h: sizeFt,
+          uid: base + out.length, x: (p.x - planOffX) / planScale, y: (p.y - planOffY) / planScale, z: 0, mountWall: "floor",
+        } as PlacedDevice);
+      });
+    }
+    return out;
+  };
+  copyBuiltInRef.current = builtInSelectionToDevices;
+
   const renderPlanTable = () => {
     const cx=tableCenterX ?? roomW/2, cy2=tableWallDist+tL/2;
     const hw=tW/2, hl=tL/2;
-    const cW = Math.max(6, 0.45 * planScale);
-    const cD = Math.max(5, 0.38 * planScale);
-    const cB = Math.max(2, 0.09 * planScale);
-    const rx = Math.max(1, cW * 0.18);
+    // Table chairs are the same chair as the "Side Chair" in the Chairs list —
+    // same size and look — shrunk only when a crowded table leaves less room
+    // than one chair per seat (so neighbouring chairs never overlap).
+    const sideChairFt = roomElementItems.find(i => i.id === "side-chair")?.w ?? 1.48;
+    const sps0 = Math.floor(tableSeats/2), lo0 = tableSeats - sps0*2;
+    const seatPitchFt = tableShape === "round"
+      ? (Math.PI * Math.max(tW, tL)) / Math.max(1, tableSeats)
+      : Math.min(sps0 > 0 ? tL / sps0 : Infinity, lo0 > 0 ? tW : Infinity);
+    const chairFt = Math.max(0.6, Math.min(sideChairFt, seatPitchFt - 0.2));
+    const cS = Math.max(6, chairFt * planScale);
+    const rx = Math.max(1, cS * 0.18);
+    const chairSquare = (px: number, py: number) => (
+      <rect x={px - cS/2} y={py - cS/2} width={cS} height={cS} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>
+    );
 
     const chairClick = (idx: number, e: React.MouseEvent) => {
       e.stopPropagation();
@@ -3743,12 +4113,12 @@ export default function RoomDesignerPage() {
           onClick={e => chairClick(idx, e)}
           onMouseDown={e => handleMultiDragStart(`chair:${idx}`, e)}
         >
-          {isSel && <circle cx={cx2} cy={cy2r} r={cW*0.8} fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" />}
-          {chairEl}
+          {isSel && <circle cx={cx2} cy={cy2r} r={cS*0.8} fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" />}
+          <g data-sel-id={`chair:${idx}`}>{chairEl}</g>
           {isSel && (
             <g style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); pushUndo(); setDeletedChairs(prev => { const next = new Set(prev); next.add(idx); return next; }); clearSelection(); }}>
-              <circle cx={cx2+cW*0.6} cy={cy2r-cD*0.6} r={7} fill="#ef4444" />
-              <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cx2+cW*0.6},${cy2r-cD*0.6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round" />
+              <circle cx={cx2+cS*0.6} cy={cy2r-cS*0.6} r={7} fill="#ef4444" />
+              <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cx2+cS*0.6},${cy2r-cS*0.6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round" />
             </g>
           )}
         </g>
@@ -3788,7 +4158,7 @@ export default function RoomDesignerPage() {
 
     if(tableShape==="round"){
       const r=Math.max(tW,tL)/2;
-      const seatDistR=-0.28;
+      const seatDistR=chairFt/2+0.15; // chairs sit just outside the table edge
       return (
         <g>
           {!tableDeleted && (() => {
@@ -3796,7 +4166,7 @@ export default function RoomDesignerPage() {
             return (
             <g style={{cursor:"grab"}} onClick={tableClick} onMouseDown={e => handleMultiDragStart("table", e)}>
               {tSel && <circle cx={pX(cx)} cy={pY(cy2)} r={r*planScale+4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 3" />}
-              <circle cx={pX(cx)} cy={pY(cy2)} r={r*planScale} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
+              <circle data-sel-id="table" cx={pX(cx)} cy={pY(cy2)} r={r*planScale} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
               {/* Diameter label below round table */}
               <text x={pX(cx)} y={pY(cy2)+r*planScale+14} textAnchor="middle" fontSize={10} fill="#94a3b8" fontFamily="'JetBrains Mono',monospace">⌀ {toDisplay(r*2)}</text>
               {tSel && (
@@ -3813,10 +4183,7 @@ export default function RoomDesignerPage() {
             const chairX=pX(cx+(r+seatDistR)*Math.cos(a)), chairY=pY(cy2+(r+seatDistR)*Math.sin(a));
             const deg=a*180/Math.PI+90;
             const chairEl = (
-              <g transform={`rotate(${deg},${chairX},${chairY})`}>
-                <rect x={chairX-cW/2} y={chairY-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>
-                <rect x={chairX-cW/2} y={chairY-cD/2-cB} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/>
-              </g>
+              <g transform={`rotate(${deg},${chairX},${chairY})`}>{chairSquare(chairX, chairY)}</g>
             );
             return renderSelectableChair(i, chairEl, chairX, chairY);
           })}
@@ -3826,7 +4193,7 @@ export default function RoomDesignerPage() {
     }
     const taperIn=tableShape==="tapered"?tW*0.15:0;
     const sps=Math.floor(tableSeats/2), lo=tableSeats-sps*2;
-    const sd=0.35;
+    const sd=chairFt/2+0.15; // chair centre distance from the table edge
     let chairIdx = 0;
     return (
       <g>
@@ -3835,7 +4202,7 @@ export default function RoomDesignerPage() {
           return (
           <g style={{cursor:"grab"}} onClick={tableClick} onMouseDown={e => handleMultiDragStart("table", e)}>
             {tSel && <rect x={pX(cx-hw)-4} y={pY(cy2-hl)-4} width={tW*planScale+8} height={tL*planScale+8} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 3" rx={4} />}
-            <polygon points={`${pX(cx-hw+taperIn)},${pY(cy2-hl)} ${pX(cx+hw-taperIn)},${pY(cy2-hl)} ${pX(cx+hw)},${pY(cy2+hl)} ${pX(cx-hw)},${pY(cy2+hl)}`} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
+            <polygon data-sel-id="table" points={`${pX(cx-hw+taperIn)},${pY(cy2-hl)} ${pX(cx+hw-taperIn)},${pY(cy2-hl)} ${pX(cx+hw)},${pY(cy2+hl)} ${pX(cx-hw)},${pY(cy2+hl)}`} fill="#cbd5e1" fillOpacity={0.3} stroke={tSel?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={tSel?2:1.5}/>
             {/* Width dimension — above table */}
             <text x={pX(cx)} y={pY(cy2-hl)-6} textAnchor="middle" fontSize={10} fill="#94a3b8" fontFamily="'JetBrains Mono',monospace">{toDisplay(tW)}</text>
             {/* Length dimension — right of table, rotated */}
@@ -3853,18 +4220,18 @@ export default function RoomDesignerPage() {
           const idx = chairIdx++;
           const t=(i+0.5)/sps, lw=hw-taperIn+(taperIn)*t;
           const cx2=pX(cx-lw-sd), cy3=pY(cy2-hl+tL*t);
-          const chairEl = (<g><rect x={cx2-cD/2} y={cy3-cW/2} width={cD} height={cW} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cD/2-cB} y={cy3-cW/2} width={cB} height={cW} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);
+          const chairEl = chairSquare(cx2, cy3);
           return renderSelectableChair(idx, chairEl, cx2, cy3);
         })}
         {Array.from({length:sps},(_,i)=>{
           const idx = chairIdx++;
           const t=(i+0.5)/sps, rw=hw-taperIn+(taperIn)*t;
           const cx2=pX(cx+rw+sd), cy3=pY(cy2-hl+tL*t);
-          const chairEl = (<g><rect x={cx2-cD/2} y={cy3-cW/2} width={cD} height={cW} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2+cD/2} y={cy3-cW/2} width={cB} height={cW} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);
+          const chairEl = chairSquare(cx2, cy3);
           return renderSelectableChair(idx, chairEl, cx2, cy3);
         })}
-        {lo>=1&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2+hl+sd);const chairEl=(<g><rect x={cx2-cW/2} y={cy3-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cW/2} y={cy3+cD/2} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
-        {lo>=2&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2-hl-sd);const chairEl=(<g><rect x={cx2-cW/2} y={cy3-cD/2} width={cW} height={cD} rx={rx} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/><rect x={cx2-cW/2} y={cy3-cD/2-cB} width={cW} height={cB} rx={rx*0.5} fill="#9ca3af" stroke="#b0b5be" strokeWidth={0.6}/></g>);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
+        {lo>=1&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2+hl+sd);const chairEl=chairSquare(cx2,cy3);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
+        {lo>=2&&(()=>{const idx=chairIdx++;const cx2=pX(cx),cy3=pY(cy2-hl-sd);const chairEl=chairSquare(cx2,cy3);return renderSelectableChair(idx,chairEl,cx2,cy3);})()}
         {!tableDeleted && renderTableResizeHandles(cx - hw, cy2 - hl, tW, tL)}
       </g>
     );
@@ -4146,7 +4513,7 @@ export default function RoomDesignerPage() {
       <div style={{display:"flex",flexDirection:"column",flex:1,overflow:"hidden"}}>
         {/* Toolbar — only above canvas+BOM, not sidebar */}
         <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",flexShrink:0,userSelect:"none"}}>
-          <div style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
+          <div className="overflow-x-auto" style={{display:"flex",alignItems:"stretch",height:82,paddingLeft:4,paddingRight:12}}>
             {/* Create group */}
             <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
               <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
@@ -4218,17 +4585,17 @@ export default function RoomDesignerPage() {
             <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
               <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
                 <button onClick={()=>{setPlacingElevationMarker(v=>!v);setPanMode(false);setMoveMode(false);}} title="Drop an elevation marker — right-click it to choose which walls (N/E/S/W) to view"
-                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:placingElevationMarker?"rgba(0,0,0,0.08)":"transparent",border:`1px solid ${placingElevationMarker?"#000":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"4px 12px",background:placingElevationMarker?"rgba(139,92,246,0.12)":"transparent",border:`1px solid ${placingElevationMarker?"#8b5cf6":"transparent"}`,borderRadius:4,cursor:"pointer",transition:"all 0.15s",minWidth:48}}
                   onMouseEnter={e=>{if(!placingElevationMarker){e.currentTarget.style.background="rgb(var(--forge-surface))";e.currentTarget.style.borderColor="rgb(var(--border))"}}}
                   onMouseLeave={e=>{if(!placingElevationMarker){e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="transparent"}}}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={placingElevationMarker?"#000":"rgb(var(--text-subtle))"} strokeWidth={1.2} strokeLinejoin="round">
-                    <polygon points="12,4.93 8.46,8.46 15.54,8.46" fill={placingElevationMarker?"#000":"rgb(var(--text-subtle))"}/>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={placingElevationMarker?"#8b5cf6":"rgb(var(--text-subtle))"} strokeWidth={1.2} strokeLinejoin="round">
+                    <polygon points="12,4.93 8.46,8.46 15.54,8.46" fill={placingElevationMarker?"#8b5cf6":"rgb(var(--text-subtle))"}/>
                     <polygon points="19.07,12 15.54,8.46 15.54,15.54" fill="none"/>
                     <polygon points="12,19.07 15.54,15.54 8.46,15.54" fill="none"/>
                     <polygon points="4.93,12 8.46,15.54 8.46,8.46" fill="none"/>
-                    <circle cx="12" cy="12" r="5" fill="#fff"/>
+                    <circle cx="12" cy="12" r="5" fill="rgb(var(--forge-panel))"/>
                   </svg>
-                  <span style={{fontSize:9,color:placingElevationMarker?"#000":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Elevation</span>
+                  <span style={{fontSize:9,color:placingElevationMarker?"#8b5cf6":"rgb(var(--text-subtle))",lineHeight:1.2,whiteSpace:"nowrap"}}>Elevation</span>
                 </button>
               </div>
               <span style={{fontSize:8,color:"rgb(var(--text-subtle))",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:"center",paddingBottom:2,paddingTop:2}}>Views</span>
@@ -4296,6 +4663,7 @@ export default function RoomDesignerPage() {
           onMouseUp={()=>{if(elevMarkerDrag){handleElevMarkerMouseUp();return;}if((annotate.activeTool&&!isDrawingWall)||annotate.isDragging()){annotate.handleUp();return;}if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
           onMouseLeave={()=>{if(elevMarkerDrag){handleElevMarkerMouseUp();return;}if(annotate.isDragging()){annotate.handleLeave();return;}annotate.handleLeave();if(moveDragStart){setMoveDragStart(null);return;}if(isPanning){setIsPanning(false);return;}handleMarqueeUp();handleSvgMouseUp();handleCalloutMouseUp();}}
           onDoubleClick={e=>{if(annotate.activeTool&&!isDrawingWall){annotate.handleDoubleClick(e);}}}
+          onDragOver={acceptBomUnit} onDrop={e=>dropBomUnit(e,"plan")}
           onMouseDown={e=>{if(placingElevationMarker)return;if(annotate.activeTool&&!isDrawingWall&&e.button===0){annotate.handleDown(e);return;}suppressClickClear.current=false;if(e.button===0&&moveMode&&(selectedUid!==null||selectedUids.size>0||selected.size>0||annotate.hasSelection)){e.preventDefault();pushUndo();if(annotate.hasSelection)annotate.beginChange();const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMoveDragStart({x:svgP.x,y:svgP.y});}else if((e.button===1||(e.button===0&&panMode))&&!lockedViews.plan){e.preventDefault();setIsPanning(true);setPanStart({x:e.clientX,y:e.clientY,px:pan.x,py:pan.y});}else if(e.button===0&&!isDrawingWall&&!dragNewChair?.active&&!dragNewTable?.active&&!dragNewDoor?.active){const svg=svgRef.current;if(!svg)return;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const svgP=pt.matrixTransform(svg.getScreenCTM()!.inverse());setMarquee({startSvgX:svgP.x,startSvgY:svgP.y,curSvgX:svgP.x,curSvgY:svgP.y});}}}
           onClick={e=>{if(placingElevationMarker){const pos=screenToWorld(e);if(pos)placeElevationMarker(pos);return;}if(annotate.activeTool&&!isDrawingWall){return;}if(isDrawingWall){handleWallClick(e);return;}if(dragNewChair?.active){handleNewChairDrop();return;}if(dragNewTable?.active){handleNewTableDrop();return;}if(dragNewDoor?.active){handleNewDoorDrop();return;}if(didMarqueeDrag.current){didMarqueeDrag.current=false;return;}if(suppressClickClear.current){suppressClickClear.current=false;return;}if(!isPanning){if(wallEdgeClicked.current){wallEdgeClicked.current=false;return;}setSelectedUid(null);setSelectedEdge(null);clearSelection();annotate.clearSelection();setSelectedElevationId(null);}}}>
 
@@ -4934,7 +5302,7 @@ export default function RoomDesignerPage() {
                     <text x={rx2+rw2/2} y={ry2+rh2+12} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600} className="dev-label">{dev.name}</text>
                     {isSelected && (
                       <>
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={rx2+rw2+8} cy={ry2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${rx2+rw2+8},${ry2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5092,7 +5460,7 @@ export default function RoomDesignerPage() {
                       <text x={cpx} y={cpy-(isHoriz?bh:bw)/2-6} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
                         <>
-                          <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                          <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                             <circle cx={cpx+bw/2+8} cy={cpy-bh/2-4} r={7} fill="#ef4444"/>
                             <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+bw/2+8},${cpy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                           </g>
@@ -5118,7 +5486,7 @@ export default function RoomDesignerPage() {
                       <rect x={cpx-cw/2} y={cpy-ch/2} width={cw} height={ch} rx={3} fill={cc.device} stroke={cc.deviceBorderLight} strokeWidth={0.8}/>
                       <text x={cpx} y={cpy-ch/2-6} textAnchor="middle" fontSize={7} fill={purpleColor} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={cpx+cw/2+8} cy={cpy-ch/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+cw/2+8},${cpy-ch/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5145,7 +5513,7 @@ export default function RoomDesignerPage() {
                     <text x={cpx} y={cpy-(mw==="west"||mw==="east"||(isDrawnWall&&Math.abs(Math.sin(facingA))<0.5)?12:14)} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                     {isSelected && (
                       <>
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={cpx+14} cy={cpy-10} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx+14},${cpy-10})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5176,7 +5544,7 @@ export default function RoomDesignerPage() {
                       {isSelected && <rect x={fpx-cW2/2-3} y={fpy-cW2/2-3} width={cW2+6} height={cW2+6} rx={3} fill="rgba(139,92,246,0.08)" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                       <rect x={fpx-cW2/2} y={fpy-cW2/2} width={cW2} height={cW2} rx={rx2} fill="#d1d5db" stroke={isSelected?"#8b5cf6":"#b0b5be"} strokeWidth={isSelected?1.2:0.8}/>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={fpx+cW2*0.8} cy={fpy-cW2*0.8} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${fpx+cW2*0.8},${fpy-cW2*0.8})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5186,12 +5554,14 @@ export default function RoomDesignerPage() {
                   return (<g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={e=>handleDeviceMouseDown(e,dev.uid)} onClick={e=>{e.stopPropagation();if(e.ctrlKey||e.metaKey||suppressClickClear.current){suppressClickClear.current=false;return;}setSelectedUid(dev.uid);clearSelection();}} opacity={isDragging?0.7:1}>
                     {isSelected && <rect x={fpx-fw/2-3} y={fpy-fh/2-3} width={fw+6} height={fh+6} rx={3} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
                     <g transform={`rotate(${rot},${fpx},${fpy})`}>
-                      <rect x={fpx-fw/2} y={fpy-fh/2} width={fw} height={fh} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke={isSelected?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1}/>
+                      {dev.id === "round-table"
+                        ? <ellipse cx={fpx} cy={fpy} rx={fw/2} ry={fh/2} fill="#cbd5e1" fillOpacity={0.3} stroke={isSelected?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1}/>
+                        : <rect x={fpx-fw/2} y={fpy-fh/2} width={fw} height={fh} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke={isSelected?"#8b5cf6":"rgb(var(--text-muted))"} strokeWidth={1}/>}
                     </g>
                     {dev.id !== "conf-table" && dev.id !== "round-table" && <text x={fpx} y={fpy+3} textAnchor="middle" fontSize={7} fill="rgb(var(--text-muted))">{dev.name}</text>}
                     {isSelected && (
                       <>
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={fpx+fw/2+8} cy={fpy-fh/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${fpx+fw/2+8},${fpy-fh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5227,7 +5597,7 @@ export default function RoomDesignerPage() {
                       <circle cx={mpx} cy={mpy} r={r*0.25} fill="#334155" stroke="#475569" strokeWidth={0.3}/>
                       <text x={mpx} y={mpy-r-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={mpx+r+5} cy={mpy-r-5} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+r+5},${mpy-r-5})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5255,7 +5625,7 @@ export default function RoomDesignerPage() {
                       {[-1,0,1].map(r=>[-1,0,1].map(c=><circle key={`${r}${c}`} cx={mpx+c*tileS*0.25} cy={mpy+r*tileS*0.25} r={1} fill="#334155"/>))}
                       <text x={mpx} y={mpy-tileS/2-5} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={mpx+tileS/2+5} cy={mpy-tileS/2-5} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+tileS/2+5},${mpy-tileS/2-5})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5281,7 +5651,7 @@ export default function RoomDesignerPage() {
                       <circle cx={mpx} cy={mpy} r={mr*0.15} fill="#334155"/>
                       <text x={mpx} y={mpy-mr-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={mpx+mr+4} cy={mpy-mr-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+mr+4},${mpy-mr-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5307,7 +5677,7 @@ export default function RoomDesignerPage() {
                       <rect x={sx-bw*0.35} y={sy-bh*0.35} width={bw*0.7} height={bh*0.7} rx={1} fill={cc.device} stroke={cc.deviceBorder} strokeWidth={0.3}/>
                       <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={sx+bw/2+8} cy={sy-bh/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${sx+bw/2+8},${sy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5321,7 +5691,7 @@ export default function RoomDesignerPage() {
                     <circle cx={mpx} cy={mpy} r={2} fill={dev.color}/>
                     <text x={mpx} y={mpy-10} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                     {isSelected && (
-                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                         <circle cx={mpx+covR+6} cy={mpy-covR-6} r={7} fill="#ef4444"/>
                         <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${mpx+covR+6},${mpy-covR-6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                       </g>
@@ -5363,7 +5733,7 @@ export default function RoomDesignerPage() {
                       <rect x={sx-bw/2+1} y={sy-bh/2+0.5} width={bw-2} height={bh-1} rx={0.5} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.3}/>
                       <text x={sx} y={sy-bh/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={sx+bw/2+8} cy={sy-bh/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${sx+bw/2+8},${sy-bh/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5389,7 +5759,7 @@ export default function RoomDesignerPage() {
                       <rect x={cpx2-tw/2+1.5} y={cpy2-th/2+1} width={tw-3} height={th-2} rx={1} fill="#070b14" stroke="#111827" strokeWidth={0.3}/>
                       <text x={cpx2} y={cpy2-th/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={cpx2+tw/2+8} cy={cpy2-th/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+tw/2+8},${cpy2-th/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5417,7 +5787,7 @@ export default function RoomDesignerPage() {
                       {[-1,0,1].map(i=><rect key={i} x={cpx2+i*cw*0.25-2} y={cpy2-ch/2+3} width={4} height={ch-6} rx={1} fill={cc.device} stroke="rgb(var(--border))" strokeWidth={0.2}/>)}
                       <text x={cpx2} y={cpy2-ch/2-4} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                       {isSelected && (
-                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                        <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                           <circle cx={cpx2+cw/2+8} cy={cpy2-ch/2-4} r={7} fill="#ef4444"/>
                           <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+cw/2+8},${cpy2-ch/2-4})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                         </g>
@@ -5434,7 +5804,7 @@ export default function RoomDesignerPage() {
                     <rect x={cpx2-5} y={cpy2-3.5} width={10} height={7} rx={2} fill={dev.color+"33"} stroke={dev.color} strokeWidth={1}/>
                     <text x={cpx2} y={cpy2+14} textAnchor="middle" fontSize={7} fill={dev.color} className="dev-label">{dev.name}</text>
                     {isSelected && (
-                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();pushUndo();setPlacedDevices(prev=>prev.filter(d=>d.uid!==dev.uid));setSelectedUid(null);}}>
+                      <g style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();requestDeleteDevices([dev.uid]);}}>
                         <circle cx={cpx2+8} cy={cpy2-6} r={7} fill="#ef4444"/>
                         <path d="M-3,-3 L3,3 M3,-3 L-3,3" transform={`translate(${cpx2+8},${cpy2-6})`} stroke="#fff" strokeWidth={1.2} strokeLinecap="round"/>
                       </g>
@@ -6141,10 +6511,11 @@ export default function RoomDesignerPage() {
       {/* Ceiling Plan half */}
       <div style={{width:`${(1-floorCeilSplit)*100}%`,position:"relative",overflow:"hidden"}}>
       <div style={{position:"absolute",inset:0,background:cc.card,overflow:"hidden"}}>
-        <svg ref={ceilSvgRef} data-rd-canvas="ceil" width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
+        <svg ref={ceilSvgRef} data-rd-canvas="ceil" onDragOver={acceptBomUnit} onDrop={e=>dropBomUnit(e,"ceil")} width="100%" height="100%" viewBox={`${300-300/ceilZoom-ceilPan.x} ${210-210/ceilZoom-ceilPan.y} ${600/ceilZoom} ${420/ceilZoom}`}
           style={{background:cc.card,cursor:annotate.activeTool?(annotate.cursor||"crosshair"):isCeilPanning?"grabbing":ceilDragUid?"grabbing":panMode?"grab":"default"}}
           onMouseMove={e=>{
             if(annotate.activeTool||annotate.isDragging()){annotate.handleMove(e);return;}
+            if(calloutDragUid){handleCalloutMouseMove(e);return;}
             if(isCeilPanning){const dx=(e.clientX-ceilPanStart.x)/ceilZoom;const dy=(e.clientY-ceilPanStart.y)/ceilZoom;setCeilPan({x:ceilPanStart.px+dx,y:ceilPanStart.py+dy});return;}
             if(ceilDragUid && ceilDragStart && ceilSvgRef.current){
               const svg=ceilSvgRef.current;const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
@@ -6156,8 +6527,8 @@ export default function RoomDesignerPage() {
               setPlacedDevices(prev=>prev.map(d=>d.uid===ceilDragUid?{...d,x:worldX,y:worldY}:d));
             }
           }}
-          onMouseUp={()=>{if(annotate.activeTool||annotate.isDragging()){annotate.handleUp();return;}if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
-          onMouseLeave={()=>{annotate.handleLeave();if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);}}
+          onMouseUp={()=>{if(annotate.activeTool||annotate.isDragging()){annotate.handleUp();return;}if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);handleCalloutMouseUp();}}
+          onMouseLeave={()=>{annotate.handleLeave();if(isCeilPanning)setIsCeilPanning(false);setCeilDragUid(null);setCeilDragStart(null);handleCalloutMouseUp();}}
           onMouseDown={e=>{if(annotate.activeTool&&e.button===0){annotate.handleDown(e);return;}if((e.button===1||(e.button===0&&panMode))&&!lockedViews.ceil){e.preventDefault();setIsCeilPanning(true);setCeilPanStart({x:e.clientX,y:e.clientY,px:ceilPan.x,py:ceilPan.y});}}}
           onDoubleClick={e=>{if(annotate.activeTool)annotate.handleDoubleClick(e);}}
 >
@@ -6183,10 +6554,6 @@ export default function RoomDesignerPage() {
                   <text x={cpX(roomW/2)} y={Math.max(12,cpY(0)-8)} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">Front Wall</text>
                   <text x={cpX(roomW/2)} y={cpY(roomL)+10} textAnchor="middle" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace">{toDisplay(roomW)}</text>
                   <text x={cpX(-0.05)} y={cpY(roomL/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-subtle))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${cpX(-0.05)},${cpY(roomL/2)})`}>{toDisplay(roomL)}</text>
-                  {/* Table outline (reference) */}
-                  {showTable && (
-                    <rect x={cpX(roomW/2 - tableWidth/2)} y={cpY(tableWallDist)} width={tableWidth*cScale} height={(Math.max(1.5,tableSeats*0.35))*cScale} rx={3} fill="none" stroke={cc.deviceBorderLight} strokeWidth={0.8} strokeDasharray="3 3"/>
-                  )}
                 </>)}
                 {/* Drawn walls from floor plan */}
                 {placedDevices.filter(d => d.id === "wall-partition" && d.wallAngle !== undefined).map(dev => {
@@ -6212,15 +6579,15 @@ export default function RoomDesignerPage() {
                   const tl2 = tL/2 * cScale;
                   return <rect x={cpX(tcx)-tw2} y={cpY(tcy)-tl2} width={tw2*2} height={tl2*2} rx={2} fill="#cbd5e1" fillOpacity={0.15} stroke="rgb(var(--text-muted))" strokeWidth={0.8} strokeDasharray="3 3" transform={`rotate(${tableRotation},${cpX(tcx)},${cpY(tcy)})`}/>;
                 })()}
-                {/* Floor furniture from floor plan (tables, chairs, credenzas…) — styled like the main plan */}
-                {placedDevices.filter(d => d.type === "furniture" && d.id !== "wall-partition" && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
+                {/* Placed tables from the floor plan — the Ceiling Plan only shows
+                    tables, as the same dotted reference outline as the built-in
+                    table above. Chairs and other floor furniture aren't ceiling
+                    information, so they're left off. */}
+                {placedDevices.filter(d => (d.id === "conf-table" || d.id === "round-table") && (d.mountWall === "floor" || !d.mountWall)).map(dev => {
                   const fw = dev.w * cScale, fl = dev.h * cScale;
-                  if (dev.id === "side-chair" || dev.id === "exec-chair") {
-                    const cW2 = Math.max(6, fw);
-                    return <rect key={"csf"+dev.uid} x={cpX(dev.x)-cW2/2} y={cpY(dev.y)-cW2/2} width={cW2} height={cW2} rx={Math.max(1,cW2*0.18)} fill="#d1d5db" stroke="#b0b5be" strokeWidth={0.8}/>;
-                  }
-                  if (dev.id === "round-table") return <ellipse key={"csf"+dev.uid} cx={cpX(dev.x)} cy={cpY(dev.y)} rx={fw/2} ry={fl/2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1}/>;
-                  return <rect key={"csf"+dev.uid} x={cpX(dev.x)-fw/2} y={cpY(dev.y)-fl/2} width={fw} height={fl} rx={2} fill="#cbd5e1" fillOpacity={0.3} stroke="rgb(var(--text-muted))" strokeWidth={1} transform={`rotate(${dev.rotation||0},${cpX(dev.x)},${cpY(dev.y)})`}/>;
+                  const outline = { fill: "#cbd5e1", fillOpacity: 0.15, stroke: "rgb(var(--text-muted))", strokeWidth: 0.8, strokeDasharray: "3 3" };
+                  if (dev.id === "round-table") return <ellipse key={"csf"+dev.uid} cx={cpX(dev.x)} cy={cpY(dev.y)} rx={fw/2} ry={fl/2} {...outline}/>;
+                  return <rect key={"csf"+dev.uid} x={cpX(dev.x)-fw/2} y={cpY(dev.y)-fl/2} width={fw} height={fl} rx={2} {...outline} transform={`rotate(${dev.rotation||0},${cpX(dev.x)},${cpY(dev.y)})`}/>;
                 })}
                 {/* Ceiling-mounted devices */}
                 {ceilingDevices.map(dev => {
@@ -6228,20 +6595,55 @@ export default function RoomDesignerPage() {
                   const dy = cpY(dev.y);
                   const isDragging = ceilDragUid === dev.uid;
                   const isSelected = selectedUid === dev.uid;
-                  const grab = (e: React.MouseEvent) => { if(annotate.activeTool)return; e.stopPropagation(); setCeilDragUid(dev.uid); setCeilDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
+                  // Left button only: a right-click must fall through to the
+                  // context menu (below) instead of starting a drag.
+                  const grab = (e: React.MouseEvent) => { if(e.button!==0)return; if(annotate.activeTool)return; e.stopPropagation(); setCeilDragUid(dev.uid); setCeilDragStart({x:e.clientX,y:e.clientY}); setSelectedUid(dev.uid); };
+                  // A coverage size typed into Edit Equipment (Coverage Pattern /
+                  // Diameter / Width / Depth) wins over the height-based estimate
+                  // below. A freshly placed ceiling mic carries a 6 / 6 / 6
+                  // placeholder (the floor plan's own fallback), and that exact
+                  // set counts as "not set" — otherwise every untouched mic would
+                  // shrink to a 6 ft circle here.
+                  const isPlaceholderCov = dev.covDiameter === 6 && dev.covW === 6 && dev.covL === 6 && dev.covShape !== "square";
+                  const specSquare = !isPlaceholderCov && dev.covShape === "square" && !!dev.covW && !!dev.covL;
+                  const specDia = !isPlaceholderCov && !specSquare && dev.covDiameter ? dev.covDiameter : undefined;
+                  // The equipment itself, drawn at its REAL size and shape rather than
+                  // as a fixed dot: a diameter (Dia) makes it a circle of that
+                  // diameter, a speaker is round by nature (its width is the
+                  // diameter), and anything else — a 24" x 24" mic array tile — is
+                  // a rectangle of its width x height. A floor keeps it big enough
+                  // to see and grab. Only this body is interactive (drag / right-click).
+                  const hasDia = (dev.diameter_in ?? 0) > 0;
+                  const bodyRound = hasDia || dev.type === "speaker";
+                  const bodyWFt = hasDia ? dev.diameter_in! / 12 : dev.w;
+                  const bodyHFt = bodyRound ? bodyWFt : dev.h;
+                  const bodyW = Math.max(8, bodyWFt * cScale), bodyH = Math.max(8, bodyHFt * cScale);
+                  const renderBody = (color: string) => {
+                    const common = { fill: color, fillOpacity: 0.6, stroke: color, strokeWidth: 1.2, pointerEvents: "all" as const, style: { cursor: isDragging ? "grabbing" : "grab" }, onMouseDown: grab, onContextMenu: (e: React.MouseEvent) => handleDeviceContextMenu(e, dev.uid) };
+                    return bodyRound
+                      ? <circle cx={dx} cy={dy} r={bodyW / 2} {...common}/>
+                      : <rect x={dx - bodyW / 2} y={dy - bodyH / 2} width={bodyW} height={bodyH} rx={2} {...common}/>;
+                  };
+                  const renderSelection = () => !isSelected ? null : (bodyRound
+                    ? <circle cx={dx} cy={dy} r={bodyW / 2 + 4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>
+                    : <rect x={dx - bodyW / 2 - 4} y={dy - bodyH / 2 - 4} width={bodyW + 8} height={bodyH + 8} rx={4} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>);
                   if (dev.type === "speaker") {
                     const earHeight = 4;  // 4 ft ear height
                     const effectiveH = Math.max(0.5, roomH - earHeight);
                     const dispRad = ((dev.dispersion || 90) / 2) * Math.PI / 180;
-                    const covDia = 2 * effectiveH * Math.tan(dispRad);
+                    const covDia = specDia ?? 2 * effectiveH * Math.tan(dispRad);
                     const r = covDia / 2 * cScale;
                     return (
-                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
-                        {isSelected && <circle cx={dx} cy={dy} r={10} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
-                        <circle cx={dx} cy={dy} r={r} fill="rgba(168,85,247,0.08)" stroke="#a855f7" strokeWidth={0.8} strokeDasharray="3 2"/>
-                        <circle cx={dx} cy={dy} r={6} fill="#a855f7" opacity={0.8}/>
-                        <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill="#a855f7" fontWeight={600}>{dev.name}</text>
-                        <text x={dx} y={dy+26} textAnchor="middle" fontSize={6} fill="#a855f780">{toDisplay(covDia)} dia</text>
+                      // Only the solid dot is interactive (drag / right-click): the
+                      // coverage area and labels are pointer-transparent, so they
+                      // never grab a click meant for something underneath them.
+                      <g key={dev.uid} pointerEvents="none" opacity={isDragging?0.7:1}>
+                        {renderSelection()}
+                        {specSquare
+                          ? <rect x={dx-dev.covW!*cScale/2} y={dy-dev.covL!*cScale/2} width={dev.covW!*cScale} height={dev.covL!*cScale} fill="rgba(168,85,247,0.08)" stroke="#a855f7" strokeWidth={0.8} strokeDasharray="3 2"/>
+                          : <circle cx={dx} cy={dy} r={r} fill="rgba(168,85,247,0.08)" stroke="#a855f7" strokeWidth={0.8} strokeDasharray="3 2"/>}
+                        {renderBody("#a855f7")}
+                        <text x={dx} y={dy+bodyH/2+9} textAnchor="middle" fontSize={6} fill="#a855f780">{specSquare ? `${toDisplay(dev.covW!)} × ${toDisplay(dev.covL!)}` : `${toDisplay(covDia)} dia`}</text>
                       </g>
                     );
                   }
@@ -6250,36 +6652,40 @@ export default function RoomDesignerPage() {
                     const effectiveH = Math.max(0.5, roomH - mouthHeight);
                     const pickupAngle = 120;
                     const pickupRad = (pickupAngle / 2) * Math.PI / 180;
-                    const covDia = 2 * effectiveH * Math.tan(pickupRad);
-                    const r = Math.min(covDia / 2 * cScale, Math.max(roomW, roomL) * cScale * 0.6);
+                    const covDia = specDia ?? 2 * effectiveH * Math.tan(pickupRad);
+                    // The estimate is capped so it can't swamp the plan; a size the
+                    // user typed is drawn exactly as entered.
+                    const r = specDia ? covDia / 2 * cScale : Math.min(covDia / 2 * cScale, Math.max(roomW, roomL) * cScale * 0.6);
                     return (
-                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
-                        {isSelected && <circle cx={dx} cy={dy} r={9} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2"/>}
-                        <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
-                        <circle cx={dx} cy={dy} r={5} fill="#22c55e" opacity={0.8}/>
-                        <text x={dx} y={dy+14} textAnchor="middle" fontSize={7} fill="#22c55e" fontWeight={600}>{dev.name}</text>
-                        <text x={dx} y={dy+24} textAnchor="middle" fontSize={6} fill="#22c55e80">{toDisplay(covDia)} dia</text>
+                      // Only the solid dot is interactive (see the speaker above).
+                      <g key={dev.uid} pointerEvents="none" opacity={isDragging?0.7:1}>
+                        {renderSelection()}
+                        {specSquare
+                          ? <rect x={dx-dev.covW!*cScale/2} y={dy-dev.covL!*cScale/2} width={dev.covW!*cScale} height={dev.covL!*cScale} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>
+                          : <circle cx={dx} cy={dy} r={r} fill="rgba(34,197,94,0.06)" stroke="#22c55e" strokeWidth={0.8} strokeDasharray="3 2"/>}
+                        {renderBody("#22c55e")}
+                        <text x={dx} y={dy+bodyH/2+9} textAnchor="middle" fontSize={6} fill="#22c55e80">{specSquare ? `${toDisplay(dev.covW!)} × ${toDisplay(dev.covL!)}` : `${toDisplay(covDia)} dia`}</text>
                       </g>
                     );
                   }
                   if (dev.type === "camera") {
                     return (
-                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                      <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                         {isSelected && <rect x={dx-12} y={dy-9} width={24} height={18} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" rx={4}/>}
                         <rect x={dx-8} y={dy-5} width={16} height={10} rx={3} fill="rgba(245,158,11,0.15)" stroke="#f59e0b" strokeWidth={1}/>
                         <circle cx={dx} cy={dy} r={3} fill="#f59e0b" opacity={0.8}/>
-                        <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill="#f59e0b" fontWeight={600}>{dev.name}</text>
                       </g>
                     );
                   }
                   return (
-                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} opacity={isDragging?0.7:1}>
+                    <g key={dev.uid} style={{cursor:isDragging?"grabbing":"grab"}} onMouseDown={grab} onContextMenu={e=>handleDeviceContextMenu(e,dev.uid)} opacity={isDragging?0.7:1}>
                       {isSelected && <rect x={dx-10} y={dy-10} width={20} height={20} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="3 2" rx={3}/>}
                       <rect x={dx-6} y={dy-6} width={12} height={12} rx={2} fill={dev.color+"22"} stroke={dev.color} strokeWidth={0.8}/>
-                      <text x={dx} y={dy+16} textAnchor="middle" fontSize={7} fill={dev.color} fontWeight={600}>{dev.name}</text>
                     </g>
                   );
                 })}
+                {/* Same make/model call-outs as the Floor Plan, on top of the equipment */}
+                {ceilingDevices.map(dev => renderCallout(dev, "ceil"))}
               </g>
             );
           })()}
@@ -6368,22 +6774,23 @@ export default function RoomDesignerPage() {
                 <text x={300} y={22} textAnchor="middle" fontSize={11} fontWeight={700} fill="rgb(var(--text-body))">Elevation {activeView.marker.label}{elevationDirNumber(activeView.marker, activeView.dir)} — {ELEVATION_DIR_LABELS[activeView.dir]}</text>
                 <line x1={ePX(0)} y1={eFloorY} x2={ePX(elevData.wallWidthFt)} y2={eFloorY} stroke="#475569" strokeWidth={2}/>
                 <rect x={ePX(0)} y={ePY(elevData.roomHFt)} width={elevData.wallWidthFt*eScale} height={elevData.roomHFt*eScale} fill="none" stroke="#b0b5be" strokeWidth={1.5}/>
-                <text x={ePX(elevData.wallWidthFt/2)} y={eFloorY+16} textAnchor="middle" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace">{toDisplay(elevData.wallWidthFt)}</text>
-                <text x={ePX(-0.15)} y={ePY(elevData.roomHFt/2)} textAnchor="end" fontSize={9} fill="#475569" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${ePX(-0.15)},${ePY(elevData.roomHFt/2)})`}>{toDisplay(elevData.roomHFt)}</text>
+                <text x={ePX(elevData.wallWidthFt/2)} y={eFloorY+16} textAnchor="middle" fontSize={9} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono',monospace">{toDisplay(elevData.wallWidthFt)}</text>
+                <text x={ePX(-0.15)} y={ePY(elevData.roomHFt/2)} textAnchor="end" fontSize={9} fill="rgb(var(--text-muted))" fontFamily="'JetBrains Mono',monospace" transform={`rotate(-90,${ePX(-0.15)},${ePY(elevData.roomHFt/2)})`}>{toDisplay(elevData.roomHFt)}</text>
                 {elevData.items.length === 0 && (
                   <text x={300} y={210} textAnchor="middle" fontSize={10} fill="rgb(var(--text-subtle))">No equipment along this line of sight</text>
                 )}
                 {elevData.items.map(it => {
                   const x0 = ePX(it.u - it.wFt/2), x1 = ePX(it.u + it.wFt/2);
                   const y0 = ePY(it.boxTop), y1 = ePY(it.boxBot);
-                  // Neutral black/gray, same as the Plan view's own equipment
-                  // call-outs (#1f2937 text, #4b5563 lines) — a professional
-                  // drawing reads in one ink color, not a rainbow of each
-                  // device's own accent color.
+                  // One neutral ink color, same as the Plan view's own equipment
+                  // call-outs — a professional drawing reads in one color, not a
+                  // rainbow of each device's own accent color. It's the theme's
+                  // body-text color (not a fixed dark grey) so it stays readable
+                  // on both the light and the dark canvas.
                   return (
                     <g key={it.dev.uid}>
-                      <rect x={Math.min(x0,x1)} y={y0} width={Math.abs(x1-x0)} height={Math.max(2,y1-y0)} fill="#1f2937" fillOpacity={0.08} stroke="#1f2937" strokeWidth={1.2}/>
-                      <text x={(x0+x1)/2} y={y0-5} textAnchor="middle" fontSize={8} fill="#1f2937" fontWeight={600}>{calloutLabel(it.dev)}</text>
+                      <rect x={Math.min(x0,x1)} y={y0} width={Math.abs(x1-x0)} height={Math.max(2,y1-y0)} fill="rgb(var(--text-body))" fillOpacity={0.08} stroke="rgb(var(--text-body))" strokeWidth={1.2}/>
+                      <text x={(x0+x1)/2} y={y0-5} textAnchor="middle" fontSize={8} fill="rgb(var(--text-body))" fontWeight={600}>{calloutLabel(it.dev)}</text>
                     </g>
                   );
                 })}
@@ -6459,8 +6866,25 @@ export default function RoomDesignerPage() {
             Duplicate
           </button>
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
+          {/* Hide: out of THIS view only — Signal Flow, the rack and the BOM keep it. */}
+          {(() => {
+            const menuDev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
+            if (!menuDev || isRoomFurniture(menuDev)) return null;
+            return (
+              <button onClick={()=>{
+                hideDevices([deviceContextMenu.uid]);
+                setDeviceContextMenu(null);
+              }}
+                title="Remove it from this view only. It stays in Signal Flow, the Rack Builder and the BOM."
+                style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                Hide
+              </button>
+            );
+          })()}
           <button onClick={()=>{
-            removeDevice(deviceContextMenu.uid);
+            requestDeleteDevices([deviceContextMenu.uid]);
             setDeviceContextMenu(null);
           }}
             style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,cursor:"pointer",textAlign:"left"}}
@@ -6516,6 +6940,20 @@ export default function RoomDesignerPage() {
       );
     })()}
 
+    {deleteConfirm && (
+      <ConfirmDialog
+        title={deleteConfirm.names.length === 1 ? "Delete equipment?" : `Delete ${deleteConfirm.names.length} pieces of equipment?`}
+        message={<>
+          <span className="font-semibold text-heading">{deleteConfirm.names.length === 1 ? deleteConfirm.names[0] : deleteConfirm.names.join(", ")}</span>{" "}
+          will be deleted from all other instances too — Room Designer, Signal Flow, Rack Builder and the BOM.
+          To remove it from this view only, cancel and use <span className="font-semibold text-heading">Hide</span> (right-click the equipment → Hide).
+        </>}
+        confirmLabel="Delete everywhere"
+        onCancel={() => setDeleteConfirm(null)}
+        onConfirm={() => { deleteDevicesNow(deleteConfirm.uids); setDeleteConfirm(null); }}
+      />
+    )}
+
     {/* Rotate popup — opened from the small purple button next to a selected
         camera or display's delete "×"; typing a value and pressing
         Enter/Apply sets its rotation directly. */}
@@ -6557,7 +6995,14 @@ export default function RoomDesignerPage() {
         onCancel={()=>setEditingDevice(null)}
         onSave={()=>{
           pushUndo();
-          setPlacedDevices(prev=>prev.map(d=>d.uid===editingDevice.uid?editingDevice:d));
+          const before = placedDevices.find(d => d.uid === editingDevice.uid);
+          // Retyping the maker / model of a library product makes it a different product.
+          const edited = identityAfterEdit(before, editingDevice);
+          setPlacedDevices(prev=>prev.map(d=>d.uid===edited.uid?edited:d));
+          // Signal Flow, the rack and the BOM show the same make / model / price / specs
+          // (only what this edit changed is passed on).
+          const changes = diffSpec(before ? specFromRoomDevice(before) : {}, specFromRoomDevice(edited));
+          if (edited.itemId && Object.keys(changes).length) updateUnitSpec(edited.itemId, changes);
           setEditingDevice(null);
         }}
         saving={false}
@@ -6566,6 +7011,7 @@ export default function RoomDesignerPage() {
         categories={deviceCatalog.map(g=>g.cat)}
         showAIImport
         aiMode="update"
+
       />
     )}
 
@@ -6591,7 +7037,7 @@ export default function RoomDesignerPage() {
           {/* Search bar */}
           <div style={{padding:"0 20px 14px",flexShrink:0}}>
             <div style={{display:"flex",gap:0}}>
-              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);setModalGlobalSearch(false);}}
+              <input autoFocus value={modalSearch} onChange={e=>{setModalSearch(e.target.value);setModalSelected(null);}}
                 placeholder="Search displays, cameras, speakers, microphones, or control panels"
                 style={{flex:1,padding:"9px 14px",background:"rgb(var(--forge-surface))",border:"1px solid rgb(var(--border))",borderRight:"none",borderRadius:"6px 0 0 6px",color:"rgb(var(--text-body))",fontSize:12,outline:"none"}}
               />
@@ -6606,8 +7052,16 @@ export default function RoomDesignerPage() {
           {/* Search results */}
           {modalSearch.trim() && (
             <div style={{margin:"0 20px",marginBottom:8}}>
-              <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"rgb(var(--text-subtle))",marginBottom:6}}>
-                {modalGlobalSearch ? "AVGenix Equipment Library" : "My Organization's Equipment Library"}
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                {([[false,"My Organization's Library"],[true,"AVGenix Library"]] as const).map(([global,label])=>(
+                  <button key={label} onClick={()=>{setModalGlobalSearch(global);setModalSelected(null);}}
+                    style={{padding:"4px 10px",fontSize:11,fontWeight:600,borderRadius:5,cursor:"pointer",
+                      background:modalGlobalSearch===global?"rgba(139,92,246,0.15)":"transparent",
+                      border:"1px solid "+(modalGlobalSearch===global?"#8b5cf6":"rgb(var(--border))"),
+                      color:modalGlobalSearch===global?"#8b5cf6":"rgb(var(--text-subtle))"}}>
+                    {label}
+                  </button>
+                ))}
               </div>
               <div style={{maxHeight:220,overflowY:"auto",border:"1px solid rgb(var(--border))",borderRadius:6,background:"rgb(var(--forge-surface) / 0.4)"}}>
                 {modalLoading ? (
@@ -6622,8 +7076,8 @@ export default function RoomDesignerPage() {
                       onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="rgb(var(--forge-surface))"}} onMouseLeave={e=>{if(!isSel)e.currentTarget.style.background="transparent"}}>
                       <div style={{width:8,height:8,borderRadius:2,background:item.color,flexShrink:0}} />
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.type}</div>
-                        <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.mfr||"Generic"}{item.cat?" · "+item.cat:""}</div>
+                        <div style={{fontSize:12,color:"rgb(var(--text-body))",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.model && item.mfr && item.mfr !== "Generic" ? `${item.mfr} ${item.model}` : item.type}</div>
+                        <div style={{fontSize:10,color:"rgb(var(--text-subtle))"}}>{item.model && item.mfr && item.mfr !== "Generic" ? [item.type, item.cat].filter(Boolean).join(" · ") : (item.mfr||"Generic")+(item.cat?" · "+item.cat:"")}</div>
                       </div>
                       {isSel && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
                     </div>

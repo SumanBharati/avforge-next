@@ -4,19 +4,20 @@ import "./globals.css";
 import LayoutShell from "@/components/LayoutShell";
 import ThemeProvider from "@/components/ThemeProvider";
 import OrgProvider from "@/components/OrgProvider";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
+import { SHARE_IMAGE } from "@/lib/seo";
 
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
   display: "swap",
-  preload: false,
 });
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-space-grotesk",
   display: "swap",
-  preload: false,
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -26,37 +27,56 @@ const jetbrainsMono = JetBrains_Mono({
   preload: false,
 });
 
-const description =
-  "The all-in-one engineering toolkit for AV professionals. Calculators, design tools, reference library, and AI-powered assistance.";
+const googleVerification = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION;
+const bingVerification = process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION;
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://avgenix.com"),
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "AVGenix — AV Engineer Toolkit",
+    default: "AVGenix — AV Project Management & Design Software",
     template: "%s — AVGenix",
   },
-  description,
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 },
+  },
   openGraph: {
-    title: "AVGenix — AV Engineer Toolkit",
-    description,
-    url: "https://avgenix.com",
-    siteName: "AVGenix",
+    title: "AVGenix — AV Project Management & Design Software",
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
     type: "website",
+    locale: "en_US",
+    images: [SHARE_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AVGenix — AV Engineer Toolkit",
-    description,
+    title: "AVGenix — AV Project Management & Design Software",
+    description: SITE_DESCRIPTION,
+    images: [SHARE_IMAGE],
   },
+  ...(googleVerification || bingVerification
+    ? {
+        verification: {
+          ...(googleVerification ? { google: googleVerification } : {}),
+          ...(bingVerification ? { other: { "msvalidate.01": bingVerification } } : {}),
+        },
+      }
+    : {}),
 };
 
 const themeScript = `
 (function(){
   try {
     var t = localStorage.getItem('avgenix-theme');
-    document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'light');
+    document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'dark');
   } catch(e) {
-    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.setAttribute('data-theme', 'dark');
   }
 })();
 `;
@@ -81,6 +101,7 @@ export default function RootLayout({
             <LayoutShell>{children}</LayoutShell>
           </OrgProvider>
         </ThemeProvider>
+        <GoogleAnalytics />
       </body>
     </html>
   );

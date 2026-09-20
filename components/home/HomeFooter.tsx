@@ -6,6 +6,8 @@ const productLinks = [
   { href: "/", label: "Home" },
   { href: "/#walkthroughs", label: "Product Walkthroughs" },
   { href: "/#plans", label: "Plans" },
+  { href: "/calculators", label: "AV Calculators" },
+  { href: "/references", label: "AV Reference Library" },
 ];
 
 export default function HomeFooter() {

@@ -166,6 +166,7 @@ export function wipeRoomDesignerEquipment(devices: any[]): any[] {
  * rather than rendering as lines into empty space and stray labelled frames.
  * Annotations live outside this and are preserved by the caller.
  */
-export function wipeSignalFlowEquipment(): { devices: any[]; connections: any[]; rooms: any[] } {
-  return { devices: [], connections: [], rooms: [] };
+export function wipeSignalFlowEquipment(): { devices: any[]; connections: any[]; rooms: any[]; hiddenDevices: any[] } {
+  // Hidden blocks are equipment too — a re-import replaces them as well.
+  return { devices: [], connections: [], rooms: [], hiddenDevices: [] };
 }

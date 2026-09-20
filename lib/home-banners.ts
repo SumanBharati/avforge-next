@@ -15,8 +15,6 @@ export interface HomeBanner {
   detailsTheme?: "default" | "purple";
   seamlessBackground?: boolean;
   shineEffect?: boolean;
-  ctaLabel?: string;
-  ctaHref?: string;
 }
 
 export const HOME_BANNERS: HomeBanner[] = Array.from({ length: 5 }, (_, index) => {
@@ -96,14 +94,6 @@ export const HOME_BANNERS: HomeBanner[] = Array.from({ length: 5 }, (_, index) =
         ? "AVGenix Signal Flow Builder showing connected AV equipment, signal paths, room locations, and system annotations"
         : "AVGenix Projects view showing project filters and project records",
       imagePresentation: "framed" as const,
-      ctaLabel: number === 3
-        ? "Start a Site Survey"
-        : number === 4
-        ? "Open Room Designer"
-        : number === 5
-        ? "Open Signal Flow Builder"
-        : "Go to Projects",
-      ctaHref: "/projects",
     } : {}),
   };
 });

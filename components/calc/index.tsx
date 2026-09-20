@@ -1,16 +1,16 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import BackLink from '@/components/BackLink';
 
 // ─── CalcSection ──────────────────────────────────────────────────────────────
 
 export function CalcSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <h3 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
+      <h2 className="mb-2 border-b border-border pb-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-muted">
         {title}
-      </h3>
+      </h2>
       {children}
     </div>
   );
@@ -129,12 +129,8 @@ interface CalcPageWrapperProps {
 export function CalcPageWrapper({ title, desc, subtitle, children }: CalcPageWrapperProps) {
   return (
     <div className="animate-fade-in px-6 py-3">
-      <div className="mb-2 flex items-center gap-2 text-[12px]">
-        <Link href="/calculators" className="text-subtle transition-colors hover:text-secondary">
-          ← Calculators
-        </Link>
-      </div>
-      <h2 className="mb-0.5 text-xl font-semibold text-heading">{title}</h2>
+      <BackLink href="/calculators" label="Back to Calculators" />
+      <h1 className="mb-0.5 text-xl font-semibold text-heading">{title}</h1>
       <p className={subtitle ? 'mb-0.5 text-[13px] text-subtle' : 'mb-3 text-[13px] text-subtle'}>{desc}</p>
       {subtitle && <p className="mb-3 text-[13px] text-subtle">{subtitle}</p>}
       <div className="w-full">{children}</div>

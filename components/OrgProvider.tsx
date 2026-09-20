@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
@@ -68,10 +68,15 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   const openUpgradeModal = useCallback(() => setUpgradeModalOpen(true), []);
   const closeUpgradeModal = useCallback(() => setUpgradeModalOpen(false), []);
 
+  // Who the loaded state belongs to — lets the auth listener below tell a real
+  // sign-in / sign-out from the library merely re-announcing the same session.
+  const userIdRef = useRef<string | null>(null);
+
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
     setOrgLoadError(null);
     const { data: { user } } = await supabase.auth.getUser();
+    userIdRef.current = user?.id ?? null;
     setUser(user);
     if (!user) {
       setOrgs([]);
@@ -197,7 +202,16 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     fetchOrgs();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Reloading flips `loading` on, and ProGate answers "loading" by swapping
+      // the whole page for a skeleton — unmounting every component under it, so
+      // an open right-click menu, an Edit Equipment window, an unsaved draft all
+      // vanish. Supabase re-announces the session (SIGNED_IN) every time the
+      // browser tab becomes visible again, and refreshes the token in the
+      // background (TOKEN_REFRESHED); neither changes who is signed in, so
+      // neither needs a reload. Only a real change of user does.
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
+      if (event === "SIGNED_IN" && session?.user?.id && session.user.id === userIdRef.current) return;
       fetchOrgs();
     });
 

@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import OrgSwitcher from "./OrgSwitcher";
 import BrandLogo from "./BrandLogo";
+import ProAuthModal from "./ProAuthModal";
 import { useTheme } from "./ThemeProvider";
 
 function SunIcon() {
@@ -24,6 +26,7 @@ export default function Header() {
   const { theme, toggle } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup" | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -43,6 +46,19 @@ export default function Header() {
   const avatarUrl = user?.user_metadata?.avatar_url;
   const initials = fullName.split(" ").map((name: string) => name[0]).join("").toUpperCase().slice(0, 2);
 
+  async function handleSignedIn() {
+    setAuthMode(null);
+    const { data: { user: signedInUser } } = await supabase.auth.getUser();
+    if (signedInUser) {
+      const { data: memberships } = await supabase.from("organization_members").select("org_id").eq("user_id", signedInUser.id).limit(1);
+      if (!memberships || memberships.length === 0) {
+        router.push("/welcome");
+        return;
+      }
+    }
+    router.push("/dashboard");
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     setDropdownOpen(false);
@@ -50,22 +66,23 @@ export default function Header() {
   }
 
   return (
+    <>
     <header className="sticky top-0 z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-forge-panel px-4 sm:px-6 xl:px-8">
       <div className="flex min-w-0 items-center gap-3 xl:gap-5">
         <Link href="/" className="flex shrink-0 items-center transition-opacity hover:opacity-80" aria-label="AVGenix home"><BrandLogo /></Link>
         {!isPublicHome && user && <><div className="h-8 w-px bg-border" /><div className="min-w-0"><OrgSwitcher /></div></>}
       </div>
 
-      {!user ? (
-        <div className="flex items-center gap-4">
-          <Link href="/register" className="text-sm font-semibold text-blue-600 transition-colors hover:text-blue-500">Sign Up</Link>
-          <Link href="/login" className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-colors hover:bg-blue-700">Log In</Link>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <button onClick={toggle} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-forge-surface hover:text-heading" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
-            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-          </button>
+      <div className="flex items-center gap-2">
+        <button onClick={toggle} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-forge-surface hover:text-heading" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+          {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+        </button>
+        {!user ? (
+          <div className="flex items-center gap-4">
+            <button type="button" onClick={() => setAuthMode("signup")} className="text-sm font-semibold text-blue-600 transition-colors hover:text-blue-500">Sign Up</button>
+            <button type="button" onClick={() => setAuthMode("signin")} className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-colors hover:bg-blue-700">Log In</button>
+          </div>
+        ) : (
           <div className="relative" ref={dropdownRef}>
           <button onClick={() => setDropdownOpen((open) => !open)} className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-border-light bg-forge-surface transition-all hover:border-blue-500/50" aria-label="Open profile menu" aria-expanded={dropdownOpen}>
             {avatarUrl ? <img src={avatarUrl} alt="Profile" className="h-full w-full object-cover" /> : <span className="text-xs font-bold text-secondary">{initials || "U"}</span>}
@@ -80,8 +97,10 @@ export default function Header() {
             </div>
           )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </header>
+    {authMode && createPortal(<ProAuthModal key={authMode} initialMode={authMode} onClose={() => setAuthMode(null)} onSignedIn={handleSignedIn} confirmRedirectPath="/login?next=%2Fwelcome" />, document.body)}
+    </>
   );
 }

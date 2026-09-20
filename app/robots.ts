@@ -1,12 +1,13 @@
 import type { MetadataRoute } from "next";
-
-const BASE_URL = "https://avgenix.com";
+import { SITE_URL } from "@/lib/site";
 
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
       allow: "/",
+      // Signed-in app areas and API routes: nothing here should be crawled.
+      // (These paths also send an X-Robots-Tag: noindex header — see next.config.mjs.)
       disallow: [
         "/dashboard",
         "/projects",
@@ -23,6 +24,6 @@ export default function robots(): MetadataRoute.Robots {
         "/api",
       ],
     },
-    sitemap: `${BASE_URL}/sitemap.xml`,
+    sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }

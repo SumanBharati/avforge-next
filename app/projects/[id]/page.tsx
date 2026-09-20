@@ -513,11 +513,11 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           <div className="mb-4 rounded-xl border border-border bg-forge-panel px-6 py-5">
             <div className="mb-4 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-widest text-heading">Project Milestones</span>
-              <span className="text-xs text-faint">Click to update the current Milestone</span>
+              <span className="text-xs text-subtle">Click to update the current Milestone</span>
             </div>
-            {/* background matches inactive segment colour so clip-path notch gaps are invisible */}
+            {/* track uses the same colour as inactive segments so clip-path notch gaps are invisible */}
             <div className="overflow-x-auto">
-            <div className="flex w-full overflow-hidden" style={{ borderRadius: 9999, height: 40, background: "#e2e8f0", minWidth: 560 }}>
+            <div className="flex w-full overflow-hidden" style={{ borderRadius: 9999, height: 40, background: "rgb(var(--forge-surface))", minWidth: 560 }}>
               {mainPhases.map((phase, i) => {
                 const isActive = phase.id === currentPhase;
                 const isPast = i < mainIndex;
@@ -530,8 +530,8 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                   ? `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, ${A}px 50%)`
                   : `polygon(0% 0%, calc(100% - ${A}px) 0%, 100% 50%, calc(100% - ${A}px) 100%, 0% 100%, ${A}px 50%)`;
 
-                const bg = isActive ? "#7c3aed" : "#e2e8f0";
-                const color = isActive ? "#ffffff" : isPast ? "#6b7280" : "#9ca3af";
+                const bg = isActive ? "#7c3aed" : "rgb(var(--forge-surface))";
+                const color = isActive ? "#ffffff" : isPast ? "rgb(var(--text-muted))" : "rgb(var(--text-subtle))";
 
                 return (
                   <button
@@ -563,8 +563,8 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                     >
                       {isPast && (
                         <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
-                          <circle cx="6" cy="6" r="5.5" stroke="#6b7280" strokeWidth="1" />
-                          <path d="M3.5 6l1.8 1.8L8.5 4.5" stroke="#6b7280" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                          <circle cx="6" cy="6" r="5.5" stroke="currentColor" strokeWidth="1" />
+                          <path d="M3.5 6l1.8 1.8L8.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       )}
                       {phase.label}

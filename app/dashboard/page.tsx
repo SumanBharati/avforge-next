@@ -11,6 +11,10 @@ import { Scheduler } from "@/components/Scheduler";
 import { getRecentTools } from "@/lib/recentTools";
 import DashboardPageSkeleton from "@/components/DashboardPageSkeleton";
 import AnimatedIcon from "@/components/AnimatedIcon";
+import ConduitIcon from "@/components/ConduitIcon";
+import Rj45Icon from "@/components/Rj45Icon";
+import TwoWayArrowsIcon from "@/components/TwoWayArrowsIcon";
+import FormulaSheetIcon from "@/components/FormulaSheetIcon";
 
 /* ── Pinned tools (calculators only) ───────────────────────── */
 const VideoWallIconSmall = () => (
@@ -36,12 +40,12 @@ const allTools: { name: string; icon: React.ReactNode; href: string }[] = [
   { name: "Speaker Coverage", icon: "🔊", href: "/calculators/speaker-coverage" },
   { name: "PAG / NAG",        icon: "🎤", href: "/calculators/pag-nag" },
   { name: "70V Tap",          icon: "⚡", href: "/calculators/70v-tap" },
-  { name: "Conduit Fill",     icon: "🔌", href: "/calculators/conduit-fill" },
-  { name: "PoE Budget",       icon: "🔋", href: "/calculators/poe-budget" },
-  { name: "Dante Bandwidth",  icon: "📶", href: "/calculators/dante-bandwidth" },
+  { name: "Conduit Fill",     icon: <ConduitIcon size={16} />, href: "/calculators/conduit-fill" },
+  { name: "PoE Budget",       icon: <Rj45Icon size={16} />, href: "/calculators/poe-budget" },
+  { name: "Dante Bandwidth",  icon: <TwoWayArrowsIcon size={16} />, href: "/calculators/dante-bandwidth" },
   { name: "Rack Heat Load",   icon: "🌡️", href: "/calculators/rack-heat" },
   { name: "Unit Converter",   icon: "🔄", href: "/calculators/unit-converter" },
-  { name: "Formula Sheet",    icon: "📐", href: "/calculators/standards" },
+  { name: "Formula Sheet",    icon: <FormulaSheetIcon size={16} />, href: "/calculators/standards" },
   { name: "PoE Device Database", icon: "📦", href: "/calculators/poe-database" },
 ];
 

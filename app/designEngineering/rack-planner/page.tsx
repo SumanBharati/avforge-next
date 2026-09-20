@@ -4,8 +4,10 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts, type AVProduct } from "@/lib/av-products";
-import { useBOM, rackItemToBOM } from "@/lib/bom-context";
+import { loadUnitSpecs, diffSpec, identityAfterEdit, specFromRackItem, applySpecToRackItem } from "@/lib/unit-specs";
+import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, rackItemToBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { useCanvasAnnotations } from "@/components/CanvasAnnotations";
 import { DxfWriter, downloadDxf } from "@/lib/dxf-export";
 import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
@@ -59,6 +61,7 @@ type RackItem = {
   ports?: EquipmentFormValue["ports"];
   heightIn?: number | null;
   depthIn?: number | null;
+  diameterIn?: number | null;
   weightLb?: number | null;
   rackEarIncluded?: boolean;
 };
@@ -86,6 +89,7 @@ function rackItemToFormValue(item: RackItem): EquipmentFormValue {
     widthIn: item.widthIn ?? null,
     heightIn: item.heightIn ?? null,
     depthIn: item.depthIn ?? null,
+    diameterIn: item.diameterIn ?? null,
     weightLb: item.weightLb ?? null,
     hfovDeg: null,
     vfovDeg: null,
@@ -121,6 +125,7 @@ function applyFormValueToRackItem(item: RackItem, v: EquipmentFormValue): RackIt
     widthIn: v.widthIn,
     heightIn: v.heightIn,
     depthIn: v.depthIn,
+    diameterIn: v.diameterIn ?? null,
     weightLb: v.weightLb,
   };
 }
@@ -216,6 +221,12 @@ export default function RackPlannerPage() {
   }, [embedMode]);
   const rackColors = ["#3b82f6","#8b5cf6","#22c55e","#f59e0b","#ef4444","#06b6d4","#f97316","#ec4899","rgb(var(--text-subtle))","rgb(var(--text-faint))"];
   const [items, setItems] = useState<RackItem[]>([]);
+  // Equipment hidden from THIS rack only. Kept in the saved rack data (so the
+  // rack doesn't re-derive it from Signal Flow / Room Designer) but not drawn or
+  // listed here; the other tools and the BOM still have it.
+  const [hiddenItems, setHiddenItems] = useState<RackItem[]>([]);
+  // Equipment awaiting the "delete from every tool?" confirmation.
+  const [deleteConfirm, setDeleteConfirm] = useState<{ indexes: number[]; names: string[] } | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [bomCollapsed, setBomCollapsed] = useState(true);
@@ -237,7 +248,7 @@ export default function RackPlannerPage() {
   const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
   const [rackEditDraft, setRackEditDraft] = useState<RackItem|null>(null);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
-  const { updateSlice } = useBOM();
+  const { updateSlice, updateUnitSpec } = useBOM();
 
   // Annotations (Text / Shape / Pencil / Highlight / Eraser) — drawn on an
   // overlay in the rack container's pixel space
@@ -261,6 +272,7 @@ export default function RackPlannerPage() {
     // has loaded.
     setLoaded(false);
     setItems([]);
+    setHiddenItems([]); setDeleteConfirm(null);
     setRackRUCapacity(null);
     setRackCount(1);
     setAdditionalRackRUCapacities([]);
@@ -272,16 +284,28 @@ export default function RackPlannerPage() {
       loadToolData("rack-planner", roomParam, projectParam),
       loadToolData("signal-flow", roomParam, projectParam),
       supabase.from("room_designs").select("data").eq("project_id", projectParam).eq("room_id", roomParam || "default").maybeSingle(),
-    ]).then(async ([rackData, signalData, roomRow]) => {
+      loadUnitSpecs(roomParam, projectParam),
+    ]).then(async ([rackData, signalData, roomRow, unitSpecs]) => {
       if (cancelled) return;
       const rawSavedItems = Array.isArray(rackData?.items) ? rackData.items as RackItem[] : [];
-      const signalDevices = ensureSignalFlowItemIds(
-        Array.isArray(signalData?.devices) ? signalData.devices as any[] : []
-      ).items;
-      const roomDevices = ensureRoomDeviceItemIds(
-        ((roomRow as any)?.data?.data?.devices as any[]) || []
-      ).items;
+      // Units another tool has hidden are still that tool's units, and so still
+      // belong in the rack (hiding is per-tool) — count them as sources.
+      const signalDevices = ensureSignalFlowItemIds([
+        ...(Array.isArray(signalData?.devices) ? signalData.devices as any[] : []),
+        ...(Array.isArray(signalData?.hiddenDevices) ? signalData.hiddenDevices as any[] : []),
+      ]).items;
+      const roomDesign = (roomRow as any)?.data?.data;
+      const roomDevices = ensureRoomDeviceItemIds([
+        ...((roomDesign?.devices as any[]) || []),
+        ...((roomDesign?.config?.hiddenDevices as any[]) || []),
+      ]).items;
       const savedItems = ensureRackItemIds(rawSavedItems, signalDevices).items;
+      // What THIS rack has hidden: kept as-is, and never re-derived below.
+      const savedHidden = ensureRackItemIds(
+        Array.isArray(rackData?.hiddenItems) ? rackData.hiddenItems as RackItem[] : [], signalDevices,
+      ).items;
+      const hiddenItemIds = new Set(savedHidden.map(item => item.itemId).filter(Boolean) as string[]);
+      setHiddenItems(savedHidden);
       const savedByItemId = new Map(
         savedItems.filter(item => item.itemId).map(item => [item.itemId as string, item])
       );
@@ -296,7 +320,7 @@ export default function RackPlannerPage() {
         ...roomDevices.filter((d: any) => d.itemId && !sfItemIds.has(d.itemId) && d.type !== "furniture" && d.id !== "wall-partition"),
       ];
 
-      const enrichedSignalDevices=await Promise.all(sourceUnits.filter(isRackApplicable).map(async device=>{
+      const enrichedSignalDevices=await Promise.all(sourceUnits.filter(isRackApplicable).filter((d: any) => !(d.itemId && hiddenItemIds.has(d.itemId))).map(async device=>{
         // A unit carrying a real library id already brought its power spec with
         // it; the fuzzy name lookup below is only a fallback for older saves.
         if(device.productId||device.libraryProductId||device.product_id)return device;
@@ -357,8 +381,11 @@ export default function RackPlannerPage() {
       // Without the itemId check, a manual item that later reached Signal Flow
       // would come back derived AND be re-appended here, doubling every load.
       const derivedItemIds = new Set(mountedItems.map(item => item.itemId).filter(Boolean));
-      const manualItems = savedItems.filter(item => item.manual === true && !(item.itemId && derivedItemIds.has(item.itemId)));
-      const restored=[...mountedItems,...manualItems].sort((a,b)=>(a.rackOrder??Number.MAX_SAFE_INTEGER)-(b.rackOrder??Number.MAX_SAFE_INTEGER));
+      const manualItems = savedItems.filter(item => item.manual === true && !(item.itemId && (derivedItemIds.has(item.itemId) || hiddenItemIds.has(item.itemId))));
+      // A unit edited or replaced in another tool carries that change into its rack row.
+      const withSpec=(item:RackItem):RackItem=>item.itemId&&unitSpecs[item.itemId]?applySpecToRackItem(item,unitSpecs[item.itemId]):item;
+      setHiddenItems(prev=>prev.map(withSpec));
+      const restored=[...mountedItems,...manualItems].map(withSpec).sort((a,b)=>(a.rackOrder??Number.MAX_SAFE_INTEGER)-(b.rackOrder??Number.MAX_SAFE_INTEGER));
       const restoredMounted=restored.filter(item=>item.rackMounted!==false);
       let nextTopRU=restoredMounted.reduce((sum,item)=>sum+item.ru,0);
       setItems(restored.map(item=>{
@@ -391,14 +418,14 @@ export default function RackPlannerPage() {
 
   // Auto-save
   const doSave = useCallback((list: RackItem[], anns: any[]) => {
-    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities, rackVoltages }, roomParam, projectParam);
-  }, [rackRUCapacity,rackCount,additionalRackRUCapacities,rackVoltages,roomParam,projectParam]);
+    saveToolData("rack-planner", { items: list.map((item,rackOrder)=>({...item,rackOrder})), hiddenItems, annotations: anns, rackRUCapacity, rackCount, additionalRackRUCapacities, rackVoltages }, roomParam, projectParam);
+  }, [hiddenItems,rackRUCapacity,rackCount,additionalRackRUCapacities,rackVoltages,roomParam,projectParam]);
 
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => doSave(items, annotate.annotations), 1000);
-  }, [items, annotate.annotations, loaded, doSave]);
+  }, [items, hiddenItems, annotate.annotations, loaded, doSave]);
 
   useEffect(() => {
     if (!showAddEquipment || !equipmentSearch.trim()) {
@@ -446,8 +473,53 @@ export default function RackPlannerPage() {
 
   // Sync rack items to shared BOM
   useEffect(() => {
-    updateSlice('rack-builder', items.map(rackItemToBOM));
-  }, [items, updateSlice]);
+    updateSlice('rack-builder', [
+      ...items.map(rackItemToBOM),
+      // Hidden here, still bought: counted by the BOM but without the RACK tag.
+      ...hiddenItems.map(item => ({ ...rackItemToBOM(item), hidden: true })),
+    ]);
+  }, [items, hiddenItems, updateSlice]);
+
+  // One unit, one existence across Room Designer / Signal Flow / the rack:
+  // deleting a unit here removes it from the other two and from the BOM. Hidden
+  // items are still this tool's, so hiding never reads as a deletion.
+  useRetireRemovedUnits("rack-builder", [...items, ...hiddenItems].map(item => item.itemId), loaded);
+
+  // Delete vs Hide. Delete removes the unit from every tool and the BOM, so it
+  // always asks first. Hide takes it out of THIS rack only.
+  const deleteItemsNow = (indexes: number[]) => {
+    const gone = new Set(indexes);
+    setItems(prev => prev.filter((_, i) => !gone.has(i)));
+    setSelectedIdxs(new Set());
+    setEditingIdx(null);
+  };
+  const requestDeleteItems = (indexes: number[]) => {
+    const targets = indexes.filter(i => items[i]);
+    if (!targets.length) return;
+    setDeleteConfirm({ indexes: targets, names: targets.map(i => items[i].name) });
+  };
+  const requestDeleteRef = useRef(requestDeleteItems);
+  requestDeleteRef.current = requestDeleteItems;
+  const hideItems = (indexes: number[]) => {
+    const gone = new Set(indexes.filter(i => items[i]));
+    if (!gone.size) return;
+    setHiddenItems(prev => [...prev, ...items.filter((_, i) => gone.has(i)).map(item => ({ ...item, itemId: item.itemId || newItemId() }))]);
+    setItems(prev => prev.filter((_, i) => !gone.has(i)));
+    setSelectedIdxs(new Set());
+    setEditingIdx(null);
+  };
+  const showHiddenItem = (itemId: string) => {
+    const item = hiddenItems.find(h => h.itemId === itemId);
+    if (!item) return;
+    setHiddenItems(prev => prev.filter(h => h.itemId !== itemId));
+    // Back into the rack's unracked list; the user places it from there.
+    setItems(prev => [...prev, { ...item, rackStartRU: undefined }]);
+  };
+  useHiddenUnitsRegistry(
+    "rack-builder",
+    hiddenItems.map(item => ({ itemId: item.itemId as string, name: item.name })),
+    showHiddenItem,
+  );
 
   // Auto-expand BOM when a device is added (not on initial load)
   const bomBaseline = useRef(-1);
@@ -559,9 +631,8 @@ export default function RackPlannerPage() {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (selectedIdxs.size === 0) return;
       e.preventDefault();
-      setItems(prev => prev.filter((_, i) => !selectedIdxs.has(i)));
-      setSelectedIdxs(new Set());
-      setEditingIdx(null);
+      // Removes the unit from every tool, so it asks first (see requestDeleteItems).
+      requestDeleteRef.current(Array.from(selectedIdxs));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -744,7 +815,7 @@ export default function RackPlannerPage() {
       <div style={{flex:1,padding:24,overflowY:"auto"}}>
       {/* Full-width command bar, matching Signal Flow and Room Designer */}
       <div style={{background:"rgb(var(--forge-panel))",borderBottom:"2px solid rgb(var(--border))",margin:"-24px -24px 20px",paddingLeft:4,paddingRight:12,userSelect:"none"}}>
-        <div style={{display:"flex",alignItems:"stretch",height:82}}>
+        <div className="overflow-x-auto" style={{display:"flex",alignItems:"stretch",height:82}}>
           <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",padding:"5px 6px 0"}}>
             <div style={{display:"flex",gap:2,flex:1,alignItems:"stretch"}}>
               <button onClick={()=>setShowAddEquipment(true)} title="Add equipment to rack"
@@ -1052,8 +1123,24 @@ export default function RackPlannerPage() {
       {rackContextMenu&&<><div style={{position:"fixed",inset:0,zIndex:110}} onClick={()=>setRackContextMenu(null)} onContextMenu={e=>{e.preventDefault();setRackContextMenu(null);}}/><div style={{position:"fixed",left:rackContextMenu.x,top:rackContextMenu.y,zIndex:111,width:190,padding:"4px 0",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
         <button onClick={()=>openRackEquipmentEditor(rackContextMenu.index)} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Edit equipment</button>
         <div style={{height:1,background:"rgb(var(--border))",margin:"3px 0"}}/>
-        <button onClick={()=>{setItems(current=>current.filter((_,index)=>index!==rackContextMenu.index));setRackContextMenu(null);setEditingIdx(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Delete equipment</button>
+        {/* Hide: out of THIS rack only — Room Designer, Signal Flow and the BOM keep it. */}
+        <button title="Remove it from this rack only. It stays in Room Designer, Signal Flow and the BOM." onClick={()=>{hideItems([rackContextMenu.index]);setRackContextMenu(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Hide</button>
+        <button onClick={()=>{requestDeleteItems([rackContextMenu.index]);setRackContextMenu(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Delete equipment</button>
       </div></>}
+
+      {deleteConfirm&&(
+        <ConfirmDialog
+          title={deleteConfirm.names.length===1?"Delete equipment?":`Delete ${deleteConfirm.names.length} pieces of equipment?`}
+          message={<>
+            <span className="font-semibold text-heading">{deleteConfirm.names.length===1?deleteConfirm.names[0]:deleteConfirm.names.join(", ")}</span>{" "}
+            will be deleted from all other instances too — Room Designer, Signal Flow, Rack Builder and the BOM.
+            To remove it from this rack only, cancel and use <span className="font-semibold text-heading">Hide</span> (right-click the equipment → Hide).
+          </>}
+          confirmLabel="Delete everywhere"
+          onCancel={()=>setDeleteConfirm(null)}
+          onConfirm={()=>{deleteItemsNow(deleteConfirm.indexes);setDeleteConfirm(null);}}
+        />
+      )}
 
       {/* Edit Equipment Modal — same form used by Signal Flow Builder/Room
           Designer and the Organization/AVGenix Equipment Library. Saves
@@ -1068,7 +1155,14 @@ export default function RackPlannerPage() {
           onSave={()=>{
             const index=rackEditingIndex;
             const draft=rackEditDraft;
-            setItems(current=>current.map((it,i)=>i===index?draft:it));
+            // Room Designer, Signal Flow and the BOM show the same make / model / price / specs
+            // (only what this edit changed is passed on).
+            const beforeEdit=items[index];
+            // Retyping the maker / model of a library product makes it a different product.
+            const edited=identityAfterEdit(beforeEdit,draft);
+            const specChanges=diffSpec(beforeEdit?specFromRackItem(beforeEdit):{},specFromRackItem(edited));
+            if(edited.itemId&&Object.keys(specChanges).length)updateUnitSpec(edited.itemId,specChanges);
+            setItems(current=>current.map((it,i)=>i===index?edited:it));
             setRackEditingIndex(null);
             setRackEditDraft(null);
           }}
@@ -1079,6 +1173,7 @@ export default function RackPlannerPage() {
           categories={[]}
           showAIImport
           aiMode="update"
+
         />
       )}
 
