@@ -171,43 +171,43 @@ export default function DashboardPage() {
           {/* Projects Card */}
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
-              background: "#ffffff",
-              borderTop:    "1.5px solid #e6def9",
-              borderRight:  "1.5px solid #e6def9",
-              borderBottom: "1.5px solid #d8ccf6",
-              borderLeft:   "1.5px solid #d8ccf6",
-              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
+              background: "var(--infocard-bg)",
+              borderTop:    "1.5px solid var(--infocard-border-a)",
+              borderRight:  "1.5px solid var(--infocard-border-a)",
+              borderBottom: "1.5px solid var(--infocard-border-b)",
+              borderLeft:   "1.5px solid var(--infocard-border-b)",
+              boxShadow: "var(--infocard-shadow)",
             }}
           >
             {/* Text content — above wave */}
             <div className="relative z-10 flex flex-col">
               <Link href="/projects" className="group mb-3 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#E6F9F3" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--infocard-icon-mint-bg)" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                     <path d="M12 3L21 19.5H3Z" stroke="#67DBB8" strokeWidth="2" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>Projects</span>
+                <span className="text-[15px] font-bold" style={{ color: "var(--infocard-heading)" }}>Projects</span>
                 {projectCount > 0 && (
-                  <span className="rounded-lg px-2 py-0.5 text-[12px] font-semibold" style={{ background: "#ede9fe", color: "#7c3aed" }}>
+                  <span className="rounded-lg px-2 py-0.5 text-[12px] font-semibold" style={{ background: "var(--infocard-badge-bg)", color: "var(--infocard-badge-text)" }}>
                     {projectCount}
                   </span>
                 )}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto transition-opacity opacity-50 group-hover:opacity-100">
-                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="var(--infocard-chevron)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
               {recentProjects.length > 0 ? (
                 <>
-                  <p className="mb-2.5 text-[12px] font-medium" style={{ color: "#69728F" }}>Most Recent Projects</p>
+                  <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Most Recent Projects</p>
                   <div className="flex flex-col gap-1.5">
                     {recentProjects.map((p, i) => (
-                      <Link key={i} href={`/projects/${p.id}`} className="flex w-fit items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-blue-50">
-                        <span className="text-[14px] font-semibold" style={{ color: "#26315C" }}>{p.name}</span>
+                      <Link key={i} href={`/projects/${p.id}`} className="flex w-fit items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-[var(--infocard-hover-bg)]">
+                        <span className="text-[14px] font-semibold" style={{ color: "var(--infocard-heading)" }}>{p.name}</span>
                         {p.job_number && (
-                          <span className="text-[12px] font-medium" style={{ color: "#959DB2" }}>#{p.job_number}</span>
+                          <span className="text-[12px] font-medium" style={{ color: "var(--infocard-subtle)" }}>#{p.job_number}</span>
                         )}
-                        <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e8f0" }}>
+                        <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ background: "var(--infocard-pill-bg)", color: "var(--infocard-pill-text)", border: "1px solid var(--infocard-pill-border)" }}>
                           {p.phase?.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) || "Opportunity"}
                         </span>
                       </Link>
@@ -215,7 +215,7 @@ export default function DashboardPage() {
                   </div>
                 </>
               ) : (
-                <p className="text-[13px]" style={{ color: "#959DB2" }}>No projects yet</p>
+                <p className="text-[13px]" style={{ color: "var(--infocard-subtle)" }}>No projects yet</p>
               )}
             </div>
 
@@ -225,7 +225,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="var(--infocard-wave)" />
             </svg>
 
             {/* Animated Projects folder illustration */}
@@ -241,18 +241,18 @@ export default function DashboardPage() {
           {/* Calculators Card */}
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
-              background: "#ffffff",
-              borderTop:    "1.5px solid #e6def9",
-              borderRight:  "1.5px solid #e6def9",
-              borderBottom: "1.5px solid #d8ccf6",
-              borderLeft:   "1.5px solid #d8ccf6",
-              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
+              background: "var(--infocard-bg)",
+              borderTop:    "1.5px solid var(--infocard-border-a)",
+              borderRight:  "1.5px solid var(--infocard-border-a)",
+              borderBottom: "1.5px solid var(--infocard-border-b)",
+              borderLeft:   "1.5px solid var(--infocard-border-b)",
+              boxShadow: "var(--infocard-shadow)",
             }}
           >
             {/* Text content — above wave */}
             <div className="relative z-10 flex flex-col">
               <Link href="/calculators" className="group mb-3 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#ede9fe" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--infocard-icon-purple-bg)" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                     <rect x="4" y="4" width="16" height="16" rx="3" stroke="#8b5cf6" strokeWidth="1.8" />
                     <line x1="8" y1="9" x2="16" y2="9" stroke="#8b5cf6" strokeWidth="1.2" opacity="0.7" />
@@ -261,9 +261,9 @@ export default function DashboardPage() {
                     <circle cx="15" cy="13" r="1" fill="#8b5cf6" opacity="0.8" />
                   </svg>
                 </div>
-                <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>Calculators</span>
+                <span className="text-[15px] font-bold" style={{ color: "var(--infocard-heading)" }}>Calculators</span>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto opacity-50 transition-opacity group-hover:opacity-100">
-                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="var(--infocard-chevron)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
               {(() => {
@@ -272,16 +272,16 @@ export default function DashboardPage() {
                   .filter((t): t is typeof allTools[number] => Boolean(t))
                   .slice(0, 5);
                 if (recent.length === 0) {
-                  return <p className="text-[13px]" style={{ color: "#69728F" }}>{allTools.length} calculators available</p>;
+                  return <p className="text-[13px]" style={{ color: "var(--infocard-label)" }}>{allTools.length} calculators available</p>;
                 }
                 return (
                   <>
-                    <p className="mb-2.5 text-[12px] font-medium" style={{ color: "#69728F" }}>Recently Used</p>
+                    <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Recently Used</p>
                     <div className="flex flex-col gap-1.5">
                       {recent.map((tool) => (
-                        <Link key={tool.name} href={tool.href} className="flex w-fit items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-blue-50">
+                        <Link key={tool.name} href={tool.href} className="flex w-fit items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-[var(--infocard-hover-bg)]">
                           <span className="text-sm">{tool.icon}</span>
-                          <span className="text-[13px] font-medium" style={{ color: "#575D75" }}>{tool.name}</span>
+                          <span className="text-[13px] font-medium" style={{ color: "var(--infocard-item)" }}>{tool.name}</span>
                         </Link>
                       ))}
                     </div>
@@ -296,7 +296,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="var(--infocard-wave)" />
             </svg>
 
             {/* Calculator illustration — animated once
@@ -312,18 +312,18 @@ export default function DashboardPage() {
           {/* AV News Card */}
           <div className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5"
             style={{
-              background: "#ffffff",
-              borderTop:    "1.5px solid #e6def9",
-              borderRight:  "1.5px solid #e6def9",
-              borderBottom: "1.5px solid #d8ccf6",
-              borderLeft:   "1.5px solid #d8ccf6",
-              boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
+              background: "var(--infocard-bg)",
+              borderTop:    "1.5px solid var(--infocard-border-a)",
+              borderRight:  "1.5px solid var(--infocard-border-a)",
+              borderBottom: "1.5px solid var(--infocard-border-b)",
+              borderLeft:   "1.5px solid var(--infocard-border-b)",
+              boxShadow: "var(--infocard-shadow)",
             }}
           >
             {/* Text content — above wave */}
             <div className="relative z-10 flex flex-col">
               <div className="mb-3 flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#E6F9F3" }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--infocard-icon-mint-bg)" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                     <rect x="3" y="5" width="18" height="14" rx="2" stroke="#67DBB8" strokeWidth="1.8" />
                     <line x1="7" y1="9"  x2="17" y2="9"  stroke="#67DBB8" strokeWidth="1.1" opacity="0.7" />
@@ -331,17 +331,17 @@ export default function DashboardPage() {
                     <line x1="7" y1="15" x2="16" y2="15" stroke="#67DBB8" strokeWidth="1.1" opacity="0.7" />
                   </svg>
                 </div>
-                <span className="text-[15px] font-bold" style={{ color: "#26315C" }}>AV News & Podcasts</span>
+                <span className="text-[15px] font-bold" style={{ color: "var(--infocard-heading)" }}>AV News & Podcasts</span>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto opacity-50">
-                  <path d="M6 3L11 8L6 13" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 3L11 8L6 13" stroke="var(--infocard-chevron)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-              <p className="mb-2.5 text-[12px] font-medium" style={{ color: "#69728F" }}>Recently updated</p>
+              <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Recently updated</p>
               <div className="flex flex-col gap-2">
                 {newsItems.map((title, i) => (
                   <div key={i} className="flex items-start gap-2.5">
                     <div className="mt-[5px] h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: "#1ACAE6" }} />
-                    <span className="text-[13px] leading-snug" style={{ color: "#575D75" }}>{title}</span>
+                    <span className="text-[13px] leading-snug" style={{ color: "var(--infocard-item)" }}>{title}</span>
                   </div>
                 ))}
               </div>
@@ -353,7 +353,7 @@ export default function DashboardPage() {
               style={{ zIndex: 0 }}
               viewBox="0 0 400 90" preserveAspectRatio="none" height="90"
             >
-              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="#f1edfb" />
+              <path d="M0 78 C120 76 200 12 400 4 L400 90 L0 90 Z" fill="var(--infocard-wave)" />
             </svg>
 
             {/* AV News/Podcast illustration — animated once

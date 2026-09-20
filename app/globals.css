@@ -35,6 +35,25 @@
   --chart-empty: #1e293b;
   --chart-text: #e2e8f0;
   --chart-text-dim: #64748b;
+  /* Dashboard info cards (Projects / Calculators / AV News) */
+  --infocard-bg: rgb(var(--forge-card));
+  --infocard-border-a: rgba(139, 92, 246, 0.22);
+  --infocard-border-b: rgba(139, 92, 246, 0.32);
+  --infocard-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  --infocard-wave: rgba(139, 92, 246, 0.08);
+  --infocard-icon-mint-bg: rgba(103, 219, 184, 0.16);
+  --infocard-icon-purple-bg: rgba(139, 92, 246, 0.18);
+  --infocard-badge-bg: rgba(139, 92, 246, 0.22);
+  --infocard-pill-bg: rgba(255, 255, 255, 0.06);
+  --infocard-pill-text: rgb(var(--text-muted));
+  --infocard-pill-border: rgb(var(--border-light));
+  --infocard-hover-bg: rgba(139, 92, 246, 0.14);
+  --infocard-heading: rgb(var(--text-heading));
+  --infocard-label: rgb(var(--text-muted));
+  --infocard-item: rgb(var(--text-secondary));
+  --infocard-subtle: rgb(var(--text-subtle));
+  --infocard-badge-text: var(--accent-blue);
+  --infocard-chevron: var(--accent-blue);
   /* Card gradient endpoint */
   --card-gradient-end: rgba(12, 18, 32, 0.95);
   --card-gradient-end-strong: rgba(12, 18, 32, 0.95);
@@ -99,6 +118,25 @@
   --chart-empty: #e2e8f0;
   --chart-text: #1e293b;
   --chart-text-dim: #64748b;
+  /* Dashboard info cards (Projects / Calculators / AV News) */
+  --infocard-bg: #ffffff;
+  --infocard-border-a: #e6def9;
+  --infocard-border-b: #d8ccf6;
+  --infocard-shadow: 0 4px 24px rgba(124, 58, 237, 0.08);
+  --infocard-wave: #f1edfb;
+  --infocard-icon-mint-bg: #e6f9f3;
+  --infocard-icon-purple-bg: #ede9fe;
+  --infocard-badge-bg: #ede9fe;
+  --infocard-pill-bg: #f1f5f9;
+  --infocard-pill-text: #64748b;
+  --infocard-pill-border: #e2e8f0;
+  --infocard-hover-bg: #f5f3ff;
+  --infocard-heading: #26315c;
+  --infocard-label: #69728f;
+  --infocard-item: #575d75;
+  --infocard-subtle: #959db2;
+  --infocard-badge-text: #7c3aed;
+  --infocard-chevron: #7c3aed;
   /* Card gradient endpoint */
   --card-gradient-end: rgba(248, 250, 252, 0.95);
   --card-gradient-end-strong: rgba(248, 250, 252, 1);
