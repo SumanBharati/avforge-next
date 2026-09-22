@@ -3,7 +3,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
-import { searchProducts, type AVProduct } from "@/lib/av-products";
+import { searchProducts, addEquipmentToLibraryConfirmed, getProductsByIds, type AVProduct } from "@/lib/av-products";
 import { loadUnitSpecs, diffSpec, identityAfterEdit, specFromRackItem, applySpecToRackItem } from "@/lib/unit-specs";
 import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, rackItemToBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
@@ -245,6 +245,7 @@ export default function RackPlannerPage() {
   const [rackVoltages, setRackVoltages] = useState<number[]>([120]);
   const [hoveredRackNumber, setHoveredRackNumber] = useState<number|null>(null);
   const [rackContextMenu, setRackContextMenu] = useState<{x:number;y:number;index:number}|null>(null);
+  const [libraryNotice, setLibraryNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
   const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
   const [rackEditDraft, setRackEditDraft] = useState<RackItem|null>(null);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
@@ -456,11 +457,54 @@ export default function RackPlannerPage() {
     setNewModel("");
   };
 
-  const addEquipment = () => {
+  const rackItemFromProduct = (p: AVProduct): RackItem => {
+    const ru = p.rack_units && p.rack_units > 0 ? Math.max(1, Math.round(p.rack_units)) : 1;
+    const name = [p.manufacturer, p.model_name].filter(Boolean).join(" ") || p.type;
+    return {manual:true,itemId:newItemId(),productId:p.id,name,ru,color:p.color||rackColors[items.length%rackColors.length],ampDraw:p.amp_draw,voltage:p.voltage,powerWatts:p.power_watts,btuHr:p.btu_hr,widthIn:p.width_in,mfr:p.manufacturer||undefined,model:p.model_name||undefined,cat:p.type||undefined,partNumber:p.part_number,heightIn:p.height_in,depthIn:p.depth_in,weightLb:p.weight_lb,rackEarIncluded:p.rack_ear_included??undefined};
+  };
+
+  // Places one item directly, replicating exactly what the "Add this to
+  // Rack?" Yes/No confirmation does (see placeRackItemAuto's two callers
+  // below) — used by the confirm dialog for a single pick, and by Kit
+  // expansion (see AVProduct.kit_items) to place each component without
+  // stacking one confirmation dialog per part.
+  const placeRackItemAuto = (item: RackItem, mount: boolean) => {
+    setItems(prev => {
+      if (!mount) return [...prev, { ...item, rackMounted: false }];
+      const mounted = prev.filter(it => it.rackMounted !== false);
+      const occupied = mounted.map((it, index) => {
+        const start = it.rackStartRU ?? mounted.slice(index + 1).reduce((sum, other) => sum + other.ru, 1);
+        return { start, end: start + it.ru - 1 };
+      });
+      const limit = Math.max(rackRUCapacity ?? 0, mounted.reduce((sum, it) => sum + it.ru, 0) + item.ru);
+      const rackStartRU = Array.from({ length: Math.max(1, limit - item.ru + 1) }, (_, i) => i + 1)
+        .find(start => occupied.every(range => start + item.ru - 1 < range.start || start > range.end)) ?? 1;
+      return [...prev, { ...item, rackMounted: true, rackId: 1, rackStartRU }];
+    });
+  };
+
+  const addEquipment = async () => {
     if (selectedProduct) {
-      const ru = selectedProduct.rack_units && selectedProduct.rack_units > 0 ? Math.max(1, Math.round(selectedProduct.rack_units)) : 1;
-      const name = [selectedProduct.manufacturer, selectedProduct.model_name].filter(Boolean).join(" ") || selectedProduct.type;
-      setPendingRackItem({manual:true,itemId:newItemId(),productId:selectedProduct.id,name,ru,color:selectedProduct.color||rackColors[items.length%rackColors.length],ampDraw:selectedProduct.amp_draw,voltage:selectedProduct.voltage,powerWatts:selectedProduct.power_watts,btuHr:selectedProduct.btu_hr,widthIn:selectedProduct.width_in,mfr:selectedProduct.manufacturer||undefined,model:selectedProduct.model_name||undefined,cat:selectedProduct.type||undefined,partNumber:selectedProduct.part_number,heightIn:selectedProduct.height_in,depthIn:selectedProduct.depth_in,weightLb:selectedProduct.weight_lb,rackEarIncluded:selectedProduct.rack_ear_included??undefined});
+      if (selectedProduct.kit_items && selectedProduct.kit_items.length > 0) {
+        const componentProducts = await getProductsByIds(selectedProduct.kit_items.map(i => i.product_id)).catch(() => []);
+        const byId = new Map(componentProducts.map(cp => [cp.id, cp]));
+        let placedAny = false;
+        for (const kitItem of selectedProduct.kit_items) {
+          const p = byId.get(kitItem.product_id);
+          if (!p) continue;
+          for (let n = 0; n < Math.max(1, kitItem.quantity || 1); n++) {
+            placeRackItemAuto(rackItemFromProduct(p), !!p.rack_mounted);
+            placedAny = true;
+          }
+        }
+        if (!placedAny) {
+          setLibraryNotice({kind:"error",message:"This kit's parts are no longer in the AVGenix Library."});
+          window.setTimeout(()=>setLibraryNotice(null),5000);
+        }
+        closeAddEquipment();
+        return;
+      }
+      setPendingRackItem(rackItemFromProduct(selectedProduct));
       closeAddEquipment();
       return;
     }
@@ -1122,11 +1166,31 @@ export default function RackPlannerPage() {
 
       {rackContextMenu&&<><div style={{position:"fixed",inset:0,zIndex:110}} onClick={()=>setRackContextMenu(null)} onContextMenu={e=>{e.preventDefault();setRackContextMenu(null);}}/><div style={{position:"fixed",left:rackContextMenu.x,top:rackContextMenu.y,zIndex:111,width:190,padding:"4px 0",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
         <button onClick={()=>openRackEquipmentEditor(rackContextMenu.index)} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Edit equipment</button>
+        <button onClick={async ()=>{
+          const item = items[rackContextMenu.index];
+          setRackContextMenu(null);
+          if(!item) return;
+          const label = [item.mfr, item.model].filter(Boolean).join(" ") || item.name || "Device";
+          const result = await addEquipmentToLibraryConfirmed(rackItemToFormValue(item), (matches)=>
+            window.confirm(`"${label}" looks similar to what's already in the AVGenix Library:\n\n${matches.map(m=>`• ${m.manufacturer} ${m.model_name}${m.part_number?` (${m.part_number})`:""}`).join("\n")}\n\nAdd it anyway as a different product?`)
+          );
+          if(result.status==="added") setLibraryNotice({kind:"ok",message:`Added ${label} to the AVGenix Library.`});
+          else if(result.status==="exists") setLibraryNotice({kind:"ok",message:`${label} is already in the AVGenix Library.`});
+          else if(result.status==="cancelled") { /* user chose not to add a possible duplicate */ }
+          else setLibraryNotice({kind:"error",message:result.error||`Unable to add ${label} to the AVGenix Library.`});
+          window.setTimeout(()=>setLibraryNotice(null),5000);
+        }} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Add to AVGenix Library</button>
         <div style={{height:1,background:"rgb(var(--border))",margin:"3px 0"}}/>
         {/* Hide: out of THIS rack only — Room Designer, Signal Flow and the BOM keep it. */}
         <button title="Remove it from this rack only. It stays in Room Designer, Signal Flow and the BOM." onClick={()=>{hideItems([rackContextMenu.index]);setRackContextMenu(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Hide</button>
         <button onClick={()=>{requestDeleteItems([rackContextMenu.index]);setRackContextMenu(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"#f87171",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgba(248,113,113,0.08)"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Delete equipment</button>
       </div></>}
+
+      {libraryNotice && (
+        <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:120,maxWidth:520,padding:"7px 12px",background:libraryNotice.kind==="ok"?"rgba(34,197,94,0.14)":"rgba(239,68,68,0.14)",border:`1px solid ${libraryNotice.kind==="ok"?"rgba(34,197,94,0.4)":"rgba(239,68,68,0.4)"}`,borderRadius:6,color:libraryNotice.kind==="ok"?"#22c55e":"#ef4444",fontSize:11,textAlign:"center"}}>
+          {libraryNotice.message}
+        </div>
+      )}
 
       {deleteConfirm&&(
         <ConfirmDialog
@@ -1238,14 +1302,8 @@ export default function RackPlannerPage() {
               </div>
             </div>
             <div style={{display:"flex",justifyContent:"flex-end",gap:12,padding:"16px 24px",borderTop:"1px solid rgb(var(--border))"}}>
-              <button onClick={()=>{setItems(prev=>[...prev,{...pendingRackItem,rackMounted:false}]);setPendingRackItem(null);}} style={{minWidth:92,padding:"10px 22px",border:"1px solid rgb(var(--border))",borderRadius:7,background:"transparent",color:"rgb(var(--text-body))",fontSize:14,cursor:"pointer"}}>No</button>
-              <button autoFocus onClick={()=>{setItems(prev=>{
-                const mounted=prev.filter(item=>item.rackMounted!==false);
-                const occupied=mounted.map((item,index)=>{const start=item.rackStartRU??mounted.slice(index+1).reduce((sum,other)=>sum+other.ru,1);return {start,end:start+item.ru-1};});
-                const limit=Math.max(rackRUCapacity??0,mounted.reduce((sum,item)=>sum+item.ru,0)+pendingRackItem.ru);
-                const rackStartRU=Array.from({length:Math.max(1,limit-pendingRackItem.ru+1)},(_,i)=>i+1).find(start=>occupied.every(range=>start+pendingRackItem.ru-1<range.start||start>range.end))??1;
-                return [...prev,{...pendingRackItem,rackMounted:true,rackId:1,rackStartRU}];
-              });setPendingRackItem(null);}} style={{minWidth:92,padding:"10px 22px",border:"1px solid #8b5cf6",borderRadius:7,background:"#8b5cf6",color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Yes</button>
+              <button onClick={()=>{placeRackItemAuto(pendingRackItem,false);setPendingRackItem(null);}} style={{minWidth:92,padding:"10px 22px",border:"1px solid rgb(var(--border))",borderRadius:7,background:"transparent",color:"rgb(var(--text-body))",fontSize:14,cursor:"pointer"}}>No</button>
+              <button autoFocus onClick={()=>{placeRackItemAuto(pendingRackItem,true);setPendingRackItem(null);}} style={{minWidth:92,padding:"10px 22px",border:"1px solid #8b5cf6",borderRadius:7,background:"#8b5cf6",color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Yes</button>
             </div>
           </div>
         </div>

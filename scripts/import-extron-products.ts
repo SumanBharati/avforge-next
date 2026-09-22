@@ -33,7 +33,7 @@ if(!commit){
 let imported=0;
 for(let index=0;index<deduped.length;index+=100){
   const batch=deduped.slice(index,index+100);
-  const {data,error}=await supabase.from("av_products").upsert(batch,{onConflict:"manufacturer,model_name"}).select("id");
+  const {data,error}=await supabase.from("av_products").upsert(batch,{onConflict:"manufacturer_key,model_name_key,part_number_key"}).select("id");
   if(error)throw new Error(`Import failed at row ${index+2}: ${error.message}`);
   imported+=data?.length??0;
 }

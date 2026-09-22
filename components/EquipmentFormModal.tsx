@@ -3,6 +3,16 @@
 import { useId, useRef, useState, useEffect } from "react";
 import { compressPhotoFile, extractEquipmentFromPhotos } from "@/lib/ai-equipment-extract";
 import { priceFromMargin, priceFromMarkup, marginFromPrice, markupFromPrice } from "@/lib/pricing";
+import { searchProducts } from "@/lib/av-products";
+
+/** One part of a Kit, as the Library's Kit editor displays it. */
+export interface KitItemDisplay {
+  productId: string;
+  manufacturer: string;
+  model: string;
+  partNumber: string | null;
+  quantity: number;
+}
 
 export interface EquipmentFormValue {
   manufacturer: string;
@@ -56,6 +66,10 @@ export default function EquipmentFormModal({
   saveLabel = "Save Item",
   showAIImport = false,
   aiMode = "create",
+  kitEnabled = false,
+  kitItems = [],
+  onKitItemsChange,
+  kitExcludeProductId,
 }: {
   title: string;
   value: EquipmentFormValue;
@@ -78,6 +92,15 @@ export default function EquipmentFormModal({
   // wins whenever it reads a value, since the whole point of re-running it
   // on an existing library item is to refresh stale specs from new photos.
   aiMode?: "create" | "update";
+  // Kit / Bundle editor — only the AVGenix Library's own product modal opts
+  // in. A kit is a single SKU that's actually several separate physical
+  // parts (see lib/av-products.ts AVProduct.kit_items); this section lets
+  // the user search the library and list which products it's made of.
+  kitEnabled?: boolean;
+  kitItems?: KitItemDisplay[];
+  onKitItemsChange?: (items: KitItemDisplay[]) => void;
+  // The product currently being edited, so it can't be added as its own component.
+  kitExcludeProductId?: string;
 }) {
   const categoryListId = useId();
   const rackMountedId = useId();
@@ -89,6 +112,46 @@ export default function EquipmentFormModal({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const aiFileRef = useRef<HTMLInputElement>(null);
+  const [kitSearch, setKitSearch] = useState("");
+  const [kitSearchResults, setKitSearchResults] = useState<Awaited<ReturnType<typeof searchProducts>>>([]);
+  const [kitSearching, setKitSearching] = useState(false);
+
+  useEffect(() => {
+    if (!kitEnabled) return;
+    const q = kitSearch.trim();
+    if (!q) { setKitSearchResults([]); return; }
+    setKitSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchProducts(q);
+        setKitSearchResults(results.filter((p) => p.id !== kitExcludeProductId));
+      } finally {
+        setKitSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [kitSearch, kitEnabled, kitExcludeProductId]);
+
+  function addKitComponent(p: { id: string; manufacturer: string; model_name: string; part_number: string | null }) {
+    if (!onKitItemsChange) return;
+    const existing = kitItems.find((i) => i.productId === p.id);
+    if (existing) {
+      onKitItemsChange(kitItems.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i)));
+    } else {
+      onKitItemsChange([...kitItems, { productId: p.id, manufacturer: p.manufacturer, model: p.model_name, partNumber: p.part_number, quantity: 1 }]);
+    }
+    setKitSearch("");
+  }
+
+  function updateKitQuantity(productId: string, quantity: number) {
+    if (!onKitItemsChange) return;
+    onKitItemsChange(kitItems.map((i) => (i.productId === productId ? { ...i, quantity: Math.max(1, Math.floor(quantity) || 1) } : i)));
+  }
+
+  function removeKitComponent(productId: string) {
+    if (!onKitItemsChange) return;
+    onKitItemsChange(kitItems.filter((i) => i.productId !== productId));
+  }
 
   async function handleAiFiles(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
@@ -263,6 +326,62 @@ export default function EquipmentFormModal({
               <input type="text" value={value.partNumber ?? ""} onChange={(e) => onChange({ ...value, partNumber: e.target.value || null })} className={inputCls} placeholder="Optional" />
             </div>
           </div>
+          {kitEnabled && (
+            <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-violet-400"><path d="M20.5 7.5L12 3 3.5 7.5v9L12 21l8.5-4.5v-9z" /><path d="M3.5 7.5L12 12l8.5-4.5M12 12v9" /></svg>
+                <span className="text-[12px] font-semibold text-heading">Kit / Bundle</span>
+              </div>
+              <p className="mb-3 text-[11px] text-subtle">
+                List the individual parts this SKU actually ships as. When this kit is added in Signal Flow, Room Designer, or Rack Builder, each part gets added on its own with its own ports and specs.
+              </p>
+              {kitItems.length > 0 && (
+                <div className="mb-3 space-y-1.5">
+                  {kitItems.map((item) => (
+                    <div key={item.productId} className="flex items-center gap-2 rounded-lg border border-border bg-forge-bg/60 px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-medium text-heading">{item.manufacturer} {item.model}</div>
+                        {item.partNumber && <div className="truncate text-[10px] text-subtle">{item.partNumber}</div>}
+                      </div>
+                      <input
+                        type="number" min={1} value={item.quantity}
+                        onChange={(e) => updateKitQuantity(item.productId, Number(e.target.value))}
+                        className="w-14 rounded-md border border-border bg-forge-surface px-2 py-1 text-center text-[12px] text-heading"
+                      />
+                      <button type="button" onClick={() => removeKitComponent(item.productId)} className="rounded-md p-1 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="relative">
+                <input
+                  type="text" value={kitSearch} onChange={(e) => setKitSearch(e.target.value)}
+                  className={inputCls} placeholder="Search the AVGenix Library to add a part…"
+                />
+                {kitSearch.trim() && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border bg-forge-bg shadow-xl">
+                    {kitSearching ? (
+                      <div className="px-3 py-3 text-center text-[11px] text-subtle">Searching…</div>
+                    ) : kitSearchResults.length === 0 ? (
+                      <div className="px-3 py-3 text-center text-[11px] text-subtle">No matches.</div>
+                    ) : (
+                      kitSearchResults.map((p) => (
+                        <button
+                          key={p.id} type="button" onClick={() => addKitComponent(p)}
+                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12px] text-body transition-colors hover:bg-forge-surface"
+                        >
+                          <span className="truncate">{p.manufacturer} {p.model_name}</span>
+                          {p.part_number && <span className="shrink-0 text-[10px] text-subtle">{p.part_number}</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div>
             <label className={labelCls}>{notesLabel}</label>
             <textarea value={value.notes} onChange={(e) => onChange({ ...value, notes: e.target.value })} className={inputCls + " resize-none"} rows={2} placeholder="Optional…" />

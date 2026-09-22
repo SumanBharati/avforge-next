@@ -372,7 +372,7 @@ async function main() {
     const batch = products.slice(i, i + BATCH);
     const { data, error } = await supabase
       .from("av_products")
-      .upsert(batch, { onConflict: "manufacturer,model_name" })
+      .upsert(batch, { onConflict: "manufacturer_key,model_name_key,part_number_key" })
       .select("id");
     if (error) {
       console.error(`Batch ${i / BATCH + 1} failed: ${error.message}`);

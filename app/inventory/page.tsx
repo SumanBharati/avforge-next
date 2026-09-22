@@ -2,11 +2,11 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createProduct, deleteProduct, getFilterOptions, getProductCount, listProducts, updateProduct, type AVProduct } from "@/lib/av-products";
+import { createProduct, deleteProduct, findLibraryDuplicateClusters, findSimilarProducts, getFilterOptions, getKitsReferencingProduct, getProductCount, getProductsByIds, listProducts, updateProduct, type AVProduct, type DuplicateCluster, type KitComponent, type ReferencingKit, type SimilarProductMatch } from "@/lib/av-products";
 import { type OrgEquipmentItem } from "@/lib/equipment-library";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
-import EquipmentFormModal, { type EquipmentFormValue } from "@/components/EquipmentFormModal";
+import EquipmentFormModal, { type EquipmentFormValue, type KitItemDisplay } from "@/components/EquipmentFormModal";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Section = "org" | "avgenix" | "inventory";
@@ -778,6 +778,7 @@ const emptyAVProduct = (): AVProduct => ({
   type: "",
   price: 0,
   part_number: null,
+  updated_at: "",
   msrp: null,
   cost: null,
   margin: null,
@@ -816,6 +817,7 @@ const emptyAVProduct = (): AVProduct => ({
   coverage_angle_deg: null,
   coverage_width_ft: null,
   coverage_depth_ft: null,
+  kit_items: [],
 });
 
 function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
@@ -828,17 +830,26 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterManufacturer, setFilterManufacturer] = useState("");
+  const [updatedSort, setUpdatedSort] = useState<"asc" | "desc" | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
   const [selected, setSelected] = useState<AVProduct | null>(null);
   const [editingProduct, setEditingProduct] = useState<AVProduct | null>(null);
+  const [editingKitItems, setEditingKitItems] = useState<KitItemDisplay[]>([]);
   const [savingProduct, setSavingProduct] = useState(false);
   const [productSaveError, setProductSaveError] = useState<string | null>(null);
   const [newProduct, setNewProduct] = useState<AVProduct | null>(null);
+  const [newKitItems, setNewKitItems] = useState<KitItemDisplay[]>([]);
   const [savingNewProduct, setSavingNewProduct] = useState(false);
   const [newProductSaveError, setNewProductSaveError] = useState<string | null>(null);
   const [pendingDeleteProduct, setPendingDeleteProduct] = useState<AVProduct | null>(null);
   const [deletingProduct, setDeletingProduct] = useState(false);
+  const [checkingDeleteProduct, setCheckingDeleteProduct] = useState<string | null>(null);
+  const [blockedDeleteProduct, setBlockedDeleteProduct] = useState<{ product: AVProduct; kits: ReferencingKit[] } | null>(null);
+  const [similarProductPrompt, setSimilarProductPrompt] = useState<{ kind: "new" | "edit"; matches: SimilarProductMatch[] } | null>(null);
+  const [checkingSimilarProducts, setCheckingSimilarProducts] = useState(false);
+  const [duplicateClusters, setDuplicateClusters] = useState<DuplicateCluster[] | null>(null);
+  const [scanningDuplicates, setScanningDuplicates] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
   const [addingToOrg, setAddingToOrg] = useState(false);
@@ -1074,13 +1085,20 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     setLoading(true);
-    listProducts({ search: debouncedSearch, category: filterCategory, manufacturer: filterManufacturer, offset: 0, limit: LIBRARY_PAGE_SIZE })
+    listProducts({
+      search: debouncedSearch,
+      category: filterCategory,
+      manufacturer: filterManufacturer,
+      offset: 0,
+      limit: LIBRARY_PAGE_SIZE,
+      ...(updatedSort ? { sortBy: "updated_at" as const, sortDir: updatedSort } : {}),
+    })
       .then(({ data, count }) => {
         setProducts(data);
         setTotal(count);
       })
       .finally(() => setLoading(false));
-  }, [debouncedSearch, filterCategory, filterManufacturer]);
+  }, [debouncedSearch, filterCategory, filterManufacturer, updatedSort]);
 
   function loadMore() {
     setLoadingMore(true);
@@ -1090,47 +1108,125 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
       manufacturer: filterManufacturer,
       offset: products.length,
       limit: LIBRARY_PAGE_SIZE,
+      ...(updatedSort ? { sortBy: "updated_at" as const, sortDir: updatedSort } : {}),
     })
       .then(({ data }) => setProducts((prev) => [...prev, ...data]))
       .finally(() => setLoadingMore(false));
   }
 
+  function toggleUpdatedSort() {
+    setUpdatedSort((prev) => (prev === "desc" ? "asc" : "desc"));
+  }
+
   function friendlyProductSaveError(message: string): string {
-    if (/duplicate key value/i.test(message)) return "A product with this manufacturer and model already exists in the AVGenix Library.";
+    if (/duplicate key value/i.test(message)) return "A product with this manufacturer, model, and part number already exists in the AVGenix Library.";
     return message;
   }
 
-  async function handleSaveProduct() {
+  function kitItemsToComponents(items: KitItemDisplay[]): KitComponent[] {
+    return items.map((i) => ({ product_id: i.productId, quantity: i.quantity }));
+  }
+
+  async function scanForDuplicates() {
+    setScanningDuplicates(true);
+    const clusters = await findLibraryDuplicateClusters().catch(() => []);
+    setScanningDuplicates(false);
+    setDuplicateClusters(clusters);
+  }
+
+  async function openClusterProduct(id: string) {
+    const [full] = await getProductsByIds([id]).catch(() => []);
+    if (!full) return;
+    setDuplicateClusters(null);
+    openEditProduct(full);
+  }
+
+  async function openEditProduct(p: AVProduct) {
+    setProductSaveError(null);
+    setEditingProduct({ ...p });
+    setEditingKitItems([]);
+    if (!p.kit_items || p.kit_items.length === 0) return;
+    const componentProducts = await getProductsByIds(p.kit_items.map((i) => i.product_id)).catch(() => []);
+    const byId = new Map(componentProducts.map((cp) => [cp.id, cp]));
+    setEditingKitItems(
+      p.kit_items
+        .map((i) => {
+          const cp = byId.get(i.product_id);
+          if (!cp) return null;
+          return { productId: cp.id, manufacturer: cp.manufacturer, model: cp.model_name, partNumber: cp.part_number, quantity: i.quantity };
+        })
+        .filter((i): i is KitItemDisplay => i !== null)
+    );
+  }
+
+  async function handleSaveProduct(force = false) {
     if (!editingProduct || !editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()) return;
+    if (!force) {
+      setCheckingSimilarProducts(true);
+      const matches = await findSimilarProducts(editingProduct.manufacturer, editingProduct.model_name, editingProduct.part_number, editingProduct.id).catch(() => []);
+      setCheckingSimilarProducts(false);
+      if (matches.length > 0) {
+        setSimilarProductPrompt({ kind: "edit", matches });
+        return;
+      }
+    }
     setSavingProduct(true);
     setProductSaveError(null);
-    const { id, ...patch } = editingProduct;
+    const { id, updated_at, ...patch } = editingProduct;
+    patch.kit_items = kitItemsToComponents(editingKitItems);
     const { error } = await updateProduct(id, patch);
     if (error) {
       setProductSaveError(friendlyProductSaveError(error));
       setSavingProduct(false);
       return;
     }
-    setProducts((prev) => prev.map((p) => (p.id === id ? editingProduct : p)));
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...editingProduct, kit_items: patch.kit_items! } : p)));
     setSavingProduct(false);
     setEditingProduct(null);
+    setEditingKitItems([]);
   }
 
-  async function handleSaveNewProduct() {
+  async function handleSaveNewProduct(force = false) {
     if (!newProduct || !newProduct.manufacturer.trim() || !newProduct.model_name.trim()) return;
+    if (!force) {
+      setCheckingSimilarProducts(true);
+      const matches = await findSimilarProducts(newProduct.manufacturer, newProduct.model_name, newProduct.part_number).catch(() => []);
+      setCheckingSimilarProducts(false);
+      if (matches.length > 0) {
+        setSimilarProductPrompt({ kind: "new", matches });
+        return;
+      }
+    }
     setSavingNewProduct(true);
     setNewProductSaveError(null);
-    const { id, ...rest } = newProduct;
+    const { id, updated_at, ...rest } = newProduct;
+    rest.kit_items = kitItemsToComponents(newKitItems);
     const { id: insertedId, error } = await createProduct(rest);
     if (error || !insertedId) {
       setNewProductSaveError(friendlyProductSaveError(error || "Save failed."));
       setSavingNewProduct(false);
       return;
     }
-    setProducts((prev) => [{ ...newProduct, id: insertedId }, ...prev]);
+    setProducts((prev) => [{ ...newProduct, id: insertedId, kit_items: rest.kit_items }, ...prev]);
     setTotal((prev) => prev + 1);
     setNewProduct(null);
+    setNewKitItems([]);
     setSavingNewProduct(false);
+  }
+
+  // Hard-blocks deleting a product that's a component of any Kit — see
+  // lib/av-products.ts getKitsReferencingProduct for why (deleting it would
+  // silently break every kit that references it). The normal delete-confirm
+  // dialog only ever appears once this check comes back clean.
+  async function requestDeleteProduct(p: AVProduct) {
+    setCheckingDeleteProduct(p.id);
+    const kits = await getKitsReferencingProduct(p.id).catch(() => []);
+    setCheckingDeleteProduct(null);
+    if (kits.length > 0) {
+      setBlockedDeleteProduct({ product: p, kits });
+      return;
+    }
+    setPendingDeleteProduct(p);
   }
 
   async function handleDeleteProduct() {
@@ -1158,7 +1254,17 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-subtle">{total} products</span>
           <button
-            onClick={() => { setNewProductSaveError(null); setNewProduct(emptyAVProduct()); }}
+            onClick={scanForDuplicates}
+            disabled={scanningDuplicates}
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-[13px] font-semibold text-body transition-colors hover:bg-forge-surface disabled:opacity-50"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            {scanningDuplicates ? "Scanning…" : "Review Duplicates"}
+          </button>
+          <button
+            onClick={() => { setNewProductSaveError(null); setNewProduct(emptyAVProduct()); setNewKitItems([]); }}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-blue-500"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1221,26 +1327,48 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
       {/* Table */}
       <div className="rounded-xl border border-border bg-forge-surface/20 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px]">
+          <table className="w-full min-w-[980px] table-fixed">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[13%]" />
+              <col className="w-[23%]" />
+              <col className="w-[9%]" />
+              <col className="w-[7%]" />
+              <col className="w-[11%]" />
+              <col className="w-[12%]" />
+              <col className="w-[72px]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-border bg-forge-surface/60">
-                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Manufacturer / Model</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Category</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Type</th>
-                <th className="px-4 py-3 text-right text-[11px] font-semibold text-muted">Price</th>
-                <th className="px-4 py-3 text-center text-[11px] font-semibold text-muted">Rack</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold text-muted">Part #</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold text-muted">Manufacturer / Model</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold text-muted">Category</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold text-muted">Type</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right text-[11px] font-semibold text-muted">Price</th>
+                <th className="whitespace-nowrap px-4 py-3 text-center text-[11px] font-semibold text-muted">Rack</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold text-muted">Part #</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold text-muted">
+                  <button
+                    onClick={toggleUpdatedSort}
+                    className="flex items-center gap-1 whitespace-nowrap transition-colors hover:text-heading"
+                    title={updatedSort === "asc" ? "Oldest to Newest" : "Newest to Oldest"}
+                  >
+                    Last Updated on
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${updatedSort === "asc" ? "rotate-180" : ""} ${updatedSort ? "opacity-100" : "opacity-40"}`}>
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                </th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
+                  <td colSpan={8} className="px-4 py-16 text-center text-[13px] text-subtle">Loading…</td>
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-[13px] text-subtle">No products found.</td>
+                  <td colSpan={8} className="px-4 py-16 text-center text-[13px] text-subtle">No products found.</td>
                 </tr>
               ) : (
                 products.map((p, index) => (
@@ -1256,30 +1384,38 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p.color || "#64748b" }} />
-                        <div>
-                          <div className="text-[13px] font-semibold text-heading">{p.manufacturer}</div>
-                          <div className="text-[11px] text-subtle">{p.model_name}</div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-[13px] font-semibold text-heading">{p.manufacturer}</span>
+                            {p.kit_items && p.kit_items.length > 0 && (
+                              <span className="shrink-0 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300" title={`Kit of ${p.kit_items.length} part${p.kit_items.length === 1 ? "" : "s"}`}>Kit</span>
+                            )}
+                          </div>
+                          <div className="truncate text-[11px] text-subtle">{p.model_name}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-[12px] text-body">{p.category}</td>
-                    <td className="px-4 py-3 text-[12px] text-subtle">{p.type}</td>
+                    <td className="truncate px-4 py-3 text-[12px] text-body">{p.category}</td>
+                    <td className="truncate px-4 py-3 text-[12px] text-subtle">{p.type}</td>
                     <td className="px-4 py-3 text-right font-mono text-[12px] text-body">
                       {p.price ? `$${p.price.toLocaleString()}` : <span className="text-faint">—</span>}
                     </td>
                     <td className="px-4 py-3 text-center text-[12px] text-subtle">
                       {p.rack_mounted ? `${p.rack_units ?? "—"}U` : <span className="text-faint">—</span>}
                     </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-subtle">{p.part_number || <span className="text-faint">—</span>}</td>
+                    <td className="truncate px-4 py-3 font-mono text-[11px] text-subtle">{p.part_number || <span className="text-faint">—</span>}</td>
+                    <td className="whitespace-nowrap truncate px-4 py-3 text-[12px] text-subtle">
+                      {p.updated_at ? new Date(p.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span className="text-faint">—</span>}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={(e) => { e.stopPropagation(); setProductSaveError(null); setEditingProduct({ ...p }); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
+                        <button onClick={(e) => { e.stopPropagation(); openEditProduct(p); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                             <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                             <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); setPendingDeleteProduct(p); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400" title="Delete">
+                        <button onClick={(e) => { e.stopPropagation(); requestDeleteProduct(p); }} disabled={checkingDeleteProduct === p.id} className="rounded-md p-1.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40" title="Delete">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                             <polyline points="3 6 5 6 21 6" />
                             <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
@@ -1521,15 +1657,19 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
           title="Edit Product"
           value={avProductToFormValue(editingProduct)}
           onChange={(v) => setEditingProduct(applyFormValueToAVProduct(editingProduct, v))}
-          onCancel={() => setEditingProduct(null)}
-          onSave={handleSaveProduct}
-          saving={savingProduct}
+          onCancel={() => { setEditingProduct(null); setEditingKitItems([]); }}
+          onSave={() => handleSaveProduct()}
+          saving={savingProduct || checkingSimilarProducts}
           saveError={productSaveError}
           saveDisabled={!editingProduct.manufacturer.trim() || !editingProduct.model_name.trim()}
           categories={categories}
           notesLabel="Type"
           showAIImport
           aiMode="update"
+          kitEnabled
+          kitItems={editingKitItems}
+          onKitItemsChange={setEditingKitItems}
+          kitExcludeProductId={editingProduct.id}
         />
       )}
 
@@ -1539,14 +1679,17 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
           title="Add Product"
           value={avProductToFormValue(newProduct)}
           onChange={(v) => setNewProduct(applyFormValueToAVProduct(newProduct, v))}
-          onCancel={() => setNewProduct(null)}
-          onSave={handleSaveNewProduct}
-          saving={savingNewProduct}
+          onCancel={() => { setNewProduct(null); setNewKitItems([]); }}
+          onSave={() => handleSaveNewProduct()}
+          saving={savingNewProduct || checkingSimilarProducts}
           saveError={newProductSaveError}
           saveDisabled={!newProduct.manufacturer.trim() || !newProduct.model_name.trim()}
           categories={categories}
           notesLabel="Type"
           showAIImport
+          kitEnabled
+          kitItems={newKitItems}
+          onKitItemsChange={setNewKitItems}
         />
       )}
 
@@ -1559,6 +1702,120 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
           onCancel={() => setPendingDeleteProduct(null)}
           onConfirm={handleDeleteProduct}
         />
+      )}
+
+      {/* Delete blocked — product is a component of one or more Kits */}
+      {blockedDeleteProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm" onClick={() => setBlockedDeleteProduct(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5">
+              <h3 className="text-[16px] font-bold text-heading">Can&apos;t delete this part</h3>
+              <p className="mt-1.5 text-[13px] text-body">
+                <span className="font-semibold text-heading">{blockedDeleteProduct.product.manufacturer} {blockedDeleteProduct.product.model_name}</span>{" "}
+                is a component of {blockedDeleteProduct.kits.length === 1 ? "this kit" : `${blockedDeleteProduct.kits.length} kits`} in the AVGenix Library. Remove it from{" "}
+                {blockedDeleteProduct.kits.length === 1 ? "that kit" : "those kits"} first, then delete it.
+              </p>
+              <ul className="mt-3 space-y-1">
+                {blockedDeleteProduct.kits.map((k) => (
+                  <li key={k.id} className="rounded-lg border border-border bg-forge-surface/60 px-3 py-1.5 text-[12px] text-body">
+                    {k.manufacturer} {k.model_name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-6 py-3">
+              <button onClick={() => setBlockedDeleteProduct(null)} className="rounded-lg border border-border px-3 py-1.5 text-[12px] text-subtle hover:text-body">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Possible duplicate — hard-block until reviewed. This is a text-similarity
+          match (see findSimilarProducts), not an exact one — the DB constraint
+          already blocks exact duplicates silently and correctly; this catches the
+          same product described slightly differently (e.g. "MIC POD CAT COUPLER"
+          vs. "Mic Pod CAT Coupler Tx"), which no exact-match rule can. */}
+      {similarProductPrompt && (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm" onClick={() => setSimilarProductPrompt(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5">
+              <h3 className="text-[16px] font-bold text-heading">This might already be in the library</h3>
+              <p className="mt-1.5 text-[13px] text-body">Found {similarProductPrompt.matches.length === 1 ? "a close match" : `${similarProductPrompt.matches.length} close matches`}:</p>
+              <ul className="mt-3 space-y-1">
+                {similarProductPrompt.matches.map((m) => (
+                  <li key={m.id} className="rounded-lg border border-border bg-forge-surface/60 px-3 py-1.5 text-[12px] text-body">
+                    <span className="font-semibold text-heading">{m.manufacturer} {m.model_name}</span>
+                    {m.part_number && <span className="text-subtle"> · {m.part_number}</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[12px] text-subtle">If this is genuinely a different product, save it anyway. If it's the same thing, cancel and edit the existing entry instead.</p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-6 py-3">
+              <button onClick={() => setSimilarProductPrompt(null)} className="rounded-lg border border-border px-3 py-1.5 text-[12px] text-subtle hover:text-body">Cancel — let me check</button>
+              <button
+                onClick={() => {
+                  const kind = similarProductPrompt.kind;
+                  setSimilarProductPrompt(null);
+                  if (kind === "new") handleSaveNewProduct(true);
+                  else handleSaveProduct(true);
+                }}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-500"
+              >
+                It&apos;s different — save anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Duplicates panel — an on-demand sweep of the whole library
+          for near-duplicate clusters (see findLibraryDuplicateClusters),
+          separate from the save-time hard block above: this surfaces
+          duplicates that already made it into the data before that check
+          existed, or that were bulk-imported. Purely a review list — merging
+          or deleting is still done by hand via each entry's own Edit/Delete. */}
+      {duplicateClusters && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm" onClick={() => setDuplicateClusters(null)}>
+          <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-border bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
+              <h3 className="text-[15px] font-bold text-heading">
+                Possible Duplicates {duplicateClusters.length > 0 && <span className="text-subtle font-normal">({duplicateClusters.length})</span>}
+              </h3>
+              <button onClick={() => setDuplicateClusters(null)} className="text-muted hover:text-heading transition-colors">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {duplicateClusters.length === 0 ? (
+                <p className="text-center text-[13px] text-subtle py-8">No likely duplicates found.</p>
+              ) : (
+                duplicateClusters.map((cluster, i) => (
+                  <div key={i} className="rounded-xl border border-border bg-forge-surface/30 p-3">
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{cluster.products[0].manufacturer}</div>
+                    <div className="space-y-1.5">
+                      {cluster.products.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => openClusterProduct(p.id)}
+                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-forge-bg/60 px-3 py-2 text-left transition-colors hover:bg-forge-surface"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-[12px] font-medium text-heading">{p.model_name}</div>
+                            <div className="text-[10px] text-subtle">{p.category}{p.part_number ? ` · ${p.part_number}` : ""}</div>
+                          </div>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0 text-muted"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

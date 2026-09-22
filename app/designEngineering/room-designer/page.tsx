@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Video, Monitor, Presentation } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
-import { searchProducts } from "@/lib/av-products";
+import { searchProducts, addEquipmentToLibraryConfirmed, getProductsByIds } from "@/lib/av-products";
 import { searchOrgLibrary } from "@/lib/equipment-library";
 import { loadUnitSpecs, diffSpec, identityAfterEdit, isLibraryProduct, specFromRoomDevice, applySpecToRoomDevice } from "@/lib/unit-specs";
 import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, roomDeviceToBOM, BOM_UNIT_DRAG_TYPE, type BOMDeviceEntry, type BOMDragUnit } from "@/lib/bom-context";
@@ -243,6 +243,26 @@ function applyFormValueToDevice(d: PlacedDevice, v: EquipmentFormValue): PlacedD
     dispersion: v.coverageAngleDeg ?? undefined,
     covW: v.coverageWidthFt ?? undefined,
     covL: v.coverageDepthFt ?? undefined,
+  };
+}
+
+// Shapes a raw av_products row into the "modalResults" pick shape addFromModal
+// / replaceDeviceFromModal / libraryPickFields expect (mfr/model/cat aliases
+// alongside the raw manufacturer/model_name/category fields, plus Room
+// Designer's rd_* placement metadata). Used both for the library search
+// dropdown and — because a Kit's own component products need the exact same
+// shape — for expanding a Kit pick into its individual parts.
+function productToModalResult(p: any) {
+  return {
+    ...p,
+    type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
+    color: p.color || "#64748b", cat: p.category,
+    rd_type: p.rd_type, rd_wall: p.rd_wall,
+    rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
+    rd_icon: p.rd_icon,
+    hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
+    coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
+    coverage_width_ft: p.coverage_width_ft, coverage_depth_ft: p.coverage_depth_ft,
   };
 }
 
@@ -1067,21 +1087,7 @@ export default function RoomDesignerPage() {
       const timer = setTimeout(async () => {
         try {
           const dbData = await searchProducts(modalSearch).catch(() => []);
-          setModalResults(dbData.map((p: any) => ({
-            // The whole product record travels with the pick (id, ports, price, specs ...):
-            // Add / Replace read it to give the placed unit its real make, model and spec.
-            ...p,
-            type: p.type, mfr: p.manufacturer, model: p.model_name, price: p.price,
-            color: p.color || "#64748b", cat: p.category,
-            // Room Designer placement fields (null when product not yet enriched)
-            rd_type: p.rd_type, rd_wall: p.rd_wall,
-            rd_width_ft: p.rd_width_ft, rd_height_ft: p.rd_height_ft,
-            rd_icon: p.rd_icon,
-            // Camera FOV / mic-speaker coverage spec, also null when not yet enriched
-            hfov_deg: p.hfov_deg, coverage_pattern: p.coverage_pattern,
-            coverage_diameter_ft: p.coverage_diameter_ft, coverage_angle_deg: p.coverage_angle_deg,
-            coverage_width_ft: p.coverage_width_ft, coverage_depth_ft: p.coverage_depth_ft,
-          })));
+          setModalResults(dbData.map(productToModalResult));
         } finally { setModalLoading(false); }
       }, 300);
       return () => clearTimeout(timer);
@@ -1114,9 +1120,7 @@ export default function RoomDesignerPage() {
   // field-resolution as addFromModal (rd_type-enriched product vs a
   // category-name-inferred fallback), but applied as an update that keeps
   // the device's uid/x/y/z/mountWall/rotation instead of creating a new one.
-  const replaceDeviceFromModal = () => {
-    if (replacingDeviceUid == null) return;
-    const sel = modalSelected;
+  const replaceSingleDevice = (uid: number, sel: any) => {
     const name = sel ? sel.type : modalDeviceName.trim();
     let devType: string, wall: string, icon: string, color: string, w: number, h: number;
 
@@ -1144,7 +1148,7 @@ export default function RoomDesignerPage() {
       }
     }
     pushUndo();
-    setPlacedDevices(prev => prev.map(d => d.uid === replacingDeviceUid ? {
+    setPlacedDevices(prev => prev.map(d => d.uid === uid ? {
       ...d,
       name, icon, w, h, wall, type: devType, color,
       hfov: sel?.hfov_deg ?? undefined,
@@ -1158,12 +1162,30 @@ export default function RoomDesignerPage() {
       ...libraryPickFields(sel),
     } : d));
     // Same for a swap: the other tools' copy of this unit becomes the new product too.
-    const swapped = placedDevices.find(d => d.uid === replacingDeviceUid);
+    const swapped = placedDevices.find(d => d.uid === uid);
     if (swapped?.itemId) {
       const updated: any = { ...swapped, name, ...libraryPickFields(sel) };
       const changes = diffSpec(specFromRoomDevice(swapped), specFromRoomDevice(updated));
       if (Object.keys(changes).length) updateUnitSpec(swapped.itemId, changes);
     }
+  };
+
+  const replaceDeviceFromModal = async () => {
+    if (replacingDeviceUid == null) return;
+    const sel = modalSelected;
+    if (sel?.kit_items && sel.kit_items.length > 0) {
+      const placeable = await resolvePlaceableKitComponents(sel);
+      if (placeable.length === 0) {
+        setGenerateNotice({ kind: "error", message: "This kit has no room-placeable part — nothing was replaced." });
+        window.setTimeout(() => setGenerateNotice(null), 5000);
+      } else {
+        replaceSingleDevice(replacingDeviceUid, placeable[0]);
+        placeable.slice(1).forEach(placeDeviceFromPick);
+      }
+      closeModal();
+      return;
+    }
+    replaceSingleDevice(replacingDeviceUid, sel);
     closeModal();
   };
 
@@ -1388,8 +1410,7 @@ export default function RoomDesignerPage() {
     mfr: modalMake.trim() || undefined, model: modalModel.trim() || undefined,
   };
 
-  const addFromModal = () => {
-    const sel = modalSelected;
+  const placeDeviceFromPick = (sel: any) => {
     const name = sel ? sel.type : modalDeviceName.trim();
     let devType: string, wall: string, icon: string, color: string, w: number, h: number;
 
@@ -1419,7 +1440,7 @@ export default function RoomDesignerPage() {
       }
     }
     addDeviceToRoom({
-      id: `modal-${Date.now()}`, name, icon, w, h, wall, type: devType, color,
+      id: `modal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, icon, w, h, wall, type: devType, color,
       hfovDeg: sel?.hfov_deg ?? null,
       coveragePattern: sel?.coverage_pattern ?? null,
       coverageDiameterFt: sel?.coverage_diameter_ft ?? null,
@@ -1428,6 +1449,42 @@ export default function RoomDesignerPage() {
       coverageDepthFt: sel?.coverage_depth_ft ?? null,
       ...libraryPickFields(sel),
     });
+  };
+
+  // A "Kit" library pick (see AVProduct.kit_items) is a bundle SKU standing
+  // in for several separate physical parts — but unlike Signal Flow Builder,
+  // not every part of a kit has a sensible spot on a floor plan (a Cat5e
+  // cable kit or a USB adapter isn't a "room object"). Only components that
+  // carry real room-placement metadata (rd_type) get placed here; resolves
+  // by id via getProductsByIds and repeats each by its quantity.
+  const resolvePlaceableKitComponents = async (sel: any): Promise<any[]> => {
+    if (!sel?.kit_items || sel.kit_items.length === 0) return [sel];
+    const componentProducts = await getProductsByIds(sel.kit_items.map((i: any) => i.product_id)).catch(() => []);
+    const byId = new Map(componentProducts.map((cp: any) => [cp.id, cp]));
+    const placeable: any[] = [];
+    for (const item of sel.kit_items) {
+      const p = byId.get(item.product_id);
+      if (!p || !p.rd_type) continue;
+      const mapped = productToModalResult(p);
+      for (let n = 0; n < Math.max(1, item.quantity || 1); n++) placeable.push(mapped);
+    }
+    return placeable;
+  };
+
+  const addFromModal = async () => {
+    const sel = modalSelected;
+    if (sel?.kit_items && sel.kit_items.length > 0) {
+      const placeable = await resolvePlaceableKitComponents(sel);
+      if (placeable.length === 0) {
+        setGenerateNotice({ kind: "error", message: "This kit has no room-placeable part — nothing was added." });
+        window.setTimeout(() => setGenerateNotice(null), 5000);
+      } else {
+        placeable.forEach(placeDeviceFromPick);
+      }
+      closeModal();
+      return;
+    }
+    placeDeviceFromPick(sel);
     closeModal();
   };
 
@@ -2279,7 +2336,10 @@ export default function RoomDesignerPage() {
   };
 
   const addDeviceToRoom = (dev: DeviceCatalogItem & Partial<PlacedDevice>) => {
-    const id = Date.now();
+    // Date.now() alone collides when this is called several times back to
+    // back synchronously (a Kit expanding into multiple placed devices at
+    // once) — same fix already used elsewhere in this file for the same reason.
+    const id = Date.now() + Math.random();
     let x=0.5, y=0.5, z=0, mountWall="north";
     let rotation: number|undefined, wallUid: number|undefined;
     if (dev.wall==="front"||dev.wall==="side") {
@@ -6865,6 +6925,31 @@ export default function RoomDesignerPage() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Duplicate
           </button>
+          {(() => {
+            const menuDev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
+            if (!menuDev || isRoomFurniture(menuDev)) return null;
+            return (
+              <button onClick={async ()=>{
+                const dev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
+                setDeviceContextMenu(null);
+                if(!dev) return;
+                const label = [(dev as any).mfr, (dev as any).model].filter(Boolean).join(" ") || (dev as any).type || "Device";
+                const result = await addEquipmentToLibraryConfirmed(deviceToFormValue(dev), (matches)=>
+                  window.confirm(`"${label}" looks similar to what's already in the AVGenix Library:\n\n${matches.map(m=>`• ${m.manufacturer} ${m.model_name}${m.part_number?` (${m.part_number})`:""}`).join("\n")}\n\nAdd it anyway as a different product?`)
+                );
+                if(result.status==="added") setGenerateNotice({kind:"ok",message:`Added ${label} to the AVGenix Library.`});
+                else if(result.status==="exists") setGenerateNotice({kind:"ok",message:`${label} is already in the AVGenix Library.`});
+                else if(result.status==="cancelled") { /* user chose not to add a possible duplicate */ }
+                else setGenerateNotice({kind:"error",message:result.error||`Unable to add ${label} to the AVGenix Library.`});
+                window.setTimeout(()=>setGenerateNotice(null),5000);
+              }}
+                style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"7px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="12" y1="4" x2="12" y2="10"/></svg>
+                Add to AVGenix Library
+              </button>
+            );
+          })()}
           <div style={{height:1,background:"rgb(var(--border))",margin:"4px 0"}} />
           {/* Hide: out of THIS view only — Signal Flow, the rack and the BOM keep it. */}
           {(() => {

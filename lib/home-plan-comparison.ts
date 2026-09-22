@@ -8,7 +8,7 @@ export interface PlanComparisonFeature {
 
 export const PLAN_COMPARISON_FEATURES: PlanComparisonFeature[] = [
   { name: "AV engineering calculators", pro: true, free: true, badge: "POPULAR" },
-  { name: "Reference library", pro: true, free: true },
+  { name: "References", pro: true, free: true },
   { name: "AI assistant", pro: true, free: false },
   { name: "Project workspaces", pro: true, free: false, badge: "POPULAR" },
   { name: "Site surveys", pro: true, free: false },
@@ -21,5 +21,5 @@ export const PLAN_COMPARISON_FEATURES: PlanComparisonFeature[] = [
   { name: "Project boards", pro: true, free: false },
   { name: "Time tracking", pro: true, free: false },
   { name: "Equipment library", pro: true, free: false },
-  { name: "Procurement and receiving", pro: true, free: false },
+  { name: "Order Management", pro: true, free: false },
 ];
