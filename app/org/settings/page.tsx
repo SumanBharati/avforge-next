@@ -255,7 +255,7 @@ export default function OrgSettingsPage() {
 
   if (!activeOrg) return <div className="px-8 py-20 text-center text-sm text-subtle">Loading...</div>;
 
-  const isOwnerOrAdmin = activeOrg.role === "owner" || activeOrg.role === "admin";
+  const isOwnerOrAdmin = activeOrg.role === "superadmin" || activeOrg.role === "admin";
 
   if (!isOwnerOrAdmin) {
     return (
@@ -348,7 +348,7 @@ export default function OrgSettingsPage() {
   }
 
   async function handleDelete() {
-    if (!activeOrg || activeOrg.role !== "owner") return;
+    if (!activeOrg || activeOrg.role !== "superadmin" || activeOrg.is_individual) return;
     const confirmed = window.confirm(
       `Delete "${activeOrg.name}"? This will permanently remove all projects and data in this organization. This cannot be undone.`
     );
@@ -491,13 +491,19 @@ export default function OrgSettingsPage() {
             </div>
           </form>
 
-          {activeOrg.role === "owner" && (
+          {activeOrg.role === "superadmin" && (
             <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
               <h3 className="mb-1.5 text-sm font-semibold text-red-400">Danger Zone</h3>
-              <p className="mb-3 text-[12px] text-muted">Permanently remove all projects, proposals, and data in this organization.</p>
-              <button onClick={handleDelete} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20">
-                Delete Organization
-              </button>
+              {activeOrg.is_individual ? (
+                <p className="text-[12px] text-muted">This is your personal workspace and can&apos;t be deleted.</p>
+              ) : (
+                <>
+                  <p className="mb-3 text-[12px] text-muted">Permanently remove all projects, proposals, and data in this organization.</p>
+                  <button onClick={handleDelete} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20">
+                    Delete Organization
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

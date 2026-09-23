@@ -59,7 +59,7 @@ export default function ProjectProcurementGatePage({ params }: { params: { id: s
 
   const totals = proposal ? computeProposalTotals(proposal.sections, proposal.marginPercent, proposal.taxRate) : null;
   const itemCount = proposal ? proposal.sections.reduce((s, sec) => s + sec.items.filter((i) => i.qty > 0).length, 0) : 0;
-  const canRelease = !!activeOrg && (activeOrg.role === "owner" || activeOrg.role === "admin");
+  const canRelease = !!activeOrg && (activeOrg.role === "superadmin" || activeOrg.role === "admin");
 
   async function handleRelease(formData: ReleaseFormData) {
     if (!activeOrg || !project || !proposal) return;

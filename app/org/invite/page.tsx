@@ -72,24 +72,15 @@ function InviteAcceptPageInner() {
 
     setStatus("accepting");
 
-    // Accept: add member + update invite status
-    const { error: memberErr } = await supabase.from("organization_members").insert({
-      org_id: invite.org_id,
-      user_id: user.id,
-      role: invite.role,
-    });
+    // Accept: server-side RPC re-validates token/status/expiry/email match
+    // and performs the membership insert + invite status update atomically.
+    const { error: acceptErr } = await supabase.rpc("accept_org_invite", { p_token: token });
 
-    if (memberErr && !memberErr.message.includes("duplicate")) {
+    if (acceptErr) {
       setStatus("error");
-      setError(memberErr.message);
+      setError(acceptErr.message);
       return;
     }
-
-    const { error: updateErr } = await supabase
-      .from("organization_invites")
-      .update({ status: "accepted" })
-      .eq("id", invite.id);
-    if (updateErr) console.error("Failed to mark invite accepted:", updateErr);
 
     // Switch to the new org
     await supabase

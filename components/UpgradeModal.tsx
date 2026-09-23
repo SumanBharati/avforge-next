@@ -14,7 +14,7 @@ const BENEFITS = [
 
 export default function UpgradeModal({ onClose, required = false }: { onClose?: () => void; required?: boolean }) {
   const { activeOrg } = useOrg();
-  const canManageBilling = activeOrg?.role === "owner" || activeOrg?.role === "admin";
+  const canManageBilling = activeOrg?.role === "superadmin" || activeOrg?.role === "admin";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

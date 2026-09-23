@@ -61,11 +61,11 @@ export default function NewOrgPage() {
       return;
     }
 
-    // Add creator as owner
+    // Add creator as superadmin
     await supabase.from("organization_members").insert({
       org_id: org.id,
       user_id: user.id,
-      role: "owner",
+      role: "superadmin",
     });
 
     // Switch to new org

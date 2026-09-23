@@ -35,7 +35,7 @@ async function main() {
     const { data: newOrg, error } = await admin.from("organizations").insert({ name: "Claude E2E Org", slug, created_by: user.id }).select().single();
     if (error) throw error;
     org = newOrg;
-    await admin.from("organization_members").insert({ org_id: org.id, user_id: user.id, role: "owner" });
+    await admin.from("organization_members").insert({ org_id: org.id, user_id: user.id, role: "superadmin" });
     console.log(`Created org: ${org.id}`);
   } else {
     console.log(`Reusing org: ${org.id}`);

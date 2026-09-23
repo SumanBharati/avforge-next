@@ -10,7 +10,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 interface Member {
   id: string;
   user_id: string;
-  role: "owner" | "admin" | "member";
+  role: "superadmin" | "admin" | "member";
   department: string;
   joined_at: string;
   email: string;
@@ -125,16 +125,16 @@ export default function OrgMembersPage() {
 
     const derivedRole = invitePrivileges.adminPrivileges ? "admin" : "member";
 
+    const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch("/api/invite", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
       body: JSON.stringify({
         org_id: activeOrg.id,
         org_name: activeOrg.name,
         email: inviteEmail.trim(),
         role: derivedRole,
         department: inviteRole,
-        invited_by: user.id,
       }),
     });
 
@@ -171,7 +171,7 @@ export default function OrgMembersPage() {
 
   if (!activeOrg) return <div className="px-8 py-20 text-center text-sm text-subtle">Loading...</div>;
 
-  const isOwnerOrAdmin = activeOrg.role === "owner" || activeOrg.role === "admin";
+  const isOwnerOrAdmin = activeOrg.role === "superadmin" || activeOrg.role === "admin";
 
   return (
     <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
@@ -196,7 +196,7 @@ export default function OrgMembersPage() {
           <h3 className="text-sm font-semibold text-heading">
             Members ({members.length})
           </h3>
-          {isOwnerOrAdmin && (
+          {isOwnerOrAdmin && !activeOrg.is_individual && (
             <button onClick={() => setShowInvite(!showInvite)} className="forge-btn-primary text-[13px]">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                 <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -206,8 +206,12 @@ export default function OrgMembersPage() {
           )}
         </div>
 
+        {isOwnerOrAdmin && activeOrg.is_individual && (
+          <p className="mb-4 text-[13px] text-subtle">Invites aren&apos;t available for your personal workspace.</p>
+        )}
+
         {/* Invite form */}
-        {showInvite && (
+        {showInvite && !activeOrg.is_individual && (
           <form onSubmit={handleInvite} className="mb-4 rounded-xl border border-border bg-forge-surface/40 p-5">
             {inviteError && (
               <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-400">
@@ -323,8 +327,8 @@ export default function OrgMembersPage() {
                   <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-400">
                     {member.department || "Sales"}
                   </span>
-                  {member.role === "owner" ? (
-                    <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">owner</span>
+                  {member.role === "superadmin" ? (
+                    <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">superadmin</span>
                   ) : (
                     <>
                       <span className="rounded-full bg-forge-surface px-2.5 py-0.5 text-[11px] font-medium text-muted">View &amp; Report</span>
@@ -337,9 +341,9 @@ export default function OrgMembersPage() {
                     </>
                   )}
                 </div>
-                {isOwnerOrAdmin && member.role !== "owner" && (
+                {isOwnerOrAdmin && member.role !== "superadmin" && (
                   <div className="flex items-center gap-1">
-                    {activeOrg.role === "owner" && (
+                    {activeOrg.role === "superadmin" && (
                       <button
                         onClick={() => handleChangeRole(member.id, member.role === "admin" ? "member" : "admin")}
                         className="rounded border border-border bg-forge-surface px-2 py-1 text-[11px] text-body transition-colors hover:bg-forge-card-hover"

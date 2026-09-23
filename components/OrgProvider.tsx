@@ -13,11 +13,12 @@ export interface Org {
   name: string;
   slug: string;
   logo_url: string | null;
-  role: "owner" | "admin" | "member";
+  role: "superadmin" | "admin" | "member";
   member_roles: string[];
   subscription_status: string | null;
   trial_started_at: string | null;
   trial_ends_at: string | null;
+  is_individual: boolean;
 }
 
 interface OrgContextValue {
@@ -105,6 +106,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
         subscription_status: org.subscription_status ?? null,
         trial_started_at: org.trial_started_at ?? null,
         trial_ends_at: org.trial_ends_at ?? null,
+        is_individual: org.is_individual ?? false,
       }));
     } else {
       // Compatibility path for deployments where migration 024 is not live yet.
@@ -132,7 +134,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
       const orgIds = memberships.map((m) => m.org_id);
       let { data: orgsData, error: orgsError } = await supabase
       .from("organizations")
-      .select("id, name, slug, logo_url, member_roles, subscription_status, trial_started_at, trial_ends_at")
+      .select("id, name, slug, logo_url, member_roles, subscription_status, trial_started_at, trial_ends_at, is_individual")
       .in("id", orgIds);
 
     // Keep organization pages usable during a staged deployment where the
@@ -170,6 +172,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
           subscription_status: org?.subscription_status ?? null,
           trial_started_at: org?.trial_started_at ?? null,
           trial_ends_at: org?.trial_ends_at ?? null,
+          is_individual: (org as any)?.is_individual ?? false,
         };
       });
     }

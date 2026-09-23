@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     .eq("user_id", user.id)
     .single();
   if (!membership) return NextResponse.json({ error: "Not a member of this organization" }, { status: 403 });
-  if (!(["owner", "admin"] as string[]).includes(membership.role)) {
+  if (!(["superadmin", "admin"] as string[]).includes(membership.role)) {
     return NextResponse.json({ error: "Only organization owners and admins can manage billing" }, { status: 403 });
   }
 

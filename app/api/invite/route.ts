@@ -2,24 +2,51 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { BrevoClient } from "@getbrevo/brevo";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 const brevoClient = new BrevoClient({ apiKey: process.env.BREVO_API_KEY! });
 
 export async function POST(req: NextRequest) {
-  const { org_id, org_name, email, role, department, invited_by } = await req.json();
+  const authHeader = req.headers.get("authorization");
+  const { org_id, org_name, email, role, department } = await req.json();
 
-  if (!org_id || !email || !role || !invited_by) {
+  if (!authHeader || !org_id || !email || !role) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // Insert invite and get the auto-generated token back
-  const { data: invite, error: insertErr } = await supabaseAdmin
+  const userClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: authHeader } } }
+  );
+
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { data: membership } = await userClient
+    .from("organization_members")
+    .select("role")
+    .eq("org_id", org_id)
+    .eq("user_id", user.id)
+    .single();
+  if (!membership) return NextResponse.json({ error: "Not a member of this organization" }, { status: 403 });
+  if (!(["superadmin", "admin"] as string[]).includes(membership.role)) {
+    return NextResponse.json({ error: "Only organization owners and admins can invite members" }, { status: 403 });
+  }
+
+  const { data: org } = await userClient
+    .from("organizations")
+    .select("is_individual")
+    .eq("id", org_id)
+    .single();
+  if (org?.is_individual) {
+    return NextResponse.json({ error: "Invites aren't available for an Individual workspace" }, { status: 403 });
+  }
+
+  // Inserted with the caller's own session so the oi_insert RLS policy
+  // (superadmin/admin of org_id, non-individual org) enforces the same
+  // checks again server-side.
+  const { data: invite, error: insertErr } = await userClient
     .from("organization_invites")
-    .insert({ org_id, email: email.toLowerCase(), role, department, invited_by })
+    .insert({ org_id, email: email.toLowerCase(), role, department, invited_by: user.id })
     .select("token")
     .single();
 
