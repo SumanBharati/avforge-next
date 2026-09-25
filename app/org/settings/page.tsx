@@ -371,9 +371,11 @@ export default function OrgSettingsPage() {
         <Link href="/org/settings" className="border-b-2 border-blue-500 px-4 py-2 text-sm font-medium text-blue-400">
           General
         </Link>
-        <Link href="/org/members" className="border-b-2 border-transparent px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-body">
-          Members
-        </Link>
+        {!activeOrg.is_individual && (
+          <Link href="/org/members" className="border-b-2 border-transparent px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-body">
+            Members
+          </Link>
+        )}
       </div>
 
       {/* Two-column layout */}
@@ -390,7 +392,14 @@ export default function OrgSettingsPage() {
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-muted">Name</label>
-                  <input type="text" value={orgDetails.name} onChange={(e) => setOrgDetails(p => ({ ...p, name: e.target.value }))} className="forge-input" required />
+                  <input
+                    type="text"
+                    value={activeOrg.is_individual ? "Individual" : orgDetails.name}
+                    onChange={(e) => setOrgDetails(p => ({ ...p, name: e.target.value }))}
+                    className="forge-input disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={activeOrg.is_individual}
+                    required
+                  />
                 </div>
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-muted">Website</label>
@@ -455,6 +464,7 @@ export default function OrgSettingsPage() {
           </form>
 
           {/* Organization Member Roles */}
+          {!activeOrg.is_individual && (
           <form onSubmit={handleRolesSave}>
             <div className="rounded-xl border border-border bg-forge-surface/40 p-3">
               <div className="mb-2 flex items-center justify-between">
@@ -490,6 +500,7 @@ export default function OrgSettingsPage() {
               </div>
             </div>
           </form>
+          )}
 
           {activeOrg.role === "superadmin" && (
             <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">

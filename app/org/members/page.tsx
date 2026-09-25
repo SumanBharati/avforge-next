@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
@@ -27,7 +28,12 @@ interface Invite {
 }
 
 export default function OrgMembersPage() {
+  const router = useRouter();
   const { activeOrg, refreshOrgs } = useOrg();
+
+  useEffect(() => {
+    if (activeOrg?.is_individual) router.replace("/org/settings");
+  }, [activeOrg?.is_individual, router]);
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);

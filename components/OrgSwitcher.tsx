@@ -51,7 +51,7 @@ export default function OrgSwitcher() {
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen((current) => !current)} className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg px-2 py-1 text-left transition-colors hover:bg-forge-surface" aria-haspopup="listbox" aria-expanded={open}>
         <span className="min-w-0">
-          <span className="block text-[9px] font-semibold uppercase tracking-widest text-subtle">{activeOrg.is_individual ? "Workspace" : "Organization"}</span>
+          <span className="block text-[9px] font-semibold uppercase tracking-widest text-subtle">Organization</span>
           <span className="mt-0.5 block max-w-[160px] truncate text-sm font-medium text-body">{activeOrg.is_individual ? "Individual" : activeOrg.name}</span>
         </span>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
