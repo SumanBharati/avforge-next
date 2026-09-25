@@ -2691,6 +2691,11 @@ export default function RoomDesignerPage() {
         const uid = Date.now() + (seq++) + Math.random();
         const placed: PlacedDevice = {
           ...template, itemId: item.itemId, productKey: item.productKey,
+          // Only when the scope text actually named a real manufacturer/model
+          // for this unit (see generate-devices-from-scope's prompt) — same
+          // conditional pattern as deviceFromBomUnit above, so a placeholder
+          // template's own mfr/model isn't clobbered with nothing.
+          ...(item.mfr ? { mfr: item.mfr, ...(item.model ? { model: item.model } : {}) } : {}),
           rack_units: item.rackUnits, uid, name: item.name,
           x: 0, y: 0, z: 0, mountWall: mount, hfov, covShape, covDiameter, covW, covL, dispersion,
         };

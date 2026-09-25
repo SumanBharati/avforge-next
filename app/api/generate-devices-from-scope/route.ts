@@ -13,20 +13,32 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 2000,
+      // A detailed real-world scope (a full BOM-style writeup) can list 20+
+      // distinct devices; each now returns 6 JSON fields including
+      // manufacturer/model. 2000 was tight even before that.
+      max_tokens: 8000,
+      // Without this, Sonnet 5 spends an uncontrolled chunk of max_tokens on
+      // extended-thinking tokens before it writes the actual JSON — observed
+      // eating 1537 of a 2000 budget on a real scope, leaving too little for
+      // the output and truncating it mid-object (which then fails to parse
+      // below). This task is a plain extraction with no need for visible
+      // reasoning, so thinking is switched off rather than just budgeted for.
+      thinking: { type: "disabled" },
       system: `You are an AV integrator's assistant. You are given a room's free-text "Scope of Work" description and must identify every distinct AV device or system it mentions, so they can be auto-placed as blocks on a signal-flow diagram, grouped into installation locations.
 
 Return ONLY valid JSON (no markdown, no explanation) with this exact shape:
 {
   "devices": [
-    { "category": "display|camera|speaker|touch_panel|microphone|other", "label": "", "quantity": 1, "location": "" }
+    { "category": "display|camera|speaker|touch_panel|microphone|other", "label": "", "quantity": 1, "location": "", "manufacturer": null, "model": null }
   ]
 }
 
 Rules:
 - One entry per distinct device/system mentioned — deduplicate repeated mentions of the same thing rather than listing it twice.
 - category must be exactly one of: "display", "camera", "speaker", "touch_panel", "microphone", "other". Use "other" for anything AV-related that doesn't fit those five (amplifiers, DSPs, video conferencing codecs, network switches, control processors, etc.) — never drop something just because it doesn't fit a category.
-- label: a short, human-readable name that preserves the specific placement/type from the text, e.g. "Front Wall Display", "Ceiling Speaker", "Wall Mounted Touch Panel", "Table Top Touch Panel", "Front Camera", "Rear Camera", "Ceiling Microphone", "Table Microphone". Keep it concise (a few words), title case, no trailing punctuation.
+- label: a short, human-readable name that preserves the specific placement/type from the text, e.g. "Front Wall Display", "Ceiling Speaker", "Wall Mounted Touch Panel", "Table Top Touch Panel", "Front Camera", "Rear Camera", "Ceiling Microphone", "Table Microphone". Keep it concise (a few words), title case, no trailing punctuation. Always describe the device generically here (by placement/type) even when a manufacturer/model was captured below — label is what groups and displays multiple identical units, and must stay consistent across units of the same product.
+- manufacturer: the real manufacturer/brand name ONLY if the text actually names one for this specific device (e.g. "Neat", "Crestron", "QSC", "Shure", "Extron", "Biamp"), copied as written. If the text doesn't name a manufacturer for this device, set this to null — never guess, infer, or invent a plausible-sounding brand.
+- model: the specific model name or number ONLY if the text actually names one for this device (e.g. "Center", "TSW-1070", "Core 110f", "MXA920"), copied as written, without repeating the manufacturer name inside it. If the text doesn't name a model, set this to null — never guess or invent one.
 - quantity: the explicit or clearly-implied count (e.g. "ceiling speakers" with no number implies more than one — use your best judgment, default 2; an explicit number like "4 ceiling speakers" uses that number). Default to 1 when the text doesn't imply multiples.
 - location: a short installation location name, 1-3 words, title case (e.g. "Front Wall", "Rear Wall", "Side Wall", "Ceiling", "Table", "Lectern", "Equipment Rack"). Infer this from where the text says or implies the device sits — use ordinary AV-integrator common sense when it isn't stated outright: a "ceiling speaker"/"ceiling microphone" belongs in "Ceiling" even if the sentence doesn't repeat the word; a "front camera"/"a display at the front wall" belongs in "Front Wall"; a DSP, amplifier, network switch, or other back-of-house equipment belongs in "Equipment Rack" unless the text says otherwise. Use the EXACT SAME location string (character-for-character) for every device that belongs in the same place, so they group together. If — and only if — there is truly no reasonable way to guess where a device goes, set location to null rather than forcing a guess.
 - If the scope text describes no AV devices at all, return {"devices": []}.`,

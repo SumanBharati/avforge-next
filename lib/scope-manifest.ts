@@ -30,6 +30,27 @@ export interface ScopeUnit {
   category: string;
   location: string | null;
   rackUnits: number | null;
+  /**
+   * Real manufacturer/model, ONLY when the scope text actually named them for
+   * this device (see the generate-devices-from-scope prompt) — null when it
+   * didn't, so callers can fall back to their own "Generic" placeholder
+   * instead of a guessed brand.
+   */
+  mfr: string | null;
+  model: string | null;
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  display: "Display",
+  camera: "Camera",
+  speaker: "Speaker",
+  touch_panel: "Touch Panel",
+  microphone: "Microphone",
+};
+
+/** Human-readable category label for a scope-generated block's header — "other" has no single good label on its own (see lib/signal-flow-types.ts ROLE_LABELS for a more specific one once AI topology has run). */
+export function scopeCategoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] || "Equipment";
 }
 
 export type ScopeTool = "room-designer" | "signal-flow" | "rack-builder";
@@ -109,6 +130,8 @@ export async function fetchScopeUnits(scopeText: string): Promise<ScopeUnit[]> {
     const category = String(item.category || "other");
     const qty = Number.isFinite(item.quantity) && item.quantity > 0 ? Math.floor(item.quantity) : 1;
     const location = item.location ? String(item.location).trim() || null : null;
+    const mfr = item.manufacturer ? String(item.manufacturer).trim() || null : null;
+    const model = item.model ? String(item.model).trim() || null : null;
     // One key for the whole run of identical units, derived from the label
     // BEFORE it gets numbered — otherwise four identical displays become four
     // BOM rows of one instead of one row of four.
@@ -123,6 +146,8 @@ export async function fetchScopeUnits(scopeText: string): Promise<ScopeUnit[]> {
         category,
         location,
         rackUnits,
+        mfr,
+        model,
       });
     }
   });
