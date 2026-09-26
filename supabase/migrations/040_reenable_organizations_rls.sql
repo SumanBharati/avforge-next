@@ -1,0 +1,27 @@
+-- ============================================================
+-- AVGenix: record the organizations RLS re-enable as a real
+-- migration, closing a gap between migration history and the
+-- live database.
+-- ============================================================
+-- 001_organizations.sql always specified
+--   ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+-- so on paper this table's RLS was on from day one. In practice it was
+-- found disabled live (relrowsecurity = false) — someone ran a manual
+-- ALTER TABLE ... DISABLE ROW LEVEL SECURITY directly against the
+-- database at some point, outside of any migration, almost certainly
+-- while working around the same organization_members self-referencing-
+-- policy recursion bug that 038_fix_organization_members_rls_recursion.sql
+-- fixes properly. That undocumented change meant every policy on this
+-- table (org_select, org_update, org_delete, org_insert) had been
+-- silently unenforced.
+--
+-- It was already re-enabled directly against the live database as an ad
+-- hoc fix in response to that discovery. This migration exists only to
+-- make that state change idempotent and reproducible from a clean
+-- migration history — running the full 001-040 sequence against a fresh
+-- database now actually reaches the same state the live database is in,
+-- instead of silently leaving RLS off on this table the way 001 alone
+-- would look like it doesn't (misleadingly implying it was never
+-- disabled).
+
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
