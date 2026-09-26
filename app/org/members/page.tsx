@@ -46,6 +46,9 @@ export default function OrgMembersPage() {
   });
   const [inviteRole, setInviteRole] = useState<string>(ROLE_OPTIONS[0]);
   const [inviteError, setInviteError] = useState("");
+  const [inviteWarning, setInviteWarning] = useState("");
+  const [inviteWarningUrl, setInviteWarningUrl] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<Member | null>(null);
   const [pendingTransfer, setPendingTransfer] = useState<Member | null>(null);
@@ -119,6 +122,8 @@ export default function OrgMembersPage() {
     e.preventDefault();
     if (!inviteEmail.trim() || !activeOrg) return;
     setInviteError("");
+    setInviteWarning("");
+    setInviteWarningUrl("");
     setInviting(true);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -155,6 +160,7 @@ export default function OrgMembersPage() {
       return;
     }
 
+    if (result.warning) { setInviteWarning(result.warning); setInviteWarningUrl(result.inviteUrl || ""); }
     setInviteEmail("");
     setInviteRole(roleOptions[0]);
     setShowInvite(false);
@@ -216,6 +222,27 @@ export default function OrgMembersPage() {
 
       {/* Members list */}
       <div className="max-w-[640px]">
+        {inviteWarning && (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-300">
+            <div className="flex items-start justify-between gap-3">
+              <span>{inviteWarning}. Share this invite link with them directly, or check your email delivery settings.</span>
+              <button onClick={() => { setInviteWarning(""); setInviteWarningUrl(""); }} className="shrink-0 text-amber-400 hover:text-amber-200">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+            {inviteWarningUrl && (
+              <div className="mt-2 flex items-center gap-2">
+                <input readOnly value={inviteWarningUrl} className="min-w-0 flex-1 rounded border border-amber-500/30 bg-forge-bg/60 px-2 py-1 text-[12px] text-amber-100" onFocus={(e) => e.target.select()} />
+                <button
+                  onClick={() => { navigator.clipboard.writeText(inviteWarningUrl); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}
+                  className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[12px] font-medium text-amber-300 transition-colors hover:bg-amber-500/20"
+                >
+                  {linkCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-heading">
             Members ({members.length})

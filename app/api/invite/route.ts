@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
   } catch (emailErr) {
     console.error("Email send error:", emailErr);
     // Invite row was created — don't fail the whole request, just warn
-    return NextResponse.json({ warning: "Invite created but email failed to send" });
+    return NextResponse.json({ warning: "Invite created but email failed to send", inviteUrl });
   }
 
   return NextResponse.json({ success: true });
