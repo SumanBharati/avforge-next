@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 type RoleItem = { key: string; value: string };
 
@@ -97,6 +98,19 @@ export default function OrgSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  useEffect(() => {
+    if (!activeOrg || activeOrg.is_individual) { setMemberCount(null); return; }
+    supabase
+      .from("organization_members")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", activeOrg.id)
+      .then(({ count }) => setMemberCount(count ?? null));
+  }, [activeOrg?.id, activeOrg?.is_individual]);
 
   async function handleManageBilling() {
     if (!activeOrg) return;
@@ -260,7 +274,7 @@ export default function OrgSettingsPage() {
   if (!isOwnerOrAdmin) {
     return (
       <div className="px-8 py-20 text-center">
-        <p className="text-sm text-subtle">You don&apos;t have permission to manage this organization.</p>
+        <p className="text-sm text-subtle">You don&apos;t have permission to manage this account.</p>
       </div>
     );
   }
@@ -347,14 +361,21 @@ export default function OrgSettingsPage() {
     setDisconnectingQb(false);
   }
 
-  async function handleDelete() {
-    if (!activeOrg || activeOrg.role !== "superadmin" || activeOrg.is_individual) return;
-    const confirmed = window.confirm(
-      `Delete "${activeOrg.name}"? This will permanently remove all projects and data in this organization. This cannot be undone.`
-    );
-    if (!confirmed) return;
+  const canDeleteOrg = Boolean(
+    activeOrg && activeOrg.role === "superadmin" && !activeOrg.is_individual
+    && memberCount === 1 && activeOrg.subscription_status !== "active"
+  );
 
-    await supabase.from("organizations").delete().eq("id", activeOrg.id);
+  async function confirmDelete() {
+    if (!activeOrg || !canDeleteOrg) return;
+    setDeleting(true);
+    setDeleteError("");
+    const { error } = await supabase.from("organizations").delete().eq("id", activeOrg.id);
+    if (error) {
+      setDeleteError(error.message);
+      setDeleting(false);
+      return;
+    }
     await refreshOrgs();
     router.push("/dashboard");
   }
@@ -362,8 +383,8 @@ export default function OrgSettingsPage() {
   return (
     <div className="animate-fade-in px-4 py-4 sm:px-6 lg:px-8">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-heading">Organization Settings</h2>
-        <p className="mt-0.5 text-sm text-muted">Manage your organization&apos;s details and members.</p>
+        <h2 className="text-lg font-semibold text-heading">Account Settings</h2>
+        <p className="mt-0.5 text-sm text-muted">Manage your account&apos;s details and members.</p>
       </div>
 
       {/* Nav tabs */}
@@ -386,7 +407,7 @@ export default function OrgSettingsPage() {
 
           <form onSubmit={handleSave}>
             <div className="rounded-xl border border-border bg-forge-surface/40 p-3">
-              <h3 className="mb-2 text-sm font-semibold text-heading">Organization Details</h3>
+              <h3 className="mb-2 text-sm font-semibold text-heading">Account Details</h3>
 
               {/* Name / Website */}
               <div className="grid grid-cols-2 gap-2 mb-2">
@@ -456,7 +477,7 @@ export default function OrgSettingsPage() {
 
               <div className="mt-3 flex items-center gap-3 border-t border-border pt-3">
                 <button type="submit" disabled={saving || !orgDetails.name.trim() || !isOrgDetailsDirty} className="forge-btn-primary text-[13px]">
-                  {saving ? "Saving..." : "Save Organization Details"}
+                  {saving ? "Saving..." : "Save Account Details"}
                 </button>
                 {saved && <span className="text-sm text-emerald-400">Saved</span>}
               </div>
@@ -469,7 +490,7 @@ export default function OrgSettingsPage() {
             <div className="rounded-xl border border-border bg-forge-surface/40 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-heading">Organization Member Roles</h3>
+                  <h3 className="text-sm font-semibold text-heading">Member Roles</h3>
                   <p className="mt-0.5 text-[12px] text-muted">Roles offered when inviting members and assigning project team slots.</p>
                 </div>
                 <button type="button" onClick={addRoleItem} className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-[12px] font-medium text-body transition-colors hover:bg-forge-surface/80">
@@ -509,10 +530,20 @@ export default function OrgSettingsPage() {
                 <p className="text-[12px] text-muted">This is your personal workspace and can&apos;t be deleted.</p>
               ) : (
                 <>
-                  <p className="mb-3 text-[12px] text-muted">Permanently remove all projects, proposals, and data in this organization.</p>
-                  <button onClick={handleDelete} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20">
-                    Delete Organization
-                  </button>
+                  <p className="mb-3 text-[12px] text-muted">Permanently remove all projects, proposals, and data in this team.</p>
+                  {activeOrg.subscription_status === "active" ? (
+                    <p className="text-[12px] text-amber-400">Cancel the active Pro subscription (use Manage Billing above) before this team can be deleted.</p>
+                  ) : memberCount !== null && memberCount > 1 ? (
+                    <p className="text-[12px] text-amber-400">
+                      Remove every other member, or transfer ownership to one of them, before this team can be deleted.{" "}
+                      <Link href="/org/members" className="underline underline-offset-2 hover:text-amber-300">Manage members</Link>
+                    </p>
+                  ) : (
+                    <button onClick={() => setConfirmingDelete(true)} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20">
+                      Delete Team
+                    </button>
+                  )}
+                  {deleteError && <p className="mt-2 text-[12px] text-red-400">{deleteError}</p>}
                 </>
               )}
             </div>
@@ -534,7 +565,7 @@ export default function OrgSettingsPage() {
                     </span>
                   </div>
                   <p className="mt-0.5 text-[12px] text-muted">
-                    {isPro ? "Your organization has an active Pro subscription — $20/month." : "Free plan — upgrade to unlock projects, design tools, and BOM generation."}
+                    {isPro ? "Your account has an active Pro subscription — $20/month." : "Free plan — upgrade to unlock projects, design tools, and BOM generation."}
                   </p>
                 </div>
                 <button
@@ -675,7 +706,7 @@ export default function OrgSettingsPage() {
             {/* Integrations */}
             <div className="rounded-xl border border-border bg-forge-surface/40 p-4">
               <h3 className="mb-0.5 text-sm font-semibold text-heading">Integrations</h3>
-              <p className="mb-4 text-[12px] text-muted">Connect third-party apps to sync data with your organization.</p>
+              <p className="mb-4 text-[12px] text-muted">Connect third-party apps to sync data with your account.</p>
 
               <div className="overflow-hidden rounded-lg border border-border">
                 <div className="grid grid-cols-[1fr_130px_110px] bg-forge-surface px-3 py-2">
@@ -727,6 +758,17 @@ export default function OrgSettingsPage() {
           </div>{/* end bottom row */}
         </div>{/* end right column */}
       </div>{/* end grid */}
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="Delete team"
+          message={<>Delete <span className="font-semibold text-heading">{activeOrg.name}</span>? This will permanently remove all projects, proposals, and data in this team. This cannot be undone.</>}
+          confirmLabel="Delete Team"
+          busy={deleting}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </div>
   );
 }

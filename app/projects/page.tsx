@@ -224,30 +224,34 @@ export default function ProjectsPage() {
             <option value="">All Stages</option>
             {Object.entries(PHASE_STYLES).map(([key, { label }]) => (<option key={key} value={key}>{label}</option>))}
           </select>
-          <select value={filterSales} onChange={(e) => setFilterSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Sales Executives</option>
-            {uniqueSales.map((s) => (<option key={s} value={s}>{s}</option>))}
-          </select>
-          <select value={filterPreSales} onChange={(e) => setFilterPreSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Pre Sales Engineers</option>
-            {uniquePreSales.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-          <select value={filterPostSales} onChange={(e) => setFilterPostSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Post Sales Engineers</option>
-            {uniquePostSales.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-          <select value={filterFieldEngineer} onChange={(e) => setFilterFieldEngineer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Field Engineers</option>
-            {uniqueFieldEngineers.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-          <select value={filterProgrammer} onChange={(e) => setFilterProgrammer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Programmers</option>
-            {uniqueProgrammers.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-          <select value={filterProjectManager} onChange={(e) => setFilterProjectManager(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
-            <option value="">All Project Managers</option>
-            {uniqueProjectManagers.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
+          {!activeOrg?.is_individual && (
+            <>
+              <select value={filterSales} onChange={(e) => setFilterSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Sales Executives</option>
+                {uniqueSales.map((s) => (<option key={s} value={s}>{s}</option>))}
+              </select>
+              <select value={filterPreSales} onChange={(e) => setFilterPreSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Pre Sales Engineers</option>
+                {uniquePreSales.map((n) => (<option key={n} value={n}>{n}</option>))}
+              </select>
+              <select value={filterPostSales} onChange={(e) => setFilterPostSales(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Post Sales Engineers</option>
+                {uniquePostSales.map((n) => (<option key={n} value={n}>{n}</option>))}
+              </select>
+              <select value={filterFieldEngineer} onChange={(e) => setFilterFieldEngineer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Field Engineers</option>
+                {uniqueFieldEngineers.map((n) => (<option key={n} value={n}>{n}</option>))}
+              </select>
+              <select value={filterProgrammer} onChange={(e) => setFilterProgrammer(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Programmers</option>
+                {uniqueProgrammers.map((n) => (<option key={n} value={n}>{n}</option>))}
+              </select>
+              <select value={filterProjectManager} onChange={(e) => setFilterProjectManager(e.target.value)} className="forge-input w-auto min-w-[160px] py-1.5 text-[12px]">
+                <option value="">All Project Managers</option>
+                {uniqueProjectManagers.map((n) => (<option key={n} value={n}>{n}</option>))}
+              </select>
+            </>
+          )}
           {hasActiveFilters && (
             <button onClick={() => { setFilterClient(""); setFilterStage(""); setFilterSales(""); setFilterPreSales(""); setFilterPostSales(""); setFilterFieldEngineer(""); setFilterProgrammer(""); setFilterProjectManager(""); }} className="text-xs font-medium text-blue-400 transition-colors hover:text-blue-300">
               Clear filters

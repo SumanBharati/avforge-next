@@ -822,6 +822,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
       })()}
 
       {/* ── Team Members ─────────────────────────────── */}
+      {!activeOrg?.is_individual && (
       <div className="mt-6 rounded-lg border border-border bg-forge-panel p-5">
         <h3 className="mb-4 text-[13px] font-bold uppercase tracking-wider text-heading">Team Members</h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
@@ -899,6 +900,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           })}
         </div>
       </div>
+      )}
 
       {/* Stage Change Confirmation Modal */}
       {phaseConfirm && (

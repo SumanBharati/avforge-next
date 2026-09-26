@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { User } from "@supabase/supabase-js";
@@ -21,8 +21,6 @@ function MoonIcon() {
 
 export default function Header() {
   const router = useRouter();
-  const pathname = usePathname();
-  const isPublicHome = pathname === "/";
   const { theme, toggle } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -70,7 +68,7 @@ export default function Header() {
     <header className="sticky top-0 z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-forge-panel px-4 sm:px-6 xl:px-8">
       <div className="flex min-w-0 items-center gap-3 xl:gap-5">
         <Link href="/" className="flex shrink-0 items-center transition-opacity hover:opacity-80" aria-label="AVGenix home"><BrandLogo /></Link>
-        {!isPublicHome && user && <><div className="h-8 w-px bg-border" /><div className="min-w-0"><OrgSwitcher /></div></>}
+        {user && <><div className="h-8 w-px bg-border" /><div className="min-w-0"><OrgSwitcher /></div></>}
       </div>
 
       <div className="flex items-center gap-2">
@@ -92,7 +90,7 @@ export default function Header() {
             <div className="absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-xl border border-border bg-forge-bg shadow-2xl">
               <div className="border-b border-border px-4 py-3"><div className="text-sm font-semibold text-body">{fullName}</div><div className="mt-0.5 truncate text-xs text-subtle">{user.email}</div></div>
               <Link href="/profile/settings" onClick={() => setDropdownOpen(false)} className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-muted transition-colors hover:bg-forge-surface/40 hover:text-body">My Settings</Link>
-              <Link href="/org/settings" onClick={() => setDropdownOpen(false)} className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-muted transition-colors hover:bg-forge-surface/40 hover:text-body">Manage Organization</Link>
+              <Link href="/org/settings" onClick={() => setDropdownOpen(false)} className="flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-muted transition-colors hover:bg-forge-surface/40 hover:text-body">Account Settings</Link>
               <button onClick={handleLogout} className="flex w-full items-center gap-2.5 border-t border-border px-4 py-2.5 text-[13px] text-red-400 transition-colors hover:bg-red-500/10">Logout</button>
             </div>
           )}

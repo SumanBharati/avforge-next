@@ -56,7 +56,7 @@ export default function NewOrgPage() {
       .single();
 
     if (insertErr || !org) {
-      setError(insertErr?.message || "Failed to create organization");
+      setError(insertErr?.message || "Failed to create team");
       setLoading(false);
       return;
     }
@@ -81,9 +81,9 @@ export default function NewOrgPage() {
   return (
     <div className="flex min-h-[calc(100vh-72px)] items-center justify-center px-4">
       <div className="w-full max-w-[440px] animate-fade-in rounded-xl border border-border bg-forge-surface p-8">
-        <h2 className="mb-2 text-xl font-semibold text-heading">Create Organization</h2>
+        <h2 className="mb-2 text-xl font-semibold text-heading">Create Team</h2>
         <p className="mb-6 text-sm text-muted">
-          Organizations let your team collaborate on projects together.
+          Teams let you collaborate on projects together.
         </p>
 
         {!emailVerified && (
@@ -96,7 +96,7 @@ export default function NewOrgPage() {
               <div className="flex-1">
                 <p className="text-[13px] font-semibold text-amber-400">Email verification required</p>
                 <p className="mt-0.5 text-[12px] text-amber-400/80">
-                  Please verify your email address before creating an organization. Check your inbox at <span className="font-medium">{userEmail}</span>.
+                  Please verify your email address before creating a team. Check your inbox at <span className="font-medium">{userEmail}</span>.
                 </p>
                 {resendSent ? (
                   <p className="mt-2 text-[12px] font-medium text-emerald-400">Verification email sent — check your inbox.</p>
@@ -124,7 +124,7 @@ export default function NewOrgPage() {
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted">
-              Organization Name <span className="text-red-400">*</span>
+              Team Name <span className="text-red-400">*</span>
             </label>
             <input
               ref={nameRef}
@@ -151,7 +151,7 @@ export default function NewOrgPage() {
               Cancel
             </button>
             <button type="submit" disabled={loading || !name.trim() || !emailVerified} className="forge-btn-primary text-[13px]">
-              {loading ? "Creating..." : "Create Organization"}
+              {loading ? "Creating..." : "Create Team"}
             </button>
           </div>
         </form>

@@ -48,6 +48,9 @@ export default function OrgMembersPage() {
   const [inviteError, setInviteError] = useState("");
   const [inviting, setInviting] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<Member | null>(null);
+  const [pendingTransfer, setPendingTransfer] = useState<Member | null>(null);
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState("");
 
   const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
 
@@ -175,6 +178,21 @@ export default function OrgMembersPage() {
     await loadMembers();
   }
 
+  async function handleTransferOwnership(member: Member) {
+    if (!activeOrg) return;
+    setTransferError("");
+    setTransferring(true);
+    const { error } = await supabase.rpc("transfer_org_ownership", {
+      p_org_id: activeOrg.id,
+      p_new_superadmin_user_id: member.user_id,
+    });
+    setTransferring(false);
+    if (error) { setTransferError(error.message); return; }
+    setPendingTransfer(null);
+    await loadMembers();
+    await refreshOrgs();
+  }
+
   if (!activeOrg) return <div className="px-8 py-20 text-center text-sm text-subtle">Loading...</div>;
 
   const isOwnerOrAdmin = activeOrg.role === "superadmin" || activeOrg.role === "admin";
@@ -182,8 +200,8 @@ export default function OrgMembersPage() {
   return (
     <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-heading">Organization Settings</h2>
-        <p className="mt-1 text-sm text-muted">Manage your organization&apos;s details and members.</p>
+        <h2 className="text-lg font-semibold text-heading">Account Settings</h2>
+        <p className="mt-1 text-sm text-muted">Manage your account&apos;s details and members.</p>
       </div>
 
       {/* Nav tabs */}
@@ -287,7 +305,7 @@ export default function OrgMembersPage() {
                   />
                   <div>
                     <div className="text-[13px] font-semibold text-heading">Admin Privileges</div>
-                    <div className="text-[12px] text-muted">Add and manage team members. Set company preferences.</div>
+                    <div className="text-[12px] text-muted">Add and manage members. Set company preferences.</div>
                   </div>
                 </label>
               </div>
@@ -350,12 +368,20 @@ export default function OrgMembersPage() {
                 {isOwnerOrAdmin && member.role !== "superadmin" && (
                   <div className="flex items-center gap-1">
                     {activeOrg.role === "superadmin" && (
-                      <button
-                        onClick={() => handleChangeRole(member.id, member.role === "admin" ? "member" : "admin")}
-                        className="rounded border border-border bg-forge-surface px-2 py-1 text-[11px] text-body transition-colors hover:bg-forge-card-hover"
-                      >
-                        {member.role === "admin" ? "Revoke Admin" : "Grant Admin"}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleChangeRole(member.id, member.role === "admin" ? "member" : "admin")}
+                          className="rounded border border-border bg-forge-surface px-2 py-1 text-[11px] text-body transition-colors hover:bg-forge-card-hover"
+                        >
+                          {member.role === "admin" ? "Revoke Admin" : "Grant Admin"}
+                        </button>
+                        <button
+                          onClick={() => { setTransferError(""); setPendingTransfer(member); }}
+                          className="rounded border border-border bg-forge-surface px-2 py-1 text-[11px] text-body transition-colors hover:bg-forge-card-hover"
+                        >
+                          Make Superadmin
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => setPendingRemove(member)}
@@ -410,10 +436,21 @@ export default function OrgMembersPage() {
         )}
       </div>
 
+      {pendingTransfer && (
+        <ConfirmDialog
+          title="Make superadmin"
+          message={<>Make <span className="font-semibold text-heading">{pendingTransfer.full_name || pendingTransfer.email || "this member"}</span> the new superadmin of this team? You&apos;ll be demoted to Admin.{transferError && <span className="mt-2 block text-red-400">{transferError}</span>}</>}
+          confirmLabel="Make Superadmin"
+          busy={transferring}
+          onCancel={() => setPendingTransfer(null)}
+          onConfirm={() => handleTransferOwnership(pendingTransfer)}
+        />
+      )}
+
       {pendingRemove && (
         <ConfirmDialog
           title="Remove member"
-          message={<>Remove <span className="font-semibold text-heading">{pendingRemove.full_name || pendingRemove.email || "this member"}</span> from the organization?</>}
+          message={<>Remove <span className="font-semibold text-heading">{pendingRemove.full_name || pendingRemove.email || "this member"}</span> from the account?</>}
           confirmLabel="Remove"
           onCancel={() => setPendingRemove(null)}
           onConfirm={() => {
