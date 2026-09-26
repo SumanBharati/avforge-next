@@ -67,43 +67,12 @@ export default function OrgMembersPage() {
   async function loadMembers() {
     if (!activeOrg) return;
 
-    // Fetch members with user details
-    const { data: memberData } = await supabase
-      .from("organization_members")
-      .select("id, user_id, role, department, joined_at")
-      .eq("org_id", activeOrg.id)
-      .order("joined_at");
-
-    if (memberData) {
-      // Fetch user details for each member
-      const userIds = memberData.map((m) => m.user_id);
-      const membersWithDetails: Member[] = [];
-
-      for (const m of memberData) {
-        // Use admin API or just show user_id - for now we'll get from auth
-        membersWithDetails.push({
-          ...m,
-          department: m.department || "Sales",
-          email: "",
-          full_name: "",
-        });
-      }
-
-      // Get current user to at least populate their info
-      const { data: { user } } = await supabase.auth.getUser();
-      const finalMembers = membersWithDetails.map((m) => {
-        if (m.user_id === user?.id) {
-          return {
-            ...m,
-            email: user.email || "",
-            full_name: user.user_metadata?.full_name || "",
-          };
-        }
-        return m;
-      });
-
-      setMembers(finalMembers);
-    }
+    const { data: memberData, error: memberErr } = await supabase.rpc("get_org_member_profiles", { p_org_id: activeOrg.id });
+    if (memberErr) console.error("Failed to fetch members:", memberErr);
+    const sorted = (memberData || [])
+      .map((m: Member) => ({ ...m, department: m.department || "Sales" }))
+      .sort((a: Member, b: Member) => a.joined_at.localeCompare(b.joined_at));
+    setMembers(sorted);
 
     // Fetch pending invites
     const { data: inviteData, error: inviteErr } = await supabase
