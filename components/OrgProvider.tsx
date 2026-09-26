@@ -28,6 +28,7 @@ interface OrgContextValue {
   refreshOrgs: () => Promise<void>;
   loading: boolean;
   isPro: boolean;
+  hasAccessOverride: boolean;
   user: User | null;
   accessStatus: ProAccessStatus;
   trialEndsAt: string | null;
@@ -44,6 +45,7 @@ const OrgContext = createContext<OrgContextValue>({
   refreshOrgs: async () => {},
   loading: true,
   isPro: false,
+  hasAccessOverride: false,
   user: null,
   accessStatus: "loading",
   trialEndsAt: null,
@@ -267,7 +269,7 @@ export default function OrgProvider({ children }: { children: React.ReactNode })
   }, [activeOrg?.trial_ends_at, paidAccess]);
 
   return (
-    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading, isPro, user, accessStatus, trialEndsAt: activeOrg?.trial_ends_at ?? null, orgLoadError, upgradeModalOpen, openUpgradeModal, closeUpgradeModal }}>
+    <OrgContext.Provider value={{ activeOrg, orgs, switchOrg, refreshOrgs: fetchOrgs, loading, isPro, hasAccessOverride, user, accessStatus, trialEndsAt: activeOrg?.trial_ends_at ?? null, orgLoadError, upgradeModalOpen, openUpgradeModal, closeUpgradeModal }}>
       {children}
       {upgradeModalOpen && <UpgradeModal onClose={closeUpgradeModal} />}
     </OrgContext.Provider>

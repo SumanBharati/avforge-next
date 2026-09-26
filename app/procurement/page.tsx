@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
 import VendorManagerModal from "@/components/VendorManagerModal";
+import ComingSoon from "@/components/ComingSoon";
 import {
   fmt$, fmtDate, statusColor, statusLabel, todayISO,
   procurementCompletionPct, computeReadiness, READINESS_LABEL, READINESS_COLOR,
@@ -14,7 +15,7 @@ import {
 interface ProjectLite { id: string; name: string; job_number: string; client_name: string; }
 
 export default function ProcurementDashboardPage() {
-  const { activeOrg, loading: orgLoading } = useOrg();
+  const { activeOrg, loading: orgLoading, hasAccessOverride } = useOrg();
   const [orders, setOrders] = useState<ReleasedOrder[]>([]);
   const [projects, setProjects] = useState<Record<string, ProjectLite>>({});
   const [items, setItems] = useState<ProcurementItem[]>([]);
@@ -148,6 +149,30 @@ export default function ProcurementDashboardPage() {
 
   if (orgLoading || loading) {
     return <div className="animate-fade-in px-4 py-20 text-center text-sm text-subtle sm:px-6 lg:px-8">Loading...</div>;
+  }
+
+  if (!hasAccessOverride) {
+    return (
+      <div className="animate-fade-in px-4 py-6 sm:px-6 lg:px-8">
+        <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400">
+            <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+            <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
+          </svg>
+          Order Management
+        </h1>
+        <ComingSoon
+          color="amber"
+          icon={
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
+            </svg>
+          }
+          description="Purchase orders, vendor coordination, and receiving tools are on the way."
+        />
+      </div>
+    );
   }
 
   return (

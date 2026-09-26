@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
+import ComingSoon from "@/components/ComingSoon";
 import { ROLE_OPTIONS, PERSON_COLORS, loadPMStore, savePMStore, type Person } from "@/lib/pm-store";
 import { type RemovedChangeOrderItem } from "@/lib/proposal-pricing";
 
@@ -199,7 +200,7 @@ const MetricCard = ({ label, value, sub, color = "#f97316" }: { label: string; v
 
 /* ═══════════════════════════════════════════════════════════ */
 export default function ProjectManagementPage({ params }: { params: { id: string } }) {
-  const { activeOrg } = useOrg();
+  const { activeOrg, hasAccessOverride } = useOrg();
   const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
   const [project, setProject] = useState<Project | null>(null);
   const [pm, setPm] = useState<PMData>(emptyPM);
@@ -461,6 +462,43 @@ export default function ProjectManagementPage({ params }: { params: { id: string
           Back to Projects
         </Link>
         <div className="mt-20 text-center text-sm text-subtle">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!hasAccessOverride) {
+    return (
+      <div className="animate-fade-in">
+        <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
+          <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            {project.name}
+            {project.job_number && <span className="text-subtle"> · #{project.job_number}</span>}
+          </Link>
+          <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-violet-400">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+            </svg>
+            Project Management
+          </h1>
+        </div>
+        <ComingSoon
+          color="violet"
+          icon={
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+            </svg>
+          }
+          description="Scheduling, coordination, and on-site management tools are on the way."
+        />
       </div>
     );
   }

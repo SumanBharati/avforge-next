@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useOrg } from "@/components/OrgProvider";
+import ComingSoon from "@/components/ComingSoon";
 import { computeProposalTotals } from "@/lib/proposal-pricing";
 import { releaseOrder, fmt$ } from "@/lib/procurement";
 
@@ -24,7 +25,7 @@ const PAYMENT_TERMS = ["Net 15", "Net 30", "Net 45", "Net 60", "Due on Receipt",
 
 export default function ProjectProcurementGatePage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const { activeOrg } = useOrg();
+  const { activeOrg, hasAccessOverride } = useOrg();
   const [project, setProject] = useState<Project | null>(null);
   const [proposal, setProposal] = useState<ProposalData | null>(null);
   const [proposalRaw, setProposalRaw] = useState<unknown>(null);
@@ -97,6 +98,37 @@ export default function ProjectProcurementGatePage({ params }: { params: { id: s
           Back to Project
         </Link>
         <div className="mt-20 text-center text-sm text-subtle">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!hasAccessOverride) {
+    return (
+      <div className="animate-fade-in">
+        <div className="border-b border-border bg-forge-panel/50 px-4 py-4 sm:px-6 lg:px-8">
+          <Link href={`/projects/${params.id}`} className="mb-2 inline-flex items-center gap-1.5 text-xs text-subtle hover:text-secondary">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            {project.name}
+            {project.job_number && <span className="text-subtle"> · #{project.job_number}</span>}
+          </Link>
+          <h1 className="flex items-center gap-2.5 text-xl font-bold text-heading">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400">
+              <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
+            </svg>
+            Project Coordination
+          </h1>
+        </div>
+        <ComingSoon
+          color="amber"
+          icon={
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
+            </svg>
+          }
+          description="Equipment ordering, tracking, and vendor coordination tools are on the way."
+        />
       </div>
     );
   }

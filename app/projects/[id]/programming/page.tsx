@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import ComingSoon from "@/components/ComingSoon";
 
 interface Project {
   id: string;
@@ -40,8 +41,9 @@ export default function ProgrammingPage({ params }: { params: { id: string } }) 
         </h1>
       </div>
 
-      <div className="flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ minHeight: "calc(100vh - 124px - 85px)" }}>
-        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-400">
+      <ComingSoon
+        color="violet"
+        icon={
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="3" width="20" height="14" rx="2" />
             <line x1="8" y1="21" x2="16" y2="21" />
@@ -49,14 +51,9 @@ export default function ProgrammingPage({ params }: { params: { id: string } }) 
             <polyline points="7 8 10 11 7 14" />
             <line x1="12" y1="14" x2="17" y2="14" />
           </svg>
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-heading">Coming Soon</h2>
-          <p className="mt-1.5 max-w-sm text-sm text-subtle">
-            System programming, commissioning, and integration testing tools are on the way.
-          </p>
-        </div>
-      </div>
+        }
+        description="System programming, commissioning, and integration testing tools are on the way."
+      />
     </div>
   );
 }

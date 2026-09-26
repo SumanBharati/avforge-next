@@ -303,8 +303,8 @@ export default function DashboardPage() {
                 public/animated-icons/calculator.json exists */}
             <AnimatedIcon
               src="/animated-icons/calculator.json"
-              fallbackSrc="/3DCalculator.svg"
-              className="pointer-events-none absolute right-4 w-[86px]"
+              fallbackSrc="/3DCalculator.png"
+              className="pointer-events-none absolute right-4 w-[105px]"
               style={{ bottom: "12px" }}
             />
           </div>
@@ -360,8 +360,8 @@ export default function DashboardPage() {
                 public/animated-icons/news-podcast.json exists */}
             <AnimatedIcon
               src="/animated-icons/news-podcast.json"
-              fallbackSrc="/3DNews.svg"
-              className="pointer-events-none absolute right-0 w-[150px]"
+              fallbackSrc="/3DNews.png"
+              className="pointer-events-none absolute right-0 w-[128px]"
               style={{ bottom: "12px" }}
             />
           </div>
