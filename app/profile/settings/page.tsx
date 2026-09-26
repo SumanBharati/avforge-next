@@ -3,8 +3,10 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
 import ProfileSettingsSkeleton from "@/components/skeletons/ProfileSettingsSkeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
@@ -36,6 +38,7 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 const iconBg = "flex h-12 w-12 items-center justify-center rounded-2xl";
 
 export default function ProfileSettingsPage() {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -63,6 +66,11 @@ export default function ProfileSettingsPage() {
   const [mfaMsg, setMfaMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [enrollFactorId, setEnrollFactorId] = useState<string | null>(null);
+
+  const [confirmingDeleteAccount, setConfirmingDeleteAccount] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState("");
+  const [deleteAccountBlockers, setDeleteAccountBlockers] = useState<string[]>([]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -173,6 +181,27 @@ export default function ProfileSettingsPage() {
     setMfaEnabled(false); setMfaFactorId(null);
     setMfaMsg({ type: "success", text: "Two-factor authentication disabled." });
     setMfaLoading(false);
+  }
+
+  async function handleDeleteAccount() {
+    setDeletingAccount(true);
+    setDeleteAccountError("");
+    setDeleteAccountBlockers([]);
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch("/api/account/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setDeleteAccountError(data.error || "Something went wrong. Please try again.");
+      setDeleteAccountBlockers(data.blockers || []);
+      setDeletingAccount(false);
+      setConfirmingDeleteAccount(false);
+      return;
+    }
+    await supabase.auth.signOut();
+    router.push("/login");
   }
 
   if (!user) return <ProfileSettingsSkeleton />;
@@ -459,7 +488,57 @@ export default function ProfileSettingsPage() {
           </div>
         </div>
 
+        {/* ── Danger Zone ── */}
+        <div className="col-span-2 rounded-2xl border border-red-500/20 bg-red-500/5 p-6">
+          <div className="mb-4 flex items-center gap-4">
+            <div className={`${iconBg} bg-red-500/15`}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div>
+              <div className="text-[15px] font-bold text-red-400">Danger Zone</div>
+              <div className="text-[12px] text-muted">Permanently delete your AVGenix account.</div>
+            </div>
+          </div>
+
+          <p className="mb-3 text-[12px] text-muted">
+            This disables sign-in and removes your personal information. Historical records tied to teams you belong to (projects, procurement records, invites you sent) are kept intact for those teams.
+          </p>
+
+          {deleteAccountError && (
+            <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-400">
+              <p>{deleteAccountError}</p>
+              {deleteAccountBlockers.length > 0 && (
+                <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                  {deleteAccountBlockers.map((b, i) => <li key={i}>{b}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => { setDeleteAccountError(""); setDeleteAccountBlockers([]); setConfirmingDeleteAccount(true); }}
+            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20"
+          >
+            Delete Account
+          </button>
+        </div>
+
       </div>
+
+      {confirmingDeleteAccount && (
+        <ConfirmDialog
+          title="Delete your AVGenix account"
+          message="This permanently disables sign-in and removes your personal information. This cannot be undone."
+          confirmLabel="Delete Account"
+          busy={deletingAccount}
+          onCancel={() => setConfirmingDeleteAccount(false)}
+          onConfirm={handleDeleteAccount}
+        />
+      )}
     </div>
   );
 }
