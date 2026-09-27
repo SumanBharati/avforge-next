@@ -29,7 +29,7 @@ export default function NewOrgPage() {
 
   async function handleResend() {
     setResendLoading(true);
-    await supabase.auth.resend({ type: "signup", email: userEmail });
+    await supabase.auth.resend({ type: "signup", email: userEmail, options: { emailRedirectTo: `${window.location.origin}/login?next=%2Forg%2Fnew` } });
     setResendLoading(false);
     setResendSent(true);
   }

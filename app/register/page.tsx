@@ -182,7 +182,9 @@ export default function RegisterPage() {
                     type="button"
                     disabled={resendDone}
                     onClick={async () => {
-                      const { error: resendErr } = await supabase.auth.resend({ type: "signup", email });
+                      const requestedNext = new URLSearchParams(window.location.search).get("next");
+                      const nextPath = requestedNext?.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/welcome";
+                      const { error: resendErr } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: `${window.location.origin}/login?next=${encodeURIComponent(nextPath)}` } });
                       if (resendErr) { setError(resendErr.message); return; }
                       setResendDone(true);
                     }}

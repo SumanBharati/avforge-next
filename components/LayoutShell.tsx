@@ -7,7 +7,7 @@ import AIChatWidget from "./AIChatWidget";
 import PendingInvitesBanner from "./PendingInvitesBanner";
 import { useOrg } from "./OrgProvider";
 
-const AUTH_ROUTES = ["/login", "/register", "/org/invite", "/welcome"];
+const AUTH_ROUTES = ["/login", "/register", "/org/invite", "/welcome", "/auth/confirm"];
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

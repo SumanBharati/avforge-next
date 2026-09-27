@@ -1,5 +1,5 @@
 /**
- * AVForge Document Ingestion Script
+ * AVGenix Document Ingestion Script
  *
  * Usage:
  *   npx tsx scripts/ingest-docs.ts <path-to-folder-with-pdfs>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AVForge — AV Engineer Toolkit</title>
+  <title>AVGenix — AV Engineer Toolkit</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/><text x='50' y='68' text-anchor='middle' font-size='50' font-weight='bold' fill='white'>▲</text></svg>" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -4102,7 +4102,7 @@
     // ─── AI ASSISTANT ───────────────────────────────────────────
 
     function AIAssistant() {
-      const [messages, setMessages] = useState([{role:"assistant",content:"I'm AVForge AI \u2014 your AV design assistant. Ask me about system design, troubleshooting, equipment selection, or acoustic calculations.\n\nTry asking:\n\u2022 \"Design a 10-person conference room with Extron\"\n\u2022 \"What\u2019s the difference between Dante and AES67?\"\n\u2022 \"How do I prevent audio feedback?\"\n\u2022 \"Recommend a DSP for a 20-person boardroom\""}]);
+      const [messages, setMessages] = useState([{role:"assistant",content:"I'm AVGenix AI \u2014 your AV design assistant. Ask me about system design, troubleshooting, equipment selection, or acoustic calculations.\n\nTry asking:\n\u2022 \"Design a 10-person conference room with Extron\"\n\u2022 \"What\u2019s the difference between Dante and AES67?\"\n\u2022 \"How do I prevent audio feedback?\"\n\u2022 \"Recommend a DSP for a 20-person boardroom\""}]);
       const [input, setInput] = useState("");
       const [loading, setLoading] = useState(false);
       const messagesRef = useRef(null);
@@ -4114,7 +4114,7 @@
         try {
           const apiMessages=[...messages.filter((m,idx)=>!(m.role==="assistant"&&idx===0)),{role:"user",content:userMsg}];
           if(apiMessages[0]?.role!=="user") apiMessages.shift();
-          const response = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:"You are AVForge AI, an expert AV engineering assistant. You have deep knowledge of: Q-SYS, Crestron, Extron (DTP3, CrossPoint, NAV, DMP, IPCP Pro, ProDSP, Vector 4K, SIS, ShareLink Pro, XPA/NetPA Ultra, GlobalViewer), Biamp (Tesira, Devio, Parle), Shure (MXA920, MXA710, P300, ANIUSB-MATRIX, Axient Digital), Sennheiser (TCC2, TeamConnect), Dante/AES67/HDBaseT/SDVoE/NDI, room acoustics, AVIXA DISCAS display calculations, speaker coverage EPR, PAG/NAG, 70V audio, conduit fill, PoE budgeting, rack design. Give concise, technically precise answers. Use formulas and specific product recommendations when relevant. Format responses clearly.",messages:apiMessages})});
+          const response = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:"You are AVGenix AI, an expert AV engineering assistant. You have deep knowledge of: Q-SYS, Crestron, Extron (DTP3, CrossPoint, NAV, DMP, IPCP Pro, ProDSP, Vector 4K, SIS, ShareLink Pro, XPA/NetPA Ultra, GlobalViewer), Biamp (Tesira, Devio, Parle), Shure (MXA920, MXA710, P300, ANIUSB-MATRIX, Axient Digital), Sennheiser (TCC2, TeamConnect), Dante/AES67/HDBaseT/SDVoE/NDI, room acoustics, AVIXA DISCAS display calculations, speaker coverage EPR, PAG/NAG, 70V audio, conduit fill, PoE budgeting, rack design. Give concise, technically precise answers. Use formulas and specific product recommendations when relevant. Format responses clearly.",messages:apiMessages})});
           const data = await response.json();
           const text = data.content?.map(i=>i.text||"").join("\n")||"Sorry, I couldn't process that request.";
           setMessages(prev=>[...prev,{role:"assistant",content:text}]);
@@ -4152,7 +4152,7 @@
 
     // ─── MAIN APP ─────────────────────────────────────────────────────
 
-    function AVForge() {
+    function AVGenix() {
       const [section, setSection] = useState("dashboard");
       const [activeCalc, setActiveCalc] = useState(null);
       const [activeRef, setActiveRef] = useState(null);
@@ -4341,7 +4341,7 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<AVForge />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<AVGenix />);
   </script>
 </body>
 </html>

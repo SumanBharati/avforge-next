@@ -1,8 +1,8 @@
 # AV Buddy Competitive Teardown — Video Reference Section
 
 **Purpose:** Competitive analysis of the AV Buddy mobile app (KOEN Digital) Video reference
-section, for the AVForge web toolkit. Documents their information architecture, UX patterns,
-content coverage, and confirmed content errors, plus build recommendations for AVForge.
+section, for the AVGenix web toolkit. Documents their information architecture, UX patterns,
+content coverage, and confirmed content errors, plus build recommendations for AVGenix.
 
 **Scope of this document:** Video section only (connector reference + resolutions).
 Audio, Calculators, Tools, and Glossary sections are documented separately.
@@ -10,7 +10,7 @@ Audio, Calculators, Tools, and Glossary sections are documented separately.
 **Source material:** 52 screenshots captured 2026-07, stored in
 `docs/competitive/av-buddy/screenshots/`. See the Screenshot Index below for the
 file-to-screen mapping. All app copy referenced here is paraphrased; do not copy
-AV Buddy's prose, diagrams, or UI layouts into AVForge — build original implementations
+AV Buddy's prose, diagrams, or UI layouts into AVGenix — build original implementations
 of the underlying (public, factual) technical data.
 
 ---
@@ -77,7 +77,7 @@ Every connector detail page follows one template:
 - No search anywhere. Everything is category → connector → tab drilling.
 - Long pinout lists scroll under a fixed header render that consumes ~45% of the screen;
   the pin-grid diagram scrolls away just when you need it against the list.
-- No deep-linking or sharing (inherent app limitation — web advantage for AVForge).
+- No deep-linking or sharing (inherent app limitation — web advantage for AVGenix).
 - Tab labels sometimes duplicate ("F-Connector / F-Connector", "Display Port / Display Port"),
   relying only on the icon to distinguish overview from pinout.
 
@@ -98,7 +98,7 @@ Every connector detail page follows one template:
 | Summary lists | Analog (8) / Digital (6) grids | — | — | SCART appears with no detail page |
 | Resolutions | Table QQVGA–8K, H/V/aspect/Mpx | — | — | Contains data errors (see §4) |
 
-### Missing for 2026 (gap = AVForge opportunity)
+### Missing for 2026 (gap = AVGenix opportunity)
 - **USB-C / DP Alt Mode** — the most-asked connector topic in current AV; absent entirely.
 - **HDBaseT / Cat6A termination**, shielded RJ45 practice for AV-over-IP.
 - **Fiber:** LC/SC, SFP/SFP+, single-mode vs multimode, AOC.
@@ -167,7 +167,7 @@ assignments consistent with the spec; strip-length tables plausible and dual-uni
 
 ---
 
-## 6. AVForge Build Spec — Signal Bandwidth Calculator (replaces their static version tables)
+## 6. AVGenix Build Spec — Signal Bandwidth Calculator (replaces their static version tables)
 
 Their best idea (DP versions matrix, IMG_2152) executed as a static, outdated table.
 Build it as a calculator:
@@ -183,16 +183,16 @@ chroma (4:4:4 / 4:2:2 / 4:2:0), DSC toggle.
   optionally HDBaseT class limits.
 
 **Output:** pass/fail per transport with headroom %, DSC-required flags, and the
-formula shown (AVForge differentiator: always show the math).
+formula shown (AVGenix differentiator: always show the math).
 
 **Data-integrity rule:** every derived column (aspect, Mpx, bandwidth) computed from
-base values at render time. No hand-typed derived data anywhere in AVForge.
+base values at render time. No hand-typed derived data anywhere in AVGenix.
 
 ---
 
 ## 7. Resolution Reference — corrected seed data
 
-Use as the seed list for AVForge's resolutions module (aspect and Mpx to be
+Use as the seed list for AVGenix's resolutions module (aspect and Mpx to be
 computed at render; values below are for validation only).
 
 | Name | H | V | Aspect | Mpx |
@@ -227,4 +227,4 @@ computed at render; values below are for validation only).
   (separate docs: `audio-teardown.md`, `calculators-teardown.md`, ...).
 - HDMI Versions table screen not yet captured (Versions button on IMG_2135).
 - SCART appears in the analog summary grid with no detail page — confirm no page exists.
-- Feature matrix (AV Buddy vs AVForge roadmap) to be compiled after all sections captured.
+- Feature matrix (AV Buddy vs AVGenix roadmap) to be compiled after all sections captured.
