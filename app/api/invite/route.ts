@@ -20,6 +20,8 @@ function buildInviteEmail(p: { inviterName: string; inviterEmail: string; teamNa
   };
 
   // Table layout + inline styles: the only thing Gmail and Outlook render reliably.
+  // supabase/templates/*.html (confirm signup, reset password, change email)
+  // copy this layout; keep them in step when changing the design.
   const html = `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f2fb;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f2fb;padding:32px 12px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">

@@ -15,6 +15,19 @@ that link points at the *.supabase.co project domain, and a password-reset
 email whose link domain differs from the sender's is what Gmail flags as
 phishing.
 
+## Team invitation email
+
+The team invitation email is not a Supabase template. `app/api/invite/route.ts`
+builds it (`buildInviteEmail`) and sends it through Brevo, because a team
+invite must also reach people who already have an account, and Supabase's
+"Invite user" (`inviteUserByEmail`) only works for new users and creates the
+account before the invite is accepted. Leave Supabase's "Invite user"
+template alone; the app never sends it.
+
+These templates copy the invitation email's layout (header, logo, heading,
+purple button, "Button not working?" link, grey footer). When you change the
+design in one, change it in the other three too.
+
 ## Testing locally
 
 Links in real emails always use the Site URL (https://avgenix.com). To test

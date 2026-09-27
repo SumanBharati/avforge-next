@@ -11,6 +11,7 @@ import { Scheduler } from "@/components/Scheduler";
 import { getRecentTools } from "@/lib/recentTools";
 import DashboardPageSkeleton from "@/components/DashboardPageSkeleton";
 import AnimatedIcon from "@/components/AnimatedIcon";
+import AvNewsList from "@/components/AvNewsList";
 import ConduitIcon from "@/components/ConduitIcon";
 import Rj45Icon from "@/components/Rj45Icon";
 import TwoWayArrowsIcon from "@/components/TwoWayArrowsIcon";
@@ -47,13 +48,6 @@ const allTools: { name: string; icon: React.ReactNode; href: string }[] = [
   { name: "Unit Converter",   icon: "🔄", href: "/calculators/unit-converter" },
   { name: "Formula Sheet",    icon: <FormulaSheetIcon size={16} />, href: "/calculators/standards" },
   { name: "PoE Device Database", icon: "📦", href: "/calculators/poe-database" },
-];
-
-const newsItems = [
-  "Hadestown AV Upgrade Unveiled",
-  "Shure's New Microphones Debut",
-  "Warner Announces SMPTE Partnership",
-  "IEC 62368-1:2024 Latest Changes",
 ];
 
 export default function DashboardPage() {
@@ -336,15 +330,8 @@ export default function DashboardPage() {
                   <path d="M6 3L11 8L6 13" stroke="var(--infocard-chevron)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-              <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Recently updated</p>
-              <div className="flex flex-col gap-2">
-                {newsItems.map((title, i) => (
-                  <div key={i} className="flex items-start gap-2.5">
-                    <div className="mt-[5px] h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: "#1ACAE6" }} />
-                    <span className="text-[13px] leading-snug" style={{ color: "var(--infocard-item)" }}>{title}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Latest from the AV industry</p>
+              <AvNewsList />
             </div>
 
             {/* Bottom wave */}
