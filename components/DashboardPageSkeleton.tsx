@@ -1,12 +1,12 @@
 import Shimmer from "./Shimmer";
 
 const CARD_STYLE = {
-  background: "#ffffff",
-  borderTop: "1.5px solid #e6def9",
-  borderRight: "1.5px solid #e6def9",
-  borderBottom: "1.5px solid #d8ccf6",
-  borderLeft: "1.5px solid #d8ccf6",
-  boxShadow: "0 4px 24px rgba(124,58,237,0.08)",
+  background: "var(--infocard-bg)",
+  borderTop: "1.5px solid var(--infocard-border-a)",
+  borderRight: "1.5px solid var(--infocard-border-a)",
+  borderBottom: "1.5px solid var(--infocard-border-b)",
+  borderLeft: "1.5px solid var(--infocard-border-b)",
+  boxShadow: "var(--infocard-shadow)",
 };
 
 const INFO_ROW_WIDTHS  = [72, 85, 55, 78, 62];
@@ -23,15 +23,15 @@ export default function DashboardPageSkeleton() {
           <div key={i} className="relative flex min-h-[200px] flex-col overflow-hidden rounded-2xl p-5" style={CARD_STYLE}>
             {/* Card header */}
             <div className="mb-3 flex items-center gap-2.5">
-              <Shimmer light className="h-9 w-9 rounded-xl" />
-              <Shimmer light className="h-4 w-28" />
+              <Shimmer className="h-9 w-9 rounded-xl" />
+              <Shimmer className="h-4 w-28" />
             </div>
             {/* Sub-label */}
-            <Shimmer light className="mb-2.5 h-3 w-24" />
+            <Shimmer className="mb-2.5 h-3 w-24" />
             {/* Content rows */}
             <div className="flex flex-col gap-1.5">
               {INFO_ROW_WIDTHS.map((w, j) => (
-                <Shimmer key={j} light className="h-5 rounded-md" style={{ width: `${w}%` }} />
+                <Shimmer key={j} className="h-5 rounded-md" style={{ width: `${w}%` }} />
               ))}
             </div>
           </div>
