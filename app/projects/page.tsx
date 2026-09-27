@@ -54,19 +54,29 @@ export default function ProjectsPage() {
   const [filterProjectManager, setFilterProjectManager] = useState("");
   const [projectMembers, setProjectMembers] = useState<{ project_id: string; role: string; full_name: string }[]>([]);
 
+  // The workspace the latest load was for; a slower response for a workspace
+  // the user has already switched away from is dropped instead of shown.
+  const loadingOrgId = useRef<string | null>(null);
+
   useEffect(() => {
     if (orgLoading) return;
     if (!activeOrg) { setLoading(false); return; }
+    setProjects([]);
+    setProjectMembers([]);
+    setLoading(true);
     loadProjects();
   }, [activeOrg?.id, orgLoading]);
 
   async function loadProjects() {
     if (!activeOrg) return;
+    const orgId = activeOrg.id;
+    loadingOrgId.current = orgId;
     const { data } = await supabase
       .from("projects")
       .select("*")
-      .eq("org_id", activeOrg.id)
+      .eq("org_id", orgId)
       .order("created_at", { ascending: false });
+    if (loadingOrgId.current !== orgId) return;
     if (data) setProjects(data);
     setLoading(false);
 
@@ -75,6 +85,7 @@ export default function ProjectsPage() {
         .from("project_members")
         .select("project_id, role, full_name")
         .in("project_id", data.map((p) => p.id));
+      if (loadingOrgId.current !== orgId) return;
       if (members) setProjectMembers(members);
     }
   }
