@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useOrg } from "./OrgProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -16,6 +17,7 @@ const BENEFITS = [
 
 export default function UpgradeModal({ onClose, required = false }: { onClose?: () => void; required?: boolean }) {
   const { activeOrg } = useOrg();
+  const router = useRouter();
   const canManageBilling = activeOrg?.role === "superadmin" || activeOrg?.role === "admin";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +60,19 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-md" onClick={() => { if (!required) onClose?.(); }} role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
-      <div className="w-full max-w-md rounded-2xl border border-violet-500/30 bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-md rounded-2xl border border-violet-500/30 bg-forge-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          // On a gated Pro page there's nothing usable behind the popup, so
+          // closing leaves the page instead of revealing a locked skeleton.
+          onClick={() => (required ? router.push("/dashboard") : onClose?.())}
+          aria-label="Close"
+          className="absolute right-4 top-4 rounded-md p-1.5 text-subtle transition-colors hover:bg-forge-surface hover:text-heading"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </button>
         <div className="px-7 pb-7 pt-7">
           <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">
             AVGenix Pro
