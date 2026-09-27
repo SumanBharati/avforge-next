@@ -14,19 +14,22 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(rawBody, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
+    // Async variant: Stripe's worker build (which some hosts' bundlers pick)
+    // verifies with Web Crypto and rejects the synchronous constructEvent.
+    event = await stripe.webhooks.constructEventAsync(rawBody, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
   } catch (err) {
     // Logs a fingerprint, never the secret, so a mismatched or missing
     // STRIPE_WEBHOOK_SECRET can be told apart from a body altered in transit.
     const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
     const diag = {
+      reason: err instanceof Error ? err.message : String(err),
       secretPresent: secret.length > 0,
       secretLength: secret.length,
       secretFingerprint: secret ? createHash("sha256").update(secret).digest("hex").slice(0, 8) : null,
       signatureHeaderPresent: Boolean(sig),
       bodyLength: rawBody.length,
     };
-    console.error("Stripe webhook signature check failed:", { reason: err instanceof Error ? err.message : String(err), ...diag });
+    console.error("Stripe webhook signature check failed:", diag);
     // TEMPORARY: returned in the response too because Netlify isn't surfacing
     // function logs for this route. Remove once the webhook secret issue is fixed.
     return NextResponse.json({ error: "Invalid signature", diag }, { status: 400 });
