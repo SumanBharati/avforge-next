@@ -81,11 +81,11 @@ export function parseFeed(xml: string, feed: { source: string; kind: AvNewsKind 
 }
 
 // Newest first, one entry per headline (the same story can appear in more
-// than one feed), then the newest of each kind. Deduped by title rather than
-// link because AVWeek episodes all share the show's link.
-export function pickLatest(items: AvNewsItem[], mix = AV_NEWS_MIX): AvNewsItem[] {
+// than one feed). Deduped by title rather than link because AVWeek episodes
+// all share the show's link.
+export function latestUnique(items: AvNewsItem[]): AvNewsItem[] {
   const seen = new Set<string>();
-  const sorted = [...items]
+  return [...items]
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
     .filter((item) => {
       const key = item.title.toLowerCase();
@@ -93,6 +93,42 @@ export function pickLatest(items: AvNewsItem[], mix = AV_NEWS_MIX): AvNewsItem[]
       seen.add(key);
       return true;
     });
+}
+
+// The newest of each kind, per AV_NEWS_MIX (dashboard card).
+export function pickLatest(items: AvNewsItem[], mix = AV_NEWS_MIX): AvNewsItem[] {
+  const sorted = latestUnique(items);
   const picked = (Object.keys(mix) as AvNewsKind[]).flatMap((kind) => sorted.filter((i) => i.kind === kind).slice(0, mix[kind]));
   return picked.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+}
+
+// Not cached per feed: the /api/av-news route and /av-news page that call this
+// are themselves saved for a day, and AVWeek's feed (every episode, ~3 MB) is over Next's 2 MB
+// per-fetch cache limit anyway.
+async function fetchFeed(feed: (typeof AV_NEWS_FEEDS)[number]): Promise<AvNewsItem[]> {
+  try {
+    const res = await fetch(feed.url, {
+      headers: { "User-Agent": "AVGenix/1.0 (+https://avgenix.com)" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseFeed(await res.text(), feed);
+  } catch (err) {
+    // One broken feed shouldn't empty the list; the other sources fill in.
+    console.error(`AV news feed failed: ${feed.source} (${feed.url})`, err);
+    return [];
+  }
+}
+
+// Server only. Every item from every feed, unsorted. Throws when all feeds
+// fail during a daily rebuild, so Next keeps serving the previous day's saved
+// version instead of saving an empty one for 24 hours (not at build time,
+// where throwing would fail the deploy).
+export async function fetchAllAvNews(): Promise<AvNewsItem[]> {
+  const items = (await Promise.all(AV_NEWS_FEEDS.map(fetchFeed))).flat();
+  if (items.length === 0 && process.env.NEXT_PHASE !== "phase-production-build") {
+    throw new Error("AV news: every feed failed");
+  }
+  return items;
 }

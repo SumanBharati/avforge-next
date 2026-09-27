@@ -316,7 +316,7 @@ export default function DashboardPage() {
           >
             {/* Text content — above wave */}
             <div className="relative z-10 flex flex-col">
-              <div className="mb-3 flex items-center gap-2.5">
+              <Link href="/av-news" className="group mb-3 flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--infocard-icon-mint-bg)" }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                     <rect x="3" y="5" width="18" height="14" rx="2" stroke="#67DBB8" strokeWidth="1.8" />
@@ -326,10 +326,10 @@ export default function DashboardPage() {
                   </svg>
                 </div>
                 <span className="text-[15px] font-bold" style={{ color: "var(--infocard-heading)" }}>AV News & Podcasts</span>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto opacity-50">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="ml-auto transition-opacity opacity-50 group-hover:opacity-100">
                   <path d="M6 3L11 8L6 13" stroke="var(--infocard-chevron)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-              </div>
+              </Link>
               <p className="mb-2.5 text-[12px] font-medium" style={{ color: "var(--infocard-label)" }}>Latest from the AV industry</p>
               <AvNewsList />
             </div>

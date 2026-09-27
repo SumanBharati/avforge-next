@@ -2,17 +2,10 @@
 
 import { useEffect, useState } from "react";
 import type { AvNewsItem } from "@/lib/av-news";
+import AvNewsTimeAgo from "@/components/AvNewsTimeAgo";
 
-function timeAgo(iso: string) {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 30) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-const PodcastIcon = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
+export const PodcastIcon = ({ size = 11 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
     <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="2" />
     <path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
   </svg>
@@ -71,7 +64,7 @@ export default function AvNewsList() {
             </a>
             <div className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: "var(--infocard-subtle)" }}>
               {item.kind === "podcast" && <PodcastIcon />}
-              <span>{item.source} · {timeAgo(item.publishedAt)}</span>
+              <span>{item.source} · <AvNewsTimeAgo iso={item.publishedAt} /></span>
             </div>
           </div>
         </li>
