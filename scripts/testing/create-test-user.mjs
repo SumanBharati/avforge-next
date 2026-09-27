@@ -24,7 +24,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const TEST_EMAIL = "claude-e2e-test@avforge.local";
+const TEST_EMAIL = "claude-e2e-test@avgenix.local";
 
 async function main() {
   const { data: existingList, error: listErr } = await admin.auth.admin.listUsers();

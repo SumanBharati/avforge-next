@@ -11,7 +11,7 @@ import { writeFileSync } from "fs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const TEST_EMAIL = process.env.PLAYWRIGHT_TEST_EMAIL || "claude-e2e-test@avforge.local";
+const TEST_EMAIL = process.env.PLAYWRIGHT_TEST_EMAIL || "claude-e2e-test@avgenix.local";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — run with node --env-file=.env.local");

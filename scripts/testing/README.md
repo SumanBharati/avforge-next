@@ -9,7 +9,7 @@ never your own data.
 ```bash
 npm install                                                       # installs playwright (devDependency)
 npx playwright install chromium                                   # downloads the browser binary (~300MB, one-time)
-node --env-file=.env.local scripts/testing/create-test-user.mjs   # creates claude-e2e-test@avforge.local via the Supabase admin API (pre-confirmed, no email click needed)
+node --env-file=.env.local scripts/testing/create-test-user.mjs   # creates claude-e2e-test@avgenix.local via the Supabase admin API (pre-confirmed, no email click needed)
 ```
 
 This writes `PLAYWRIGHT_TEST_EMAIL` / `PLAYWRIGHT_TEST_PASSWORD` into
