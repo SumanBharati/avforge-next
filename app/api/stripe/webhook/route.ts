@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { stripe } from "@/lib/stripe";
 import type Stripe from "stripe";
@@ -14,7 +15,18 @@ export async function POST(req: NextRequest) {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch {
+  } catch (err) {
+    // Logs a fingerprint, never the secret, so a mismatched or missing
+    // STRIPE_WEBHOOK_SECRET can be told apart from a body altered in transit.
+    const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+    console.error("Stripe webhook signature check failed:", {
+      reason: err instanceof Error ? err.message : String(err),
+      secretPresent: secret.length > 0,
+      secretLength: secret.length,
+      secretFingerprint: secret ? createHash("sha256").update(secret).digest("hex").slice(0, 8) : null,
+      signatureHeaderPresent: Boolean(sig),
+      bodyLength: rawBody.length,
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
