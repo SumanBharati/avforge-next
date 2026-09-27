@@ -77,20 +77,31 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
           <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-violet-300">
             AVGenix Pro
           </span>
-          <h2 id="upgrade-title" className="mt-3 text-xl font-bold text-heading">Subscribe to continue using Projects</h2>
+          <h2 id="upgrade-title" className="mt-3 text-xl font-bold text-heading">
+            {canManageBilling ? "Subscribe to continue using Projects" : `${activeOrg?.name ?? "This team"} doesn't have Pro yet`}
+          </h2>
           <p className="mt-2 text-[13px] leading-relaxed text-body">
-            Calculators, references, and AV news are free. Upgrade to AVGenix Pro to create and manage AV projects.
+            {canManageBilling
+              ? "Calculators, references, and AV news are free. Upgrade to AVGenix Pro to create and manage AV projects."
+              : "Your team's owner or an admin needs to subscribe before you can use Projects and other Pro tools. Calculators, references, and AV news are free."}
           </p>
 
           <div className="mt-5 rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-extrabold text-heading">${SEAT_PRICE}</span>
-              <span className="text-[13px] text-subtle">/ seat / month</span>
-            </div>
-            {seatCount > 1 && (
-              <p className="mt-1 text-[12px] text-subtle">
-                Your team has {seatCount} members — ${monthlyTotal}/month total.
-              </p>
+            {!canManageBilling && (
+              <h3 className="text-[14px] font-semibold text-heading">Pro Features</h3>
+            )}
+            {canManageBilling && (
+              <>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-extrabold text-heading">${SEAT_PRICE}</span>
+                  <span className="text-[13px] text-subtle">/ seat / month</span>
+                </div>
+                {seatCount > 1 && (
+                  <p className="mt-1 text-[12px] text-subtle">
+                    Your team has {seatCount} members — ${monthlyTotal}/month total.
+                  </p>
+                )}
+              </>
             )}
             <ul className="mt-3 flex flex-col gap-2">
               {BENEFITS.map((b) => (
@@ -106,16 +117,26 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
 
           {error && <p className="mt-3 text-[12px] text-red-400">{error}</p>}
 
-          <button
-            onClick={handleUpgrade}
-            disabled={loading || !canManageBilling}
-            className="mt-5 w-full rounded-lg bg-violet-600 px-4 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
-          >
-            {loading ? "Redirecting…" : `Upgrade to Pro — $${monthlyTotal}/month${seatCount > 1 ? ` (${seatCount} seats)` : ""}`}
-          </button>
-          {!canManageBilling && <p className="mt-2 text-center text-xs text-muted">Ask an organization owner or administrator to activate Pro.</p>}
-          {!required && <button onClick={onClose} className="mt-2 w-full rounded-lg px-4 py-2.5 text-[13px] font-medium text-muted hover:text-body">Continue with free tools</button>}
-          <p className="mt-3 text-center text-[11px] text-faint">Cancel anytime</p>
+          {canManageBilling ? (
+            <>
+              <button
+                onClick={handleUpgrade}
+                disabled={loading}
+                className="mt-5 w-full rounded-lg bg-violet-600 px-4 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+              >
+                {loading ? "Redirecting…" : `Upgrade to Pro — $${monthlyTotal}/month${seatCount > 1 ? ` (${seatCount} seats)` : ""}`}
+              </button>
+              {!required && <button onClick={onClose} className="mt-2 w-full rounded-lg px-4 py-2.5 text-[13px] font-medium text-muted hover:text-body">Continue with free tools</button>}
+              <p className="mt-3 text-center text-[11px] text-faint">Cancel anytime</p>
+            </>
+          ) : (
+            <button
+              onClick={() => (required ? router.push("/dashboard") : onClose?.())}
+              className="mt-5 w-full rounded-lg border border-border px-4 py-3 text-[14px] font-semibold text-body transition-colors hover:bg-forge-surface"
+            >
+              {required ? "Back to dashboard" : "Continue with free tools"}
+            </button>
+          )}
         </div>
       </div>
     </div>
