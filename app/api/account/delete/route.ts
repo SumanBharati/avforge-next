@@ -36,29 +36,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
 
-  // Same rules as deleting a single team (037_team_delete_rules_and_ownership_transfer.sql),
-  // applied across every org this person owns: nothing with an active
-  // subscription, and no team where they're still superadmin over other
-  // members — each one has to be resolved (cancel billing; transfer
-  // ownership or remove members) before the whole account can go.
+  // For a team you own (superadmin), same rules as deleting it outright
+  // (037_team_delete_rules_and_ownership_transfer.sql): no active
+  // subscription, and no other members still on it — resolve those first
+  // (cancel billing; transfer ownership or remove members).
+  //
+  // For a team you're just a member/admin of, billing isn't your call to
+  // make (only superadmin/admin can even open Manage Billing — see
+  // app/api/stripe/checkout/route.ts) and AVGenix Pro is billed per seat
+  // (lib/stripe-seats.ts), so you leaving doesn't require touching the
+  // team's subscription at all — it just corrects the team's seat count.
+  // The requirement is simply: leave first, then delete.
   const blockers: string[] = [];
   for (const m of memberships ?? []) {
     const org = m.organizations as unknown as { id: string; name: string; is_individual: boolean; subscription_status: string | null } | null;
     if (!org) continue;
     const label = org.is_individual ? "your Individual workspace" : `"${org.name}"`;
 
+    // Individual workspaces always make their creator the superadmin, so
+    // this only fires for a real team you don't own.
+    if (m.role !== "superadmin") {
+      blockers.push(`You're a member of ${label} — leave that team first (Team Settings → Members).`);
+      continue;
+    }
+
     if (org.subscription_status === "active") {
       blockers.push(`${label} has an active Pro subscription — cancel it first (Team Settings → Manage Billing).`);
       continue;
     }
-    if (m.role === "superadmin" && !org.is_individual) {
-      const { count } = await admin
-        .from("organization_members")
-        .select("id", { count: "exact", head: true })
-        .eq("org_id", org.id);
-      if ((count ?? 0) > 1) {
-        blockers.push(`You're the superadmin of ${label}, which still has other members — transfer ownership or remove them first.`);
-      }
+    const { count } = await admin
+      .from("organization_members")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", org.id);
+    if ((count ?? 0) > 1) {
+      blockers.push(`You're the superadmin of ${label}, which still has other members — transfer ownership or remove them first.`);
     }
   }
 

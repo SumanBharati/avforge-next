@@ -43,7 +43,7 @@ export default function PlanComparisonSection({ features }: { features: PlanComp
                   <th scope="col" className="w-[23%] bg-violet-500/10 px-4 py-4 text-center">
                     <PlanIcon pro />
                     <div className="mt-2 text-xs font-extrabold uppercase tracking-wide text-heading">AVGenix Pro</div>
-                    <div className="mt-1 text-xs font-medium text-blue-500">$20/month</div>
+                    <div className="mt-1 text-xs font-medium text-blue-500">$20/seat/month</div>
                   </th>
                   <th scope="col" className="w-[23%] bg-violet-500/10 px-4 py-4 text-center">
                     <PlanIcon />

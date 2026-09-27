@@ -8,6 +8,11 @@ import { useOrg } from "@/components/OrgProvider";
 import { ROLE_OPTIONS } from "@/lib/pm-store";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
+async function withAuthHeader() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` };
+}
+
 interface Member {
   id: string;
   user_id: string;
@@ -29,7 +34,7 @@ interface Invite {
 
 export default function OrgMembersPage() {
   const router = useRouter();
-  const { activeOrg, refreshOrgs } = useOrg();
+  const { activeOrg, refreshOrgs, switchOrg, orgs, user } = useOrg();
 
   useEffect(() => {
     if (activeOrg?.is_individual) router.replace("/org/settings");
@@ -54,6 +59,9 @@ export default function OrgMembersPage() {
   const [pendingTransfer, setPendingTransfer] = useState<Member | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState("");
+  const [pendingLeave, setPendingLeave] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState("");
 
   const roleOptions = activeOrg?.member_roles?.length ? activeOrg.member_roles : ROLE_OPTIONS;
 
@@ -139,7 +147,31 @@ export default function OrgMembersPage() {
 
   async function handleRemoveMember(memberId: string) {
     await supabase.from("organization_members").delete().eq("id", memberId);
+    if (activeOrg) {
+      const headers = await withAuthHeader();
+      fetch("/api/org/sync-seats", { method: "POST", headers, body: JSON.stringify({ org_id: activeOrg.id }) })
+        .catch((err) => console.error("Seat sync failed:", err));
+    }
     await loadMembers();
+  }
+
+  async function handleLeaveTeam() {
+    if (!activeOrg) return;
+    setLeaveError("");
+    setLeaving(true);
+    const headers = await withAuthHeader();
+    const res = await fetch("/api/org/leave", { method: "POST", headers, body: JSON.stringify({ org_id: activeOrg.id }) });
+    const data = await res.json();
+    setLeaving(false);
+    if (!res.ok) {
+      setLeaveError(data.error || "Something went wrong. Please try again.");
+      return;
+    }
+    setPendingLeave(false);
+    await refreshOrgs();
+    const nextOrg = orgs.find((o) => o.id !== activeOrg.id);
+    if (nextOrg) await switchOrg(nextOrg.id);
+    router.push("/dashboard");
   }
 
   async function handleChangeRole(memberId: string, newRole: string) {
@@ -361,7 +393,15 @@ export default function OrgMembersPage() {
                     </>
                   )}
                 </div>
-                {isOwnerOrAdmin && member.role !== "superadmin" && (
+                {member.user_id === user?.id && member.role !== "superadmin" && (
+                  <button
+                    onClick={() => { setLeaveError(""); setPendingLeave(true); }}
+                    className="rounded border border-border bg-forge-surface px-2 py-1 text-[11px] text-body transition-colors hover:bg-forge-card-hover"
+                  >
+                    Leave Team
+                  </button>
+                )}
+                {isOwnerOrAdmin && member.role !== "superadmin" && member.user_id !== user?.id && (
                   <div className="flex items-center gap-1">
                     {activeOrg.role === "superadmin" && (
                       <>
@@ -431,6 +471,17 @@ export default function OrgMembersPage() {
           </div>
         )}
       </div>
+
+      {pendingLeave && (
+        <ConfirmDialog
+          title="Leave team"
+          message={<>Leave <span className="font-semibold text-heading">{activeOrg.name}</span>? You&apos;ll lose access to its projects and data unless you&apos;re invited back.{leaveError && <span className="mt-2 block text-red-400">{leaveError}</span>}</>}
+          confirmLabel="Leave Team"
+          busy={leaving}
+          onCancel={() => setPendingLeave(false)}
+          onConfirm={handleLeaveTeam}
+        />
+      )}
 
       {pendingTransfer && (
         <ConfirmDialog

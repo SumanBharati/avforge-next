@@ -53,10 +53,18 @@ export async function POST(req: NextRequest) {
     await admin.from("organizations").update({ stripe_customer_id: customerId }).eq("id", org.id);
   }
 
+  // Billed per seat — a team that already has members before its first
+  // checkout starts at that headcount, not 1.
+  const { count } = await admin
+    .from("organization_members")
+    .select("id", { count: "exact", head: true })
+    .eq("org_id", orgId);
+  const seats = Math.max(1, count ?? 1);
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID!, quantity: 1 }],
+    line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID!, quantity: seats }],
     success_url: `${process.env.NEXT_PUBLIC_APP_URL}/projects?upgraded=1`,
     cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/projects`,
     client_reference_id: org.id,

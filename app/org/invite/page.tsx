@@ -82,6 +82,16 @@ function InviteAcceptPageInner() {
       return;
     }
 
+    // Correct the org's per-seat Stripe quantity now that headcount changed.
+    // Best-effort — a sync hiccup here shouldn't block the person from
+    // actually joining the team.
+    const { data: { session } } = await supabase.auth.getSession();
+    fetch("/api/org/sync-seats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ org_id: invite.org_id }),
+    }).catch((err) => console.error("Seat sync failed:", err));
+
     // Switch to the new org
     await supabase
       .from("user_preferences")

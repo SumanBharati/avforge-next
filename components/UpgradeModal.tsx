@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useOrg } from "./OrgProvider";
 import { supabase } from "@/lib/supabase";
+
+const SEAT_PRICE = 20;
 
 const BENEFITS = [
   "Create and save unlimited AV projects",
@@ -17,6 +19,22 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
   const canManageBilling = activeOrg?.role === "superadmin" || activeOrg?.role === "admin";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [seatCount, setSeatCount] = useState(1);
+
+  // AVGenix Pro is billed per seat — a team checking out with existing
+  // members starts at that headcount (app/api/stripe/checkout/route.ts),
+  // so show the real total up front rather than a flat $20 that wouldn't
+  // match the invoice.
+  useEffect(() => {
+    if (!activeOrg || activeOrg.is_individual) { setSeatCount(1); return; }
+    supabase
+      .from("organization_members")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", activeOrg.id)
+      .then(({ count }) => setSeatCount(Math.max(1, count ?? 1)));
+  }, [activeOrg?.id, activeOrg?.is_individual]);
+
+  const monthlyTotal = seatCount * SEAT_PRICE;
 
   async function handleUpgrade() {
     if (!activeOrg || !canManageBilling) return;
@@ -52,9 +70,14 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
 
           <div className="mt-5 rounded-xl border border-violet-500/30 bg-violet-500/5 p-4">
             <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-extrabold text-heading">$20</span>
-              <span className="text-[13px] text-subtle">/ month</span>
+              <span className="text-2xl font-extrabold text-heading">${SEAT_PRICE}</span>
+              <span className="text-[13px] text-subtle">/ seat / month</span>
             </div>
+            {seatCount > 1 && (
+              <p className="mt-1 text-[12px] text-subtle">
+                Your team has {seatCount} members — ${monthlyTotal}/month total.
+              </p>
+            )}
             <ul className="mt-3 flex flex-col gap-2">
               {BENEFITS.map((b) => (
                 <li key={b} className="flex items-start gap-2 text-[13px] text-body">
@@ -74,7 +97,7 @@ export default function UpgradeModal({ onClose, required = false }: { onClose?: 
             disabled={loading || !canManageBilling}
             className="mt-5 w-full rounded-lg bg-violet-600 px-4 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
           >
-            {loading ? "Redirecting…" : "Upgrade to Pro — $20/month"}
+            {loading ? "Redirecting…" : `Upgrade to Pro — $${monthlyTotal}/month${seatCount > 1 ? ` (${seatCount} seats)` : ""}`}
           </button>
           {!canManageBilling && <p className="mt-2 text-center text-xs text-muted">Ask an organization owner or administrator to activate Pro.</p>}
           {!required && <button onClick={onClose} className="mt-2 w-full rounded-lg px-4 py-2.5 text-[13px] font-medium text-muted hover:text-body">Continue with free tools</button>}

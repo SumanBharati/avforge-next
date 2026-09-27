@@ -565,7 +565,11 @@ export default function OrgSettingsPage() {
                     </span>
                   </div>
                   <p className="mt-0.5 text-[12px] text-muted">
-                    {isPro ? "Your account has an active Pro subscription — $20/month." : "Free plan — upgrade to unlock projects, design tools, and BOM generation."}
+                    {isPro
+                      ? memberCount && memberCount > 1
+                        ? `Active Pro subscription — $20/seat/month × ${memberCount} members = $${memberCount * 20}/month.`
+                        : "Your account has an active Pro subscription — $20/month."
+                      : "Free plan — upgrade to unlock projects, design tools, and BOM generation."}
                   </p>
                 </div>
                 <button

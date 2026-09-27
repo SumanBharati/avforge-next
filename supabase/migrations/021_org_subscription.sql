@@ -1,10 +1,18 @@
 -- ============================================================
 -- AVGenix: Organization Subscription (Stripe) — AVGenix Pro
 -- ============================================================
--- Subscription is billed per-organization, not per-user — matches
--- org_id already being the scoping unit for all project/equipment
--- data, and matches the existing extended-columns-on-organizations
--- precedent set in migration 011 (billing address, tax, QuickBooks).
+-- The subscription itself is still one Stripe subscription per
+-- organization — matches org_id already being the scoping unit for all
+-- project/equipment data, and matches the existing extended-columns-on-
+-- organizations precedent set in migration 011 (billing address, tax,
+-- QuickBooks).
+--
+-- UPDATE: originally billed as a flat rate regardless of headcount.
+-- AVGenix Pro is now billed per seat — the one subscription's quantity
+-- tracks the org's member count and is kept in sync by lib/stripe-seats.ts
+-- whenever membership changes (invite accepted, member removed or leaves;
+-- see app/api/org/leave and app/org/members). See app/api/stripe/checkout
+-- for the initial quantity at signup.
 
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS stripe_customer_id text UNIQUE,
