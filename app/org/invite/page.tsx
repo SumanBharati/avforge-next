@@ -52,13 +52,23 @@ function InviteAcceptPageInner() {
 
     setOrgName((invite as any).organizations?.name || "Organization");
 
-    if (invite.status !== "pending") {
+    // Signing up auto-accepts pending invites for that email
+    // (handle_new_user_org), so a brand-new user arriving from the invite
+    // email is often already in the team: finish the join instead of erroring.
+    const alreadyJoined = invite.status === "accepted" && Boolean((await supabase
+      .from("organization_members")
+      .select("id")
+      .eq("org_id", invite.org_id)
+      .eq("user_id", user.id)
+      .maybeSingle()).data);
+
+    if (invite.status !== "pending" && !alreadyJoined) {
       setStatus("error");
       setError("This invite has already been used");
       return;
     }
 
-    if (new Date(invite.expires_at) < new Date()) {
+    if (!alreadyJoined && new Date(invite.expires_at) < new Date()) {
       setStatus("expired");
       return;
     }
@@ -74,7 +84,7 @@ function InviteAcceptPageInner() {
 
     // Accept: server-side RPC re-validates token/status/expiry/email match
     // and performs the membership insert + invite status update atomically.
-    const { error: acceptErr } = await supabase.rpc("accept_org_invite", { p_token: token });
+    const { error: acceptErr } = alreadyJoined ? { error: null } : await supabase.rpc("accept_org_invite", { p_token: token });
 
     if (acceptErr) {
       setStatus("error");
