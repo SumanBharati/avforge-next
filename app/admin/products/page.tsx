@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { searchProducts, upsertProducts, deleteProduct, getProductCount, type AVProduct } from "@/lib/av-products";
 import { parseProductRows } from "@/lib/product-import";
+import { useLibraryAdmin } from "@/lib/use-library-admin";
 
 // CSV columns (all optional except Type and Ports):
 // Category, Type, Manufacturer, Model, Price, Color, Ports,
@@ -23,6 +24,15 @@ function fmt(v: number | null, unit = "", decimals = 2) {
 }
 
 export default function AdminProductsPage() {
+  const { isLibraryAdmin, checked } = useLibraryAdmin();
+  if (!checked) return null;
+  if (!isLibraryAdmin) {
+    return <div className="px-8 py-20 text-center text-sm text-subtle">You don&apos;t have access to manage the AVGenix Library.</div>;
+  }
+  return <AdminProductsManager />;
+}
+
+function AdminProductsManager() {
   const [csvText, setCsvText]         = useState("");
   const [importing, setImporting]     = useState(false);
   const [importResult, setImportResult] = useState<string>("");

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import { loadToolData, saveToolData } from "@/lib/tool-data";
 import { searchProducts, addEquipmentToLibraryConfirmed, getProductsByIds, type AVProduct } from "@/lib/av-products";
+import { useLibraryAdmin } from "@/lib/use-library-admin";
 import { loadUnitSpecs, diffSpec, identityAfterEdit, specFromRackItem, applySpecToRackItem } from "@/lib/unit-specs";
 import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, rackItemToBOM } from "@/lib/bom-context";
 import BOMPanel from "@/components/BOMPanel";
@@ -246,6 +247,7 @@ export default function RackPlannerPage() {
   const [hoveredRackNumber, setHoveredRackNumber] = useState<number|null>(null);
   const [rackContextMenu, setRackContextMenu] = useState<{x:number;y:number;index:number}|null>(null);
   const [libraryNotice, setLibraryNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
+  const { isLibraryAdmin } = useLibraryAdmin();
   const [rackEditingIndex, setRackEditingIndex] = useState<number|null>(null);
   const [rackEditDraft, setRackEditDraft] = useState<RackItem|null>(null);
   const saveTimer = useRef<NodeJS.Timeout | null>(null);
@@ -1166,7 +1168,7 @@ export default function RackPlannerPage() {
 
       {rackContextMenu&&<><div style={{position:"fixed",inset:0,zIndex:110}} onClick={()=>setRackContextMenu(null)} onContextMenu={e=>{e.preventDefault();setRackContextMenu(null);}}/><div style={{position:"fixed",left:rackContextMenu.x,top:rackContextMenu.y,zIndex:111,width:190,padding:"4px 0",background:"rgb(var(--forge-panel))",border:"1px solid rgb(var(--border))",borderRadius:6,boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
         <button onClick={()=>openRackEquipmentEditor(rackContextMenu.index)} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Edit equipment</button>
-        <button onClick={async ()=>{
+        {isLibraryAdmin && <button onClick={async ()=>{
           const item = items[rackContextMenu.index];
           setRackContextMenu(null);
           if(!item) return;
@@ -1179,7 +1181,7 @@ export default function RackPlannerPage() {
           else if(result.status==="cancelled") { /* user chose not to add a possible duplicate */ }
           else setLibraryNotice({kind:"error",message:result.error||`Unable to add ${label} to the AVGenix Library.`});
           window.setTimeout(()=>setLibraryNotice(null),5000);
-        }} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Add to AVGenix Library</button>
+        }} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Add to AVGenix Library</button>}
         <div style={{height:1,background:"rgb(var(--border))",margin:"3px 0"}}/>
         {/* Hide: out of THIS rack only — Room Designer, Signal Flow and the BOM keep it. */}
         <button title="Remove it from this rack only. It stays in Room Designer, Signal Flow and the BOM." onClick={()=>{hideItems([rackContextMenu.index]);setRackContextMenu(null);}} style={{display:"block",width:"100%",padding:"8px 14px",background:"none",border:"none",color:"rgb(var(--text-body))",fontSize:12,textAlign:"left",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="rgb(var(--forge-surface))"} onMouseLeave={e=>e.currentTarget.style.background="none"}>Hide</button>

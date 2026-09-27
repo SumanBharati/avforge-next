@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createProduct, deleteProduct, findLibraryDuplicateClusters, findSimilarProducts, getFilterOptions, getKitsReferencingProduct, getProductCount, getProductsByIds, listProducts, updateProduct, type AVProduct, type DuplicateCluster, type KitComponent, type ReferencingKit, type SimilarProductMatch } from "@/lib/av-products";
 import { type OrgEquipmentItem } from "@/lib/equipment-library";
 import { supabase } from "@/lib/supabase";
+import { useLibraryAdmin } from "@/lib/use-library-admin";
 import { useOrg } from "@/components/OrgProvider";
 import EquipmentFormModal, { type EquipmentFormValue, type KitItemDisplay } from "@/components/EquipmentFormModal";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -822,6 +823,9 @@ const emptyAVProduct = (): AVProduct => ({
 
 function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
   const { activeOrg } = useOrg();
+  // The shared catalog is read-only for everyone but library admins; the
+  // database enforces it, this just hides the controls that would fail.
+  const { isLibraryAdmin } = useLibraryAdmin();
   const [products, setProducts] = useState<AVProduct[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -1253,6 +1257,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-subtle">{total} products</span>
+          {isLibraryAdmin && (<>
           <button
             onClick={scanForDuplicates}
             disabled={scanningDuplicates}
@@ -1273,6 +1278,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
             </svg>
             Add Product
           </button>
+          </>)}
         </div>
       </div>
 
@@ -1408,7 +1414,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
                       {p.updated_at ? new Date(p.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : <span className="text-faint">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                      {isLibraryAdmin && <div className="flex items-center justify-end gap-1">
                         <button onClick={(e) => { e.stopPropagation(); openEditProduct(p); }} className="rounded-md p-1.5 text-muted transition-colors hover:bg-forge-surface hover:text-heading" title="Edit">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                             <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
@@ -1423,7 +1429,7 @@ function AVGenixLibraryView({ onBack }: { onBack: () => void }) {
                             <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
                           </svg>
                         </button>
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 ))

@@ -6,6 +6,7 @@ import { Video, Monitor, Presentation } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/components/ThemeProvider";
 import { searchProducts, addEquipmentToLibraryConfirmed, getProductsByIds } from "@/lib/av-products";
+import { useLibraryAdmin } from "@/lib/use-library-admin";
 import { searchOrgLibrary } from "@/lib/equipment-library";
 import { loadUnitSpecs, diffSpec, identityAfterEdit, isLibraryProduct, specFromRoomDevice, applySpecToRoomDevice } from "@/lib/unit-specs";
 import { useBOM, useRetireRemovedUnits, useHiddenUnitsRegistry, roomDeviceToBOM, BOM_UNIT_DRAG_TYPE, type BOMDeviceEntry, type BOMDragUnit } from "@/lib/bom-context";
@@ -531,6 +532,7 @@ export default function RoomDesignerPage() {
   const [generatingFromScope, setGeneratingFromScope] = useState(false);
   const [scopeReimportConfirm, setScopeReimportConfirm] = useState(false);
   const [generateNotice, setGenerateNotice] = useState<{kind:"ok"|"error";message:string}|null>(null);
+  const { isLibraryAdmin } = useLibraryAdmin();
   const [showHfov,      setShowHfov]      = useState(false);
   const [viewMode,      setViewMode]      = useState("plan");
   const [zoom,          setZoom]          = useState(1.5);
@@ -6932,7 +6934,7 @@ export default function RoomDesignerPage() {
           </button>
           {(() => {
             const menuDev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
-            if (!menuDev || isRoomFurniture(menuDev)) return null;
+            if (!menuDev || isRoomFurniture(menuDev) || !isLibraryAdmin) return null;
             return (
               <button onClick={async ()=>{
                 const dev = placedDevices.find(d=>d.uid===deviceContextMenu.uid);
