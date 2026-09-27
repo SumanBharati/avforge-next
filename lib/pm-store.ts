@@ -299,15 +299,26 @@ export async function mergeOrgProjectsAsSchedProjects(
   orgId: string,
   store: PMStore,
 ): Promise<PMStore> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("projects")
     .select("id, name, client_name")
     .eq("org_id", orgId);
 
-  if (!data) return store;
+  if (error || !data) return store;
 
   const next = [...store.projects];
   let changed = false;
+
+  // Scheduler entries whose project was deleted (or never belonged to this
+  // workspace) are archived rather than removed, so logged hours survive.
+  const liveIds = new Set(data.map((p) => p.id));
+  for (let i = 0; i < next.length; i++) {
+    const sp = next[i];
+    if (sp.projectRef && !liveIds.has(sp.projectRef) && !sp.archived) {
+      next[i] = { ...sp, archived: true };
+      changed = true;
+    }
+  }
 
   for (const p of data) {
     if (next.some((sp) => sp.projectRef === p.id)) continue;
@@ -477,6 +488,31 @@ export async function mergeOrgMembersAsPeople(orgId: string, store: PMStore): Pr
       inviteId: inv.id,
     });
     changed = true;
+  }
+
+  // People who were only ever a pending invite (never became a member) whose
+  // invite is gone: revoked, declined, expired, or left over from a workspace
+  // that became an Individual one. Drop them, or archive them if schedule or
+  // timesheet data points at them so that history survives. Skipped when
+  // either query failed, since empty results would look like "everyone left".
+  if (!membersRes.error && !invitesRes.error) {
+    const pendingInviteIds = new Set(invites.map((inv) => inv.id));
+    const referenced = new Set<string>([
+      ...store.allocations.map((a) => a.personId),
+      ...store.timeOff.map((t) => t.personId),
+      ...store.timeEntries.map((t) => t.personId),
+      ...store.tasks.map((t) => t.assigneeId).filter((id): id is string => Boolean(id)),
+    ]);
+    for (let i = next.length - 1; i >= 0; i--) {
+      const p = next[i];
+      if (!p.inviteId || p.memberUserId || pendingInviteIds.has(p.inviteId)) continue;
+      if (referenced.has(p.id)) {
+        if (!p.archived) { next[i] = { ...p, archived: true }; changed = true; }
+      } else {
+        next.splice(i, 1);
+        changed = true;
+      }
+    }
   }
 
   return { store: changed ? { ...store, people: next } : store, currentUserId: user?.id ?? null };
