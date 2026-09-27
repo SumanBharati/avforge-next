@@ -585,6 +585,9 @@ export default function OrgSettingsPage() {
             </div>
           )}
 
+          {/* Labor rates, currency/tax and integrations only feed Pro features
+              (estimates, proposals, QuickBooks sync), so free plans don't see them. */}
+          {isPro && (<>
           {/* Labor Rates & Costs */}
           <form onSubmit={handleLaborSave}>
             <div className="rounded-xl border border-border bg-forge-surface/40 p-4">
@@ -760,6 +763,7 @@ export default function OrgSettingsPage() {
             </div>
 
           </div>{/* end bottom row */}
+          </>)}
         </div>{/* end right column */}
       </div>{/* end grid */}
 
