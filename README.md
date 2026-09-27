@@ -17,7 +17,7 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Project Structure
 
 ```
-avforge-next/
+avgenix/
 ├── app/
 │   ├── layout.tsx          # Root layout (fonts, header, AI widget)
 │   ├── dashboard/page.tsx  # Dashboard page
