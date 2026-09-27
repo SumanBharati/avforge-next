@@ -304,7 +304,7 @@ export default function DashboardPage() {
             <AnimatedIcon
               src="/animated-icons/calculator.json"
               fallbackSrc="/3DCalculator.png"
-              className="pointer-events-none absolute right-4 w-[105px]"
+              className="pointer-events-none absolute right-4 w-[89px]"
               style={{ bottom: "12px" }}
             />
           </div>
