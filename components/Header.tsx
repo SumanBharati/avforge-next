@@ -121,7 +121,19 @@ export default function Header() {
         )}
       </div>
     </header>
-    {authMode && createPortal(<ProAuthModal key={authMode} initialMode={authMode} onClose={() => setAuthMode(null)} onSignedIn={handleSignedIn} confirmRedirectPath="/login?next=%2Fwelcome" />, document.body)}
+    {authMode && createPortal(
+      <ProAuthModal
+        key={authMode}
+        initialMode={authMode}
+        onClose={() => setAuthMode(null)}
+        onSignedIn={handleSignedIn}
+        // The confirmation email returns through /login, which forwards a
+        // confirmed session with ?invite= straight to accepting the invite.
+        confirmRedirectPath={pendingInvite ? `/login?invite=${encodeURIComponent(pendingInvite)}` : "/login?next=%2Fwelcome"}
+        notice={pendingInvite ? "You've been invited to join a team. Sign in, or create an account with the email address the invite was sent to." : undefined}
+      />,
+      document.body,
+    )}
     </>
   );
 }

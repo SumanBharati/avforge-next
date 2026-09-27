@@ -33,9 +33,11 @@ interface ProAuthModalProps {
   initialMode?: Mode;
   /** Path the email-confirmation link returns to. Defaults to the Projects gate flow. */
   confirmRedirectPath?: string;
+  /** Short context shown under the heading, e.g. why the person is being asked to sign in. */
+  notice?: string;
 }
 
-export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signin", confirmRedirectPath }: ProAuthModalProps = {}) {
+export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signin", confirmRedirectPath, notice }: ProAuthModalProps = {}) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -140,6 +142,7 @@ export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signi
         )}
         <h2 id="pro-auth-title" className="text-2xl font-bold">{mode === "signup" ? "Create your account" : mode === "reset" ? "Set new password" : "Welcome back"}</h2>
         <p className="mt-1 text-sm leading-5 text-muted">{mode === "signup" ? "Start your 3-day Pro trial. No credit card required." : mode === "reset" ? "Choose a new password for your account." : "Sign in to continue designing, estimating, and delivering exceptional AV experiences."}</p>
+        {notice && mode !== "reset" && <p className="mt-4 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-sm leading-5 text-heading">{notice}</p>}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {mode === "signup" && <label className="block text-sm font-medium"><span className="mb-2 block">Full Name</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><UserIcon /></span><input className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="John Doe" autoComplete="name" required /></span></label>}
