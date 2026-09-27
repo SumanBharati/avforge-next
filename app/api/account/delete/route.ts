@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   const { data: memberships, error: membershipsErr } = await userClient
     .from("organization_members")
-    .select("role, organizations(id, name, is_individual, subscription_status)")
+    .select("role, organizations(id, name, is_individual, subscription_status, subscription_cancel_at_period_end)")
     .eq("user_id", user.id);
   if (membershipsErr) {
     console.error("Account deletion: failed to load memberships:", membershipsErr.message);
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   // The requirement is simply: leave first, then delete.
   const blockers: string[] = [];
   for (const m of memberships ?? []) {
-    const org = m.organizations as unknown as { id: string; name: string; is_individual: boolean; subscription_status: string | null } | null;
+    const org = m.organizations as unknown as { id: string; name: string; is_individual: boolean; subscription_status: string | null; subscription_cancel_at_period_end: boolean | null } | null;
     if (!org) continue;
     const label = org.is_individual ? "your Individual workspace" : `"${org.name}"`;
 
@@ -60,7 +60,9 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    if (org.subscription_status === "active") {
+    // Already cancelled but still inside the paid month: no future charges, so
+    // it doesn't need to block deletion.
+    if (org.subscription_status === "active" && !org.subscription_cancel_at_period_end) {
       blockers.push(`${label} has an active Pro subscription — cancel it first (Team Settings → Manage Billing).`);
       continue;
     }

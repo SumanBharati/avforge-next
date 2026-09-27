@@ -7,6 +7,12 @@ import type Stripe from "stripe";
 
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
+// Newer Stripe API versions schedule a customer-portal cancellation by setting
+// cancel_at (the period end) and leave cancel_at_period_end false, so check both.
+function isCancellationScheduled(sub: Stripe.Subscription) {
+  return sub.cancel_at_period_end || sub.cancel_at != null;
+}
+
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
   const rawBody = await req.text();
@@ -32,7 +38,7 @@ export async function POST(req: NextRequest) {
           stripe_subscription_id: sub.id,
           subscription_status: sub.status,
           subscription_current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-          subscription_cancel_at_period_end: sub.cancel_at_period_end,
+          subscription_cancel_at_period_end: isCancellationScheduled(sub),
         }).eq("id", orgId);
       }
       break;
@@ -46,7 +52,7 @@ export async function POST(req: NextRequest) {
         stripe_subscription_id: sub.id,
         subscription_status: sub.status,
         subscription_current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-        subscription_cancel_at_period_end: sub.cancel_at_period_end,
+        subscription_cancel_at_period_end: isCancellationScheduled(sub),
       }).eq("stripe_customer_id", sub.customer as string);
       break;
     }
