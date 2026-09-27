@@ -586,8 +586,30 @@ export default function OrgSettingsPage() {
           )}
 
           {/* Labor rates, currency/tax and integrations only feed Pro features
-              (estimates, proposals, QuickBooks sync), so free plans don't see them. */}
-          {isPro && (<>
+              (estimates, proposals, QuickBooks sync), so free plans see them
+              locked: visible, but disabled, with a way to upgrade. */}
+          {!isPro && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-500/30 bg-violet-500/[0.06] px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-violet-400" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+                <p className="text-[12px] text-body">
+                  <span className="font-semibold text-heading">Pro feature:</span> labor rates, currency &amp; tax, and integrations are part of AVGenix Pro.
+                  {!isOwnerOrAdmin && " Ask your team's owner or an admin to upgrade."}
+                </p>
+              </div>
+              {isOwnerOrAdmin && (
+                <button type="button" onClick={openUpgradeModal} className="forge-btn-primary shrink-0 text-[12px]">Upgrade</button>
+              )}
+            </div>
+          )}
+          <fieldset
+            disabled={!isPro}
+            aria-disabled={!isPro}
+            // inert also blocks links (QuickBooks Connect) that disabled doesn't
+            // cover. Set on the element: React 18 doesn't render an inert prop.
+            ref={(el) => { el?.toggleAttribute("inert", !isPro); }}
+            className={`m-0 flex min-w-0 flex-col gap-4 border-0 p-0 ${!isPro ? "pointer-events-none select-none opacity-50" : ""}`}
+          >
           {/* Labor Rates & Costs */}
           <form onSubmit={handleLaborSave}>
             <div className="rounded-xl border border-border bg-forge-surface/40 p-4">
@@ -763,7 +785,7 @@ export default function OrgSettingsPage() {
             </div>
 
           </div>{/* end bottom row */}
-          </>)}
+          </fieldset>
         </div>{/* end right column */}
       </div>{/* end grid */}
 
