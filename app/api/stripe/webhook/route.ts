@@ -19,15 +19,17 @@ export async function POST(req: NextRequest) {
     // Logs a fingerprint, never the secret, so a mismatched or missing
     // STRIPE_WEBHOOK_SECRET can be told apart from a body altered in transit.
     const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
-    console.error("Stripe webhook signature check failed:", {
-      reason: err instanceof Error ? err.message : String(err),
+    const diag = {
       secretPresent: secret.length > 0,
       secretLength: secret.length,
       secretFingerprint: secret ? createHash("sha256").update(secret).digest("hex").slice(0, 8) : null,
       signatureHeaderPresent: Boolean(sig),
       bodyLength: rawBody.length,
-    });
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    };
+    console.error("Stripe webhook signature check failed:", { reason: err instanceof Error ? err.message : String(err), ...diag });
+    // TEMPORARY: returned in the response too because Netlify isn't surfacing
+    // function logs for this route. Remove once the webhook secret issue is fixed.
+    return NextResponse.json({ error: "Invalid signature", diag }, { status: 400 });
   }
 
   switch (event.type) {
