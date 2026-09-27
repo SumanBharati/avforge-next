@@ -3,7 +3,7 @@
 // show that value."
 //
 // Root cause: every place Signal Flow Builder turns an org-library or
-// AV Forge Library product into a canvas device (initial search-add, both
+// AVGenix Library product into a canvas device (initial search-add, both
 // global and org-scoped, and both "Refresh from Library" actions) built the
 // new device object field-by-field and simply omitted hfov_deg/vfov_deg/
 // coverage_* — even though the Edit Equipment modal already reads and writes

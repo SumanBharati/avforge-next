@@ -6,7 +6,7 @@
 //     shorter than 3 characters in the approximate-match path (exact
 //     substring matches of any length are unaffected).
 //  2. Room Designer's Add Equipment modal never searched the org's own
-//     Equipment Library at all — only the global AV Forge product database —
+//     Equipment Library at all — only the global AVGenix product database —
 //     unlike Signal Flow Builder. Brought to parity: org library first, with
 //     an explicit "Search in Global Library" fallback, same as Signal Flow.
 //

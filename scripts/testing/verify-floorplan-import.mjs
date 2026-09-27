@@ -32,7 +32,7 @@ const OUT_DIR = fileURLToPath(new URL("./screenshots/", import.meta.url));
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
 const DXF_PATH = fileURLToPath(new URL("./fixtures/sample-floorplan.dxf", import.meta.url));
-const PDF_PATH = "D:/Suman/avforge-next/data/CTS.pdf";
+const PDF_PATH = fileURLToPath(new URL("../../data/CTS.pdf", import.meta.url));
 
 async function clearFloorPlan() {
   await admin.from("room_designs").delete().eq("project_id", fixture.projectId).eq("room_id", fixture.roomId);

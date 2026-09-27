@@ -3,7 +3,7 @@
 // screenshots, they can. It should function the same way as Create with AI
 // work for creating equipment database." — the AI photo-import panel, which
 // used to show only on the Add modals, now also shows on both Edit modals
-// (Org Equipment Library's Edit Item, and the AV Forge Library admin's Edit
+// (Org Equipment Library's Edit Item, and the AVGenix Library admin's Edit
 // Product), labeled "Update with AI" instead of "Fill in with AI".
 //
 // Prereqs: node --env-file=.env.local scripts/testing/create-test-user.mjs
@@ -37,13 +37,13 @@ async function main() {
     await page.locator('button:has-text("Cancel")').first().click();
     await page.waitForTimeout(300);
 
-    // 2. AV Forge Library (admin) — Edit Product.
+    // 2. AVGenix Library (admin) — Edit Product.
     await page.goto(`${APP_URL}/inventory?section=avgenix`);
     await page.waitForTimeout(1500);
     await page.locator('tbody tr').first().locator('button[title="Edit"]').click();
     await page.waitForTimeout(400);
-    console.log(`AV Forge Library Edit modal shows "Update with AI": ${await page.locator('text=Update with AI').count() > 0}`);
-    await page.screenshot({ path: "scripts/testing/screenshots/update-with-ai-avforge.png" });
+    console.log(`AVGenix Library Edit modal shows "Update with AI": ${await page.locator('text=Update with AI').count() > 0}`);
+    await page.screenshot({ path: "scripts/testing/screenshots/update-with-ai-avgenix.png" });
 
     console.log("\nDone. Screenshots at scripts/testing/screenshots/update-with-ai-*.png");
   } finally {

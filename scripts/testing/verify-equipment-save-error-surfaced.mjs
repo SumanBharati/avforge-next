@@ -1,7 +1,7 @@
 // Verifies the fix for: "The create with AI tool created the equipment
 // library, but it is unable to save it to the database." — investigation
 // found that both equipment-library save paths in app/inventory/page.tsx
-// (Org Equipment Library's insert, and the AV Forge Library admin's
+// (Org Equipment Library's insert, and the AVGenix Library admin's
 // createProduct) discarded the Supabase error entirely: the modal either
 // closed as if it had succeeded, or just sat there with no message, so a
 // real failure (RLS, a bad value, a dropped session) looked identical to

@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 import * as fs from "fs";
 import * as path from "path";
 
-const dataDir = "d:/Suman/avforge-next/data";
+const dataDir = path.join(process.cwd(), "data");
 const files = fs.readdirSync(dataDir).filter(f => f.endsWith(".xlsx"));
 
 interface Row { file: string; category: string; type: string; manufacturer: string; model: string; price: any; color: string; ports: string }

@@ -1,4 +1,4 @@
-// Verifies the fix for: "when i right click on an equipment on AV Forge
+// Verifies the fix for: "when i right click on an equipment on AVGenix
 // Equipment Library, I see an option of 'Add to My Organization's Equipment
 // Library' however when we click on it and if that product is already
 // there, it automatically skips it without adding it." — the right-click
