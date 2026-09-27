@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "reset";
 
 function EmailIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>;
@@ -66,7 +66,7 @@ export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signi
     event.preventDefault();
     setMessage(null);
 
-    if (mode === "signup" && password !== confirmPassword) {
+    if (mode !== "signin" && password !== confirmPassword) {
       setMessage({ type: "error", text: "Passwords do not match." });
       return;
     }
@@ -76,6 +76,18 @@ export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signi
     }
 
     setLoading(true);
+    if (mode === "reset") {
+      // The recovery link already signed this person in; only the password changes.
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) {
+        setMessage({ type: "error", text: error.message });
+        setLoading(false);
+        return;
+      }
+      setMessage({ type: "success", text: "Password updated. Signing you in…" });
+      setTimeout(() => onSignedIn?.(), 1200);
+      return;
+    }
     if (mode === "signin") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMessage({ type: "error", text: error.message });
@@ -126,26 +138,28 @@ export default function ProAuthModal({ onClose, onSignedIn, initialMode = "signi
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
         )}
-        <h2 id="pro-auth-title" className="text-2xl font-bold">{mode === "signup" ? "Create your account" : "Welcome back"}</h2>
-        <p className="mt-1 text-sm leading-5 text-muted">{mode === "signup" ? "Start your 3-day Pro trial. No credit card required." : "Sign in to continue designing, estimating, and delivering exceptional AV experiences."}</p>
+        <h2 id="pro-auth-title" className="text-2xl font-bold">{mode === "signup" ? "Create your account" : mode === "reset" ? "Set new password" : "Welcome back"}</h2>
+        <p className="mt-1 text-sm leading-5 text-muted">{mode === "signup" ? "Start your 3-day Pro trial. No credit card required." : mode === "reset" ? "Choose a new password for your account." : "Sign in to continue designing, estimating, and delivering exceptional AV experiences."}</p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {mode === "signup" && <label className="block text-sm font-medium"><span className="mb-2 block">Full Name</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><UserIcon /></span><input className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="John Doe" autoComplete="name" required /></span></label>}
 
-          <label className="block text-sm font-medium"><span className="mb-2 block">Email address</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><EmailIcon /></span><input className={fieldClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></span></label>
+          {mode !== "reset" && <label className="block text-sm font-medium"><span className="mb-2 block">Email address</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><EmailIcon /></span><input className={fieldClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></span></label>}
 
-          <label className="block text-sm font-medium"><span className="mb-2 block">Password</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><LockIcon /></span><input className={fieldClass} type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "signup" ? "Create a password" : "Enter your password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} required /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-violet-500" aria-label={showPassword ? "Hide password" : "Show password"}><EyeIcon hidden={!showPassword} /></button></span></label>
+          <label className="block text-sm font-medium"><span className="mb-2 block">{mode === "reset" ? "New Password" : "Password"}</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><LockIcon /></span><input className={fieldClass} type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "signin" ? "Enter your password" : "Create a password"} autoComplete={mode === "signin" ? "current-password" : "new-password"} required /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-violet-500" aria-label={showPassword ? "Hide password" : "Show password"}><EyeIcon hidden={!showPassword} /></button></span></label>
 
-          {mode === "signup" && <label className="block text-sm font-medium"><span className="mb-2 block">Confirm Password</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><LockIcon /></span><input className={fieldClass} type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm your password" autoComplete="new-password" required /><button type="button" onClick={() => setShowConfirmPassword((visible) => !visible)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-violet-500" aria-label={showConfirmPassword ? "Hide confirmation password" : "Show confirmation password"}><EyeIcon hidden={!showConfirmPassword} /></button></span></label>}
+          {mode !== "signin" && <label className="block text-sm font-medium"><span className="mb-2 block">Confirm Password</span><span className="relative block"><span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"><LockIcon /></span><input className={fieldClass} type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm your password" autoComplete="new-password" required /><button type="button" onClick={() => setShowConfirmPassword((visible) => !visible)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted hover:text-violet-500" aria-label={showConfirmPassword ? "Hide confirmation password" : "Show confirmation password"}><EyeIcon hidden={!showConfirmPassword} /></button></span></label>}
 
           {mode === "signin" && <div className="text-right"><button type="button" onClick={handleForgotPassword} className="text-sm font-medium text-blue-500 hover:text-blue-400">Forgot password?</button></div>}
           {message && <p className={`rounded-xl px-4 py-3 text-sm ${message.type === "error" ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-600"}`}>{message.text}</p>}
-          <button type="submit" disabled={loading} className="w-full rounded-full bg-violet-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500 disabled:opacity-60">{loading ? "Please wait…" : mode === "signup" ? "Create Account" : "Sign In"}</button>
+          <button type="submit" disabled={loading} className="w-full rounded-full bg-violet-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500 disabled:opacity-60">{loading ? "Please wait…" : mode === "signup" ? "Create Account" : mode === "reset" ? "Update Password" : "Sign In"}</button>
           {mode === "signup" && <p className="text-center text-xs leading-5 text-subtle">Continue with Pro after your 3-day trial by choosing a subscription.</p>}
         </form>
 
+        {mode !== "reset" && <>
         <div className="my-6 flex items-center gap-3 text-xs text-subtle"><span className="h-px flex-1 bg-border" /><span>or</span><span className="h-px flex-1 bg-border" /></div>
         <p className="text-center text-sm text-subtle">{mode === "signup" ? "Already have an account?" : "Don't have an account?"} <button type="button" onClick={() => switchMode(mode === "signup" ? "signin" : "signup")} className="font-medium text-blue-500 hover:text-blue-400">{mode === "signup" ? "Sign in ›" : "Create one and get 3 days of Pro access ›"}</button></p>
+        </>}
         {!onClose && <div className="mt-5 text-center"><Link href="/" className="text-xs text-subtle hover:text-heading">Return home</Link></div>}
       </div>
     </div>

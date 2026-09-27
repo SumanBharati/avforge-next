@@ -201,7 +201,7 @@ export default function ProfileSettingsPage() {
       return;
     }
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/");
   }
 
   if (!user) return <ProfileSettingsSkeleton />;

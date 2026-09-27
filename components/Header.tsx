@@ -24,12 +24,31 @@ export default function Header() {
   const { theme, toggle } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"signin" | "signup" | null>(null);
+  const [authMode, setAuthMode] = useState<"signin" | "signup" | "reset" | null>(null);
+  // Where to go after signing in, handed over by /login (invite emails, old links).
+  const [pendingInvite, setPendingInvite] = useState<string | null>(null);
+  const [pendingNext, setPendingNext] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => subscription.unsubscribe();
+  }, []);
+
+  // /login forwards here as /?auth=signin|signup|reset[&invite=…][&next=…].
+  // Read once from window rather than useSearchParams, which would force a
+  // Suspense boundary around the header on every page.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get("auth");
+    if (auth !== "signin" && auth !== "signup" && auth !== "reset") return;
+    const next = params.get("next");
+    setPendingInvite(params.get("invite"));
+    setPendingNext(next?.startsWith("/") && !next.startsWith("//") ? next : null);
+    setAuthMode(auth);
+    params.delete("auth"); params.delete("invite"); params.delete("next");
+    const rest = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
   }, []);
 
   useEffect(() => {
@@ -46,6 +65,10 @@ export default function Header() {
 
   async function handleSignedIn() {
     setAuthMode(null);
+    if (pendingInvite) {
+      router.push(`/org/invite?token=${encodeURIComponent(pendingInvite)}`);
+      return;
+    }
     const { data: { user: signedInUser } } = await supabase.auth.getUser();
     if (signedInUser) {
       const { data: memberships } = await supabase.from("organization_members").select("org_id").eq("user_id", signedInUser.id).limit(1);
@@ -54,7 +77,7 @@ export default function Header() {
         return;
       }
     }
-    router.push("/dashboard");
+    router.push(pendingNext ?? "/dashboard");
   }
 
   async function handleLogout() {
